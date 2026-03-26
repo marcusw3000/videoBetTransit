@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pt
+*.pyc
+
+# Node
+node_modules/
+dist/
+build/
+
+# .NET
+bin/
+obj/
+appsettings.Development.json
+
+# IDE
+.vscode/
+.vs/
+*.suo
+*.user
+
+# Project specific
+snapshots/
