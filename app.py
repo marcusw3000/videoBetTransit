@@ -343,6 +343,7 @@ def main():
                     "frameWidth": w,
                     "frameHeight": h,
                     "totalCount": total,
+                    "timestamp": now_ts,
                     "roi": roi,
                     "countLine": {
                         "x1": line["x1"],
@@ -384,7 +385,7 @@ def main():
                 annotated,
                 (line["x1"], line["y1"]),
                 (line["x2"], line["y2"]),
-                (0, 255, 255),
+                (0, 0, 255),
                 3,
             )
 

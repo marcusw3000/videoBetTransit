@@ -9,6 +9,7 @@ public class LiveDetectionFrameDto
     public int FrameWidth { get; set; }
     public int FrameHeight { get; set; }
     public int TotalCount { get; set; }
+    public double Timestamp { get; set; }
     public RoiDto Roi { get; set; } = new();
     public CountLineDto CountLine { get; set; } = new();
     public List<DetectionDto> Detections { get; set; } = new();

@@ -29,7 +29,13 @@ export default function VideoPlayer({ src, title = 'Ao Vivo', detectionFrame = n
     } else if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true
+        lowLatencyMode: true,
+        liveSyncDurationCount: 1,
+        liveMaxLatencyDurationCount: 3,
+        liveDurationInfinity: true,
+        maxBufferLength: 3,
+        maxMaxBufferLength: 5,
+        backBufferLength: 0,
       })
 
       hls.loadSource(src)
