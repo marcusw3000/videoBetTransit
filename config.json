@@ -1,38 +1,35 @@
 {
   "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
-  "model": "yolov8n.pt",
-  "tracker": "bytetrack.yaml",
+  "model": "yolov8s.pt",
+  "tracker": "botsort_traffic.yaml",
   "backend_url": "http://localhost:5000/api/rounds/count-events",
   "api_key": "SUA_API_KEY",
   "camera_id": "cam_001",
   "round_id": "rnd_001",
-
   "allowed_classes": {
     "car": 2,
     "motorcycle": 3,
     "bus": 5,
     "truck": 7
   },
-
-  "conf": 0.25,
-
+  "conf": 0.20,
   "line": {
-    "x1": 0,
-    "y1": 360,
-    "x2": 1920,
-    "y2": 360
+    "x1": 95,
+    "y1": 182,
+    "x2": 610,
+    "y2": 182
   },
-
   "roi": {
-    "x": 0,
-    "y": 0,
-    "w": 1920,
-    "h": 1080
+    "x": 44,
+    "y": 62,
+    "w": 616,
+    "h": 338
   },
-
-  "count_direction": "any",
-
+  "count_direction": "down",
   "show_window": false,
   "save_snapshots": true,
-  "snapshot_dir": "snapshots"
+  "snapshot_dir": "snapshots",
+  "min_hits_to_count": 4,
+  "max_track_history_age": 300,
+  "min_bbox_area": 100
 }

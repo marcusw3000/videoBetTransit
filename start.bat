@@ -11,7 +11,7 @@ start cmd /k "cd traffic-counter-front && title [FRONTEND] React Vite && npm run
 
 echo.
 echo 3. Iniciando Engine YOLO (Python)...
-start cmd /k "title [ENGINE] Python YOLO && python app.py"
+start cmd /k "title [ENGINE] Python YOLO && call .venv\Scripts\activate && python app.py"
 
 echo.
 echo Tudo iniciado! 3 janelas do terminal foram abertas.
