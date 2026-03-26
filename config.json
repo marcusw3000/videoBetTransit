@@ -7,17 +7,14 @@
   "camera_id": "cam_001",
   "round_id": "rnd_001",
   "allowed_classes": {
-    "car": 2,
-    "motorcycle": 3,
-    "bus": 5,
-    "truck": 7
+    "car": 2
   },
   "conf": 0.20,
   "line": {
     "x1": 95,
-    "y1": 182,
+    "y1": 300,
     "x2": 610,
-    "y2": 182
+    "y2": 300
   },
   "roi": {
     "x": 44,
@@ -26,7 +23,7 @@
     "h": 338
   },
   "count_direction": "down",
-  "show_window": false,
+  "show_window": true,
   "save_snapshots": true,
   "snapshot_dir": "snapshots",
   "min_hits_to_count": 4,

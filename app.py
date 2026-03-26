@@ -154,6 +154,7 @@ def main():
     min_bbox_area = int(cfg.get("min_bbox_area", 100))
 
     logger.info("Iniciando contagem...")
+    print("tracker:", cfg["tracker"])
 
     while True:
         ret, frame = stream.read()
@@ -210,14 +211,18 @@ def main():
 
         boxes = results[0].boxes
 
-        # Debug logging a cada 30 frames
+        # Debug prints (checklist do usuário)
         if frame_count % 30 == 0:
             n_boxes = len(boxes) if boxes is not None else 0
             has_ids = boxes.id is not None if boxes is not None else False
-            logger.info(
-                "[DEBUG] frame=%d | boxes=%d | has_track_ids=%s | total=%d",
-                frame_count, n_boxes, has_ids, total,
-            )
+            print(f"[frame {frame_count}] boxes: {boxes is not None} ({n_boxes})")
+            print(f"[frame {frame_count}] ids: {boxes.id if boxes is not None else None}")
+            print(f"[frame {frame_count}] total: {total}")
+            if boxes is not None and n_boxes > 0:
+                for bi in range(min(n_boxes, 5)):
+                    bx = boxes.xyxy[bi].cpu().numpy().astype(int)
+                    ba = int((bx[2]-bx[0]) * (bx[3]-bx[1]))
+                    print(f"  box[{bi}] bbox=({bx[0]},{bx[1]},{bx[2]},{bx[3]}) area={ba} cls={int(boxes.cls[bi])}")
 
         if boxes is not None and boxes.id is not None:
             xyxy = boxes.xyxy.cpu().numpy().astype(int)
@@ -365,6 +370,7 @@ def main():
         if cfg.get("show_window", True):
             annotated = frame.copy()
 
+            # Desenhar ROI
             cv2.rectangle(
                 annotated,
                 (roi["x"], roi["y"]),
@@ -373,6 +379,7 @@ def main():
                 2,
             )
 
+            # Desenhar linha de contagem
             cv2.line(
                 annotated,
                 (line["x1"], line["y1"]),
@@ -380,6 +387,30 @@ def main():
                 (0, 255, 255),
                 3,
             )
+
+            # Desenhar bboxes + IDs dos veículos trackados
+            for det in detections_list:
+                dx = det["bbox"]["x"]
+                dy = det["bbox"]["y"]
+                dw = det["bbox"]["w"]
+                dh = det["bbox"]["h"]
+                tid = det["trackId"]
+                vtype = det["vehicleType"]
+                color = (0, 255, 0) if det["counted"] else (0, 165, 255)
+                cv2.rectangle(annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
+                cv2.putText(
+                    annotated,
+                    f"#{tid} {vtype}",
+                    (dx, dy - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    1,
+                )
+                # Desenhar anchor point
+                cx_d = det["center"]["x"]
+                cy_d = det["center"]["y"]
+                cv2.circle(annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
 
             cv2.putText(
                 annotated,
