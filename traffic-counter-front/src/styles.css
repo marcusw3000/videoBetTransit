@@ -177,6 +177,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
   text-align: center;
 }
 
@@ -286,6 +287,40 @@ body {
   font-weight: 700;
 }
 
+/* ── Toast ────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999;
+  padding: 14px 24px;
+  border-radius: 14px;
+  background: rgba(30, 30, 40, 0.92);
+  border: 1px solid rgba(100, 180, 120, 0.4);
+  color: #b0f0c0;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  animation: toast-in 0.3s ease-out;
+  white-space: nowrap;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ── Sparkline ────────────────────────────────────────── */
+
+.sparkline {
+  display: block;
+  margin: 10px auto 0;
+  opacity: 0.8;
+}
+
 /* ── Ranges Grid ──────────────────────────────────────── */
 
 .ranges-grid {
@@ -296,7 +331,8 @@ body {
 
 .range-card {
   text-align: center;
-  transition: transform 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  position: relative;
 }
 
 .range-card:hover {
@@ -304,17 +340,39 @@ body {
 }
 
 .range-card h3 {
-  margin: 0 0 10px 0;
+  margin: 0 0 8px 0;
   font-size: 20px;
   font-weight: 700;
 }
 
-.range-card p {
-  margin: 0;
+.range-odds {
+  margin: 0 0 6px 0;
   opacity: 0.85;
   font-size: 15px;
   font-weight: 600;
   color: #b8b8e0;
+}
+
+.range-card-active {
+  border-color: rgba(48, 209, 107, 0.5) !important;
+  background: rgba(28, 87, 54, 0.3) !important;
+  box-shadow: 0 0 20px rgba(48, 209, 107, 0.2) !important;
+  transform: translateY(-4px);
+}
+
+.range-active-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(48, 209, 107, 0.2);
+  border: 1px solid rgba(48, 209, 107, 0.5);
+  color: #30d16b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  animation: pulse-glow 2s ease-in-out infinite;
 }
 
 /* ── History List ─────────────────────────────────────── */
@@ -326,10 +384,48 @@ body {
 
 .history-card {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1.5fr 1fr 1.2fr 1fr;
   align-items: center;
-  padding: 16px 24px;
+  padding: 14px 20px;
   font-size: 14px;
+  gap: 8px;
+}
+
+.history-id {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #6868a0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-count .label {
+  font-size: 10px;
+  margin-bottom: 0;
+}
+
+.history-count strong {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.history-winner {
+  font-weight: 700;
+  color: #80d8a0;
+  font-size: 13px;
+}
+
+.history-date {
+  text-align: right;
+  font-size: 12px;
+  color: #6868a0;
 }
 
 /* ── Empty State ──────────────────────────────────────── */

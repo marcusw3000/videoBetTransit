@@ -156,8 +156,10 @@ def main():
     max_track_history_age = int(cfg.get("max_track_history_age", 300))
     min_bbox_area = int(cfg.get("min_bbox_area", 100))
 
-    logger.info("Iniciando contagem...")
-    print("tracker:", cfg["tracker"])
+    logger.info("Iniciando contagem... | tracker: %s | conf: %s", cfg["tracker"], cfg["conf"])
+
+    fps_frame_count = 0
+    fps_start_ts = time.time()
 
     while True:
         ret, frame = stream.read()
@@ -198,15 +200,19 @@ def main():
                     count_direction,
                 )
 
-        results = model.track(
-            frame,
-            persist=True,
-            tracker=cfg["tracker"],
-            conf=cfg["conf"],
-            classes=list(cfg["allowed_classes"].values()),
-            imgsz=416,
-            verbose=False,
-        )
+        try:
+            results = model.track(
+                frame,
+                persist=True,
+                tracker=cfg["tracker"],
+                conf=cfg["conf"],
+                classes=list(cfg["allowed_classes"].values()),
+                imgsz=416,
+                verbose=False,
+            )
+        except Exception as exc:
+            logger.warning("Falha na inferência YOLO (frame %d ignorado): %s", frame_count, exc)
+            continue
 
         h, w = frame.shape[:2]
         line_y = line["y1"]
@@ -214,18 +220,23 @@ def main():
 
         boxes = results[0].boxes
 
-        # Debug prints (checklist do usuário)
-        if frame_count % 30 == 0:
+        # FPS periódico
+        fps_frame_count += 1
+        if fps_frame_count >= 100:
+            elapsed = time.time() - fps_start_ts
+            logger.info("FPS médio: %.1f | Total contado: %d", fps_frame_count / elapsed if elapsed > 0 else 0, total)
+            fps_frame_count = 0
+            fps_start_ts = time.time()
+
+        if logger.isEnabledFor(logging.DEBUG) and frame_count % 30 == 0:
             n_boxes = len(boxes) if boxes is not None else 0
-            has_ids = boxes.id is not None if boxes is not None else False
-            print(f"[frame {frame_count}] boxes: {boxes is not None} ({n_boxes})")
-            print(f"[frame {frame_count}] ids: {boxes.id if boxes is not None else None}")
-            print(f"[frame {frame_count}] total: {total}")
-            if boxes is not None and n_boxes > 0:
-                for bi in range(min(n_boxes, 5)):
-                    bx = boxes.xyxy[bi].cpu().numpy().astype(int)
-                    ba = int((bx[2]-bx[0]) * (bx[3]-bx[1]))
-                    print(f"  box[{bi}] bbox=({bx[0]},{bx[1]},{bx[2]},{bx[3]}) area={ba} cls={int(boxes.cls[bi])}")
+            logger.debug("[frame %d] boxes=%s (%d) | ids=%s | total=%d",
+                frame_count,
+                boxes is not None,
+                n_boxes,
+                boxes.id if boxes is not None else None,
+                total,
+            )
 
         if boxes is not None and boxes.id is not None:
             xyxy = boxes.xyxy.cpu().numpy().astype(int)
@@ -291,7 +302,11 @@ def main():
                                         cfg["snapshot_dir"],
                                         filename,
                                     )
-                                    cv2.imwrite(path, crop)
+                                    try:
+                                        cv2.imwrite(path, crop)
+                                    except Exception as exc:
+                                        logger.warning("Falha ao salvar snapshot %s: %s", path, exc)
+                                        path = ""
                                 else:
                                     path = ""
                             else:
@@ -435,4 +450,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("Encerrando por Ctrl+C.")

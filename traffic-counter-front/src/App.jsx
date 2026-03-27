@@ -11,6 +11,8 @@ import { startRoundConnection, stopRoundConnection } from './services/roundSigna
 import { startOverlayConnection, stopOverlayConnection } from './services/overlaySignalr'
 import { getTimeLeftInSeconds } from './utils/time'
 
+const MAX_HISTORY_POINTS = 30
+
 function MarketPage() {
   const [round, setRound] = useState(null)
   const [history, setHistory] = useState([])
@@ -18,8 +20,16 @@ function MarketPage() {
   const [isSettling, setIsSettling] = useState(false)
   const [error, setError] = useState('')
   const [detectionFrame, setDetectionFrame] = useState(null)
+  const [countHistory, setCountHistory] = useState([])
+  const [toast, setToast] = useState(null)
 
   const liveStreamUrl = 'https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8'
+
+  function showToast(message) {
+    const id = Date.now()
+    setToast({ message, id })
+    setTimeout(() => setToast(t => t?.id === id ? null : t), 4000)
+  }
 
   async function loadCurrentRound() {
     try {
@@ -63,8 +73,14 @@ function MarketPage() {
     startRoundConnection({
       onCountUpdated: (data) => {
         setRound(data)
+        setCountHistory(prev => {
+          const next = [...prev, data.currentCount]
+          return next.length > MAX_HISTORY_POINTS ? next.slice(-MAX_HISTORY_POINTS) : next
+        })
       },
       onRoundSettled: async () => {
+        showToast('Round encerrado! Novo round iniciado.')
+        setCountHistory([])
         await loadCurrentRound()
         await loadHistory()
       }
@@ -126,6 +142,9 @@ function MarketPage() {
         </header>
 
         {error && <div className="error-banner">{error}</div>}
+        {toast && (
+          <div className="toast" key={toast.id}>{toast.message}</div>
+        )}
 
         <section className="top-grid">
           <div className="video-column">
@@ -137,7 +156,7 @@ function MarketPage() {
           </div>
 
           <div className="stats-column">
-            <CounterCard value={round?.currentCount} />
+            <CounterCard value={round?.currentCount} history={countHistory} />
             <TimerCard seconds={timeLeftSeconds} />
           </div>
         </section>
@@ -151,7 +170,15 @@ function MarketPage() {
           <h2>Faixas</h2>
           <div className="ranges-grid">
             {(round?.ranges || []).map((range) => (
-              <RangeCard key={range.id} range={range} />
+              <RangeCard
+                key={range.id}
+                range={range}
+                isActive={
+                  round?.currentCount !== undefined &&
+                  round.currentCount >= range.min &&
+                  round.currentCount <= range.max
+                }
+              />
             ))}
           </div>
         </section>
