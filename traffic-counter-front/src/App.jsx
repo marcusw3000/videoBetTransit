@@ -23,7 +23,7 @@ function MarketPage() {
   const [countHistory, setCountHistory] = useState([])
   const [toast, setToast] = useState(null)
 
-  const liveStreamUrl = 'https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8'
+  const liveStreamUrl = 'http://127.0.0.1:8090/video_feed'
 
   function showToast(message) {
     const id = Date.now()
@@ -151,7 +151,6 @@ function MarketPage() {
             <VideoPlayer
               src={liveStreamUrl}
               title="Rodovia Norte - Faixa A"
-              detectionFrame={detectionFrame}
             />
           </div>
 

@@ -1,10 +1,12 @@
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timezone
 
 import cv2
+from flask import Flask, Response, jsonify
 from ultralytics import YOLO
 
 from backend_client import BackendClient
@@ -18,6 +20,89 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Annotated MJPEG stream
+# ---------------------------------------------------------------------------
+class AnnotatedFrameStreamer:
+    def __init__(self, jpeg_quality: int = 80):
+        self.jpeg_quality = jpeg_quality
+        self._lock = threading.Lock()
+        self._latest_jpeg: bytes | None = None
+
+    def update(self, frame):
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
+        )
+        if not ok:
+            return
+
+        with self._lock:
+            self._latest_jpeg = encoded.tobytes()
+
+    def get_latest(self) -> bytes | None:
+        with self._lock:
+            return self._latest_jpeg
+
+
+streamer = AnnotatedFrameStreamer(jpeg_quality=80)
+mjpeg_app = Flask(__name__)
+
+
+@mjpeg_app.get("/health")
+def health():
+    return jsonify({"ok": True})
+
+
+@mjpeg_app.get("/video_feed")
+def video_feed():
+    def generate():
+        last_sent = None
+
+        while True:
+            frame = streamer.get_latest()
+            if frame is None:
+                time.sleep(0.03)
+                continue
+
+            if frame is last_sent:
+                time.sleep(0.01)
+                continue
+
+            last_sent = frame
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Cache-Control: no-cache\r\n\r\n"
+                + frame
+                + b"\r\n"
+            )
+
+    return Response(
+        generate(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+def run_mjpeg_server(host: str = "0.0.0.0", port: int = 8090):
+    thread = threading.Thread(
+        target=lambda: mjpeg_app.run(
+            host=host,
+            port=port,
+            threaded=True,
+            debug=False,
+            use_reloader=False,
+        ),
+        daemon=True,
+    )
+    thread.start()
+    logger.info("MJPEG server iniciado em http://%s:%s/video_feed", host, port)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -136,6 +221,10 @@ def main():
     model = YOLO(cfg["model"])
     backend = BackendClient(cfg["backend_url"], cfg["api_key"])
     stream = StreamCapture(cfg["stream_url"])
+    run_mjpeg_server(
+        host=cfg.get("mjpeg_host", "0.0.0.0"),
+        port=int(cfg.get("mjpeg_port", 8090)),
+    )
 
     class_names = build_class_names(cfg["allowed_classes"])
 
@@ -358,6 +447,7 @@ def main():
                 {
                     "cameraId": cfg["camera_id"],
                     "roundId": cfg["round_id"],
+                    "frameId": frame_count,
                     "frameWidth": w,
                     "frameHeight": h,
                     "totalCount": total,
@@ -385,6 +475,55 @@ def main():
                 last_seen.pop(tid, None)
                 track_hits.pop(tid, None)
                 counted_ids.discard(tid)
+
+        stream_annotated = frame.copy()
+        cv2.rectangle(
+            stream_annotated,
+            (roi["x"], roi["y"]),
+            (roi["x"] + roi["w"], roi["y"] + roi["h"]),
+            (255, 255, 0),
+            2,
+        )
+        cv2.line(
+            stream_annotated,
+            (line["x1"], line["y1"]),
+            (line["x2"], line["y2"]),
+            (0, 0, 255),
+            3,
+        )
+
+        for det in detections_list:
+            dx = det["bbox"]["x"]
+            dy = det["bbox"]["y"]
+            dw = det["bbox"]["w"]
+            dh = det["bbox"]["h"]
+            tid = det["trackId"]
+            vtype = det["vehicleType"]
+            color = (0, 255, 0) if det["counted"] else (0, 165, 255)
+            cv2.rectangle(stream_annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
+            cv2.putText(
+                stream_annotated,
+                f"#{tid} {vtype}",
+                (dx, dy - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                1,
+            )
+            cx_d = det["center"]["x"]
+            cy_d = det["center"]["y"]
+            cv2.circle(stream_annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
+
+        cv2.putText(
+            stream_annotated,
+            f"TOTAL: {total}",
+            (30, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.2,
+            (0, 255, 0),
+            3,
+        )
+        streamer.update(stream_annotated)
 
         if cfg.get("show_window", True):
             annotated = frame.copy()

@@ -29,6 +29,8 @@
   "show_window": true,
   "save_snapshots": true,
   "snapshot_dir": "snapshots",
+  "mjpeg_host": "0.0.0.0",
+  "mjpeg_port": 8090,
   "min_hits_to_count": 4,
   "max_track_history_age": 300,
   "min_bbox_area": 100
