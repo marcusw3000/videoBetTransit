@@ -19,26 +19,34 @@ public class RoundService
         .Take(20)
         .ToList();
 
-    public Round? Settle(string currentId)
-    {
-        if (_current.Id != currentId || _current.Status == "settled") 
-            return null;
-
-        _current.Status = "settled";
-        _current.FinalCount = _current.CurrentCount;
-        _history.Add(_current);
-
-        _current = CreateNewRound();
-        return _current;
-    }
-
     private readonly object _lock = new();
 
-    public Round IncrementCount()
+    public Round? Settle(string currentId)
     {
         lock (_lock)
         {
-            _current.CurrentCount++;
+            if (_current.Id != currentId || _current.Status == "settled")
+                return null;
+
+            _current.Status = "settled";
+            _current.FinalCount = _current.CurrentCount;
+            _history.Add(_current);
+
+            _current = CreateNewRound();
+            return _current;
+        }
+    }
+
+    /// <summary>
+    /// Sincroniza a contagem com o total informado pelo Python.
+    /// Só avança — nunca reduz o contador.
+    /// </summary>
+    public Round SyncCount(int totalCount)
+    {
+        lock (_lock)
+        {
+            if (totalCount > _current.CurrentCount)
+                _current.CurrentCount = totalCount;
             return _current;
         }
     }

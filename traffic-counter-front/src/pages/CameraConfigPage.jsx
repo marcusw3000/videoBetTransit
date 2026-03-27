@@ -52,11 +52,10 @@ export default function CameraConfigPage() {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsReady(true)
         video.play().catch(() => {})
-        // Espera um pouco para pegar videoWidth/videoHeight
-        setTimeout(() => {
-          frameSize.current = { w: video.videoWidth || 640, h: video.videoHeight || 360 }
-        }, 500)
       })
+      video.addEventListener('loadedmetadata', () => {
+        frameSize.current = { w: video.videoWidth || 640, h: video.videoHeight || 360 }
+      }, { once: true })
     }
 
     return () => { if (hls) hls.destroy() }

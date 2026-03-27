@@ -13,7 +13,7 @@ export default function DetectionsList({ detections = [] }) {
 
   return (
     <div className="card detections-card">
-      <span className="label">Veículos na Tela</span>
+      <span className="label">Últimos Contabilizados</span>
       <div className="detections-grid">
         {counted.map((det) => (
           <div key={det.trackId} className="detection-item">

@@ -15,6 +15,8 @@ class BackendClient:
         self.live_detections_url = f"{self.base_url}/live-detections"
         self.camera_config_url = f"{self.base_url}/camera-config"
         self.api_key = api_key
+        # Limita threads simultâneas de live-detections para evitar acúmulo
+        self._live_sem = threading.Semaphore(3)
 
     def fetch_camera_config(self, camera_id: str) -> dict | None:
         """Busca config de câmera do backend (ROI, linha, direção)."""
@@ -39,13 +41,21 @@ class BackendClient:
         thread.start()
 
     def send_live_detections(self, payload: dict):
-        """Envia frame de detecções em thread separada."""
+        """Envia frame de detecções em thread separada (máx. 3 simultâneas)."""
+        if not self._live_sem.acquire(blocking=False):
+            return  # descarta frame se já há 3 requisições pendentes
         thread = threading.Thread(
-            target=self._post,
+            target=self._post_live,
             args=(self.live_detections_url, payload),
             daemon=True
         )
         thread.start()
+
+    def _post_live(self, url: str, payload: dict):
+        try:
+            self._post(url, payload)
+        finally:
+            self._live_sem.release()
 
     def _post(self, url: str, payload: dict):
         try:

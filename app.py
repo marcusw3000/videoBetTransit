@@ -57,6 +57,9 @@ def crossed_horizontal_segment(
     if direction == "up":
         return prev_y > line_y >= curr_y
 
+    if direction == "any":
+        return (prev_y < line_y <= curr_y) or (prev_y > line_y >= curr_y)
+
     return False
 
 
@@ -161,7 +164,6 @@ def main():
         if not ret:
             if frame_count == 0:
                 logger.warning("Nenhum frame recebido ainda do stream...")
-            time.sleep(0.1)
             continue
 
         frame_count += 1
@@ -202,6 +204,7 @@ def main():
             tracker=cfg["tracker"],
             conf=cfg["conf"],
             classes=list(cfg["allowed_classes"].values()),
+            imgsz=416,
             verbose=False,
         )
 

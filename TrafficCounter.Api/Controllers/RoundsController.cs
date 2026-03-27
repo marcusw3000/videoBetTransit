@@ -49,7 +49,8 @@ public class RoundsController : ControllerBase
     [HttpPost("count-events")]
     public async Task<IActionResult> ReceiveCountEvent([FromBody] CountEvent evt)
     {
-        var round = _roundService.IncrementCount();
+        // Sincroniza com o total acumulado do Python para evitar divergência
+        var round = _roundService.SyncCount(evt.TotalCount);
 
         await _hubContext.Clients.All.SendAsync("count_updated", round);
 
