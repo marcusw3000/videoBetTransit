@@ -40,6 +40,16 @@ if not exist "%D%.venv\Scripts\activate.bat" (
 echo [OK] Todos os pre-requisitos encontrados.
 echo.
 
+echo Atualizando dependencias Python da engine...
+call "%D%.venv\Scripts\activate.bat"
+python -m pip install -r "%D%requirements.txt"
+if errorlevel 1 (
+    echo [ERRO] Falha ao instalar dependencias Python.
+    pause & exit /b 1
+)
+echo [OK] Dependencias Python prontas.
+echo.
+
 :: ─── Criar pasta de logs ──────────────────────────────────────
 if not exist "%D%logs" mkdir "%D%logs"
 
@@ -66,6 +76,7 @@ echo.
 echo ============================================================
 echo  Tudo iniciado! 3 janelas abertas.
 echo  Logs disponiveis em: %D%logs\
+echo  Feed MJPEG: http://127.0.0.1:8090/video_feed
 echo  Para encerrar: feche as 3 janelas do terminal.
 echo ============================================================
 pause
