@@ -224,11 +224,11 @@ Entregavel esperado:
 - Fluxo de envio HTTP mais robusto.
 
 ### 9. Refinar o start.bat
-- [ ] Validar se a porta do backend ja esta em uso.
-- [ ] Validar se a porta do MJPEG ja esta em uso.
-- [ ] Checar se `node_modules` e `.venv` estao saudaveis.
-- [ ] Fazer teste opcional do endpoint `/health` depois de subir a engine.
-- [ ] Exibir URLs finais de frontend, backend e MJPEG.
+- [x] Validar se a porta do backend ja esta em uso.
+- [x] Validar se a porta do MJPEG ja esta em uso.
+- [x] Checar se `node_modules` e `.venv` estao saudaveis.
+- [x] Fazer teste opcional do endpoint `/health` depois de subir a engine.
+- [x] Exibir URLs finais de frontend, backend e MJPEG.
 
 Objetivo:
 - Melhorar a experiencia operacional local.
