@@ -21,21 +21,109 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+class RuntimeStats:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._started_at = time.time()
+        self._frames_processed = 0
+        self._last_frame_at = None
+        self._fps_instant = 0.0
+        self._fps_average = 0.0
+        self._last_inference_ms = 0.0
+        self._avg_inference_ms = 0.0
+        self._last_jpeg_encode_ms = 0.0
+        self._avg_jpeg_encode_ms = 0.0
+        self._mjpeg_clients = 0
+        self._stream_connected = False
+        self._stream_failures = 0
+        self._last_stream_error_at = None
+        self._total_count = 0
+
+    def record_processed_frame(self, total_count: int):
+        now_ts = time.time()
+        with self._lock:
+            self._frames_processed += 1
+            self._total_count = total_count
+            if self._last_frame_at is not None:
+                elapsed = now_ts - self._last_frame_at
+                if elapsed > 0:
+                    self._fps_instant = 1.0 / elapsed
+            total_elapsed = now_ts - self._started_at
+            if total_elapsed > 0:
+                self._fps_average = self._frames_processed / total_elapsed
+            self._last_frame_at = now_ts
+
+    def record_inference_ms(self, duration_ms: float):
+        with self._lock:
+            self._last_inference_ms = duration_ms
+            n = self._frames_processed or 1
+            self._avg_inference_ms += (duration_ms - self._avg_inference_ms) / n
+
+    def record_jpeg_encode_ms(self, duration_ms: float):
+        with self._lock:
+            self._last_jpeg_encode_ms = duration_ms
+            n = self._frames_processed or 1
+            self._avg_jpeg_encode_ms += (duration_ms - self._avg_jpeg_encode_ms) / n
+
+    def set_stream_status(self, connected: bool, failures: int):
+        with self._lock:
+            self._stream_connected = connected
+            self._stream_failures = failures
+            if not connected:
+                self._last_stream_error_at = time.time()
+
+    def add_mjpeg_client(self):
+        with self._lock:
+            self._mjpeg_clients += 1
+
+    def remove_mjpeg_client(self):
+        with self._lock:
+            self._mjpeg_clients = max(0, self._mjpeg_clients - 1)
+
+    def snapshot(self, backend_health: dict | None = None) -> dict:
+        with self._lock:
+            return {
+                "ok": self._stream_connected,
+                "framesProcessed": self._frames_processed,
+                "fpsInstant": round(self._fps_instant, 2),
+                "fpsAverage": round(self._fps_average, 2),
+                "lastInferenceMs": round(self._last_inference_ms, 2),
+                "avgInferenceMs": round(self._avg_inference_ms, 2),
+                "lastJpegEncodeMs": round(self._last_jpeg_encode_ms, 2),
+                "avgJpegEncodeMs": round(self._avg_jpeg_encode_ms, 2),
+                "mjpegClients": self._mjpeg_clients,
+                "streamConnected": self._stream_connected,
+                "streamFailures": self._stream_failures,
+                "lastFrameAt": self._last_frame_at,
+                "lastStreamErrorAt": self._last_stream_error_at,
+                "totalCount": self._total_count,
+                "backend": backend_health or {},
+            }
+
+
+runtime_stats = RuntimeStats()
+backend_client_ref: BackendClient | None = None
+
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
 # ---------------------------------------------------------------------------
 class AnnotatedFrameStreamer:
-    def __init__(self, jpeg_quality: int = 80):
+    def __init__(self, jpeg_quality: int = 80, stats: RuntimeStats | None = None):
         self.jpeg_quality = jpeg_quality
+        self.stats = stats
         self._lock = threading.Lock()
         self._latest_jpeg: bytes | None = None
 
     def update(self, frame):
+        encode_start = time.perf_counter()
         ok, encoded = cv2.imencode(
             ".jpg",
             frame,
             [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
         )
+        if self.stats is not None:
+            self.stats.record_jpeg_encode_ms((time.perf_counter() - encode_start) * 1000)
         if not ok:
             return
 
@@ -47,38 +135,43 @@ class AnnotatedFrameStreamer:
             return self._latest_jpeg
 
 
-streamer = AnnotatedFrameStreamer(jpeg_quality=80)
+streamer = AnnotatedFrameStreamer(jpeg_quality=80, stats=runtime_stats)
 mjpeg_app = Flask(__name__)
 
 
 @mjpeg_app.get("/health")
 def health():
-    return jsonify({"ok": True})
+    backend_health = backend_client_ref.get_health_snapshot() if backend_client_ref else {}
+    return jsonify(runtime_stats.snapshot(backend_health))
 
 
 @mjpeg_app.get("/video_feed")
 def video_feed():
     def generate():
         last_sent = None
+        runtime_stats.add_mjpeg_client()
 
-        while True:
-            frame = streamer.get_latest()
-            if frame is None:
-                time.sleep(0.03)
-                continue
+        try:
+            while True:
+                frame = streamer.get_latest()
+                if frame is None:
+                    time.sleep(0.03)
+                    continue
 
-            if frame is last_sent:
-                time.sleep(0.01)
-                continue
+                if frame is last_sent:
+                    time.sleep(0.01)
+                    continue
 
-            last_sent = frame
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n"
-                b"Cache-Control: no-cache\r\n\r\n"
-                + frame
-                + b"\r\n"
-            )
+                last_sent = frame
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Cache-Control: no-cache\r\n\r\n"
+                    + frame
+                    + b"\r\n"
+                )
+        finally:
+            runtime_stats.remove_mjpeg_client()
 
     return Response(
         generate(),
@@ -146,6 +239,30 @@ def crossed_horizontal_segment(
         return (prev_y < line_y <= curr_y) or (prev_y > line_y >= curr_y)
 
     return False
+
+
+def should_count_track(
+    prev_y: int | None,
+    curr_y: int,
+    cx: int,
+    line: dict,
+    direction: str,
+    hits: int,
+    min_hits_to_count: int,
+    already_counted: bool,
+) -> bool:
+    if prev_y is None or already_counted or hits < min_hits_to_count:
+        return False
+
+    return crossed_horizontal_segment(
+        prev_y=prev_y,
+        curr_y=curr_y,
+        line_y=line["y1"],
+        cx=cx,
+        x1=line["x1"],
+        x2=line["x2"],
+        direction=direction,
+    )
 
 
 def anchor_point(x1: int, y1: int, x2: int, y2: int) -> tuple[int, int]:
@@ -231,8 +348,9 @@ def annotate_frame(
 class StreamCapture:
     MAX_FAILURES = 30
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, stats: RuntimeStats | None = None):
         self.url = url
+        self.stats = stats
         self.cap: cv2.VideoCapture | None = None
         self._fail_count = 0
         self._connect()
@@ -244,6 +362,8 @@ class StreamCapture:
         logger.info("Conectando ao stream: %s", self.url)
         self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
         self._fail_count = 0
+        if self.stats is not None:
+            self.stats.set_stream_status(self.cap.isOpened(), self._fail_count)
 
         if not self.cap.isOpened():
             logger.warning("Falha ao abrir stream na conexão inicial.")
@@ -252,6 +372,8 @@ class StreamCapture:
         ret, frame = self.cap.read()
         if not ret:
             self._fail_count += 1
+            if self.stats is not None:
+                self.stats.set_stream_status(False, self._fail_count)
 
             if self._fail_count >= self.MAX_FAILURES:
                 logger.warning("Stream perdido — reconectando...")
@@ -260,6 +382,8 @@ class StreamCapture:
             return False, None
 
         self._fail_count = 0
+        if self.stats is not None:
+            self.stats.set_stream_status(True, self._fail_count)
         return True, frame
 
     def release(self):
@@ -275,13 +399,16 @@ CONFIG_POLL_INTERVAL = 10
 
 
 def main():
+    global backend_client_ref
+
     cfg = load_config()
 
     os.makedirs(cfg["snapshot_dir"], exist_ok=True)
 
     model = YOLO(cfg["model"])
     backend = BackendClient(cfg["backend_url"], cfg["api_key"])
-    stream = StreamCapture(cfg["stream_url"])
+    backend_client_ref = backend
+    stream = StreamCapture(cfg["stream_url"], stats=runtime_stats)
     run_mjpeg_server(
         host=cfg.get("mjpeg_host", "0.0.0.0"),
         port=int(cfg.get("mjpeg_port", 8090)),
@@ -350,6 +477,7 @@ def main():
                     count_direction,
                 )
 
+        inference_start = time.perf_counter()
         try:
             results = model.track(
                 frame,
@@ -364,6 +492,8 @@ def main():
             logger.warning("Falha na inferência YOLO (frame %d ignorado): %s", frame_count, exc)
             continue
 
+        runtime_stats.record_inference_ms((time.perf_counter() - inference_start) * 1000)
+
         h, w = frame.shape[:2]
         line_y = line["y1"]
         detections_list = []
@@ -374,7 +504,16 @@ def main():
         fps_frame_count += 1
         if fps_frame_count >= 100:
             elapsed = time.time() - fps_start_ts
+            snapshot = runtime_stats.snapshot(backend.get_health_snapshot())
             logger.info("FPS médio: %.1f | Total contado: %d", fps_frame_count / elapsed if elapsed > 0 else 0, total)
+            logger.info(
+                "FPS inst: %.1f | inferencia media: %.1f ms | JPEG medio: %.1f ms | MJPEG clientes: %d | live descartados: %d",
+                snapshot["fpsInstant"],
+                snapshot["avgInferenceMs"],
+                snapshot["avgJpegEncodeMs"],
+                snapshot["mjpegClients"],
+                snapshot["backend"].get("liveDropped", 0),
+            )
             fps_frame_count = 0
             fps_start_ts = time.time()
 
@@ -416,70 +555,65 @@ def main():
                     last_seen[track_id] = frame_count
 
                     prev = last_positions.get(track_id)
-                    if (
-                        prev
-                        and track_id not in counted_ids
-                        and track_hits.get(track_id, 0) >= min_hits_to_count
+                    prev_y = prev[1] if prev else None
+                    if should_count_track(
+                        prev_y=prev_y,
+                        curr_y=cy,
+                        cx=cx,
+                        line=line,
+                        direction=count_direction,
+                        hits=track_hits.get(track_id, 0),
+                        min_hits_to_count=min_hits_to_count,
+                        already_counted=track_id in counted_ids,
                     ):
-                        _, prev_y = prev
+                        counted_ids.add(track_id)
+                        total += 1
+                        is_counted = True
+                        did_cross = True
 
-                        if crossed_horizontal_segment(
-                            prev_y=prev_y,
-                            curr_y=cy,
-                            line_y=line_y,
-                            cx=cx,
-                            x1=line["x1"],
-                            x2=line["x2"],
-                            direction=count_direction,
-                        ):
-                            counted_ids.add(track_id)
-                            total += 1
-                            is_counted = True
-                            did_cross = True
+                        if cfg.get("save_snapshots", True):
+                            sy1 = clamp(y1, 0, h)
+                            sy2 = clamp(y2, 0, h)
+                            sx1 = clamp(x1, 0, w)
+                            sx2 = clamp(x2, 0, w)
+                            crop = frame[sy1:sy2, sx1:sx2]
 
-                            if cfg.get("save_snapshots", True):
-                                sy1 = clamp(y1, 0, h)
-                                sy2 = clamp(y2, 0, h)
-                                sx1 = clamp(x1, 0, w)
-                                sx2 = clamp(x2, 0, w)
-                                crop = frame[sy1:sy2, sx1:sx2]
-
-                                if crop.size > 0:
-                                    filename = (
-                                        f"{track_id}_{int(time.time() * 1000)}.jpg"
-                                    )
-                                    path = os.path.join(
-                                        cfg["snapshot_dir"],
-                                        filename,
-                                    )
-                                    try:
-                                        cv2.imwrite(path, crop)
-                                    except Exception as exc:
-                                        logger.warning("Falha ao salvar snapshot %s: %s", path, exc)
-                                        path = ""
-                                else:
+                            if crop.size > 0:
+                                filename = (
+                                    f"{track_id}_{int(time.time() * 1000)}.jpg"
+                                )
+                                path = os.path.join(
+                                    cfg["snapshot_dir"],
+                                    filename,
+                                )
+                                try:
+                                    cv2.imwrite(path, crop)
+                                except Exception as exc:
+                                    logger.warning("Falha ao salvar snapshot %s: %s", path, exc)
                                     path = ""
                             else:
                                 path = ""
+                        else:
+                            path = ""
 
-                            backend.send_count_event(
-                                {
-                                    "cameraId": cfg["camera_id"],
-                                    "roundId": cfg["round_id"],
-                                    "trackId": str(track_id),
-                                    "vehicleType": vehicle_name,
-                                    "crossedAt": now(),
-                                    "snapshotUrl": path,
-                                    "totalCount": total,
-                                }
-                            )
+                        backend.send_count_event(
+                            {
+                                "cameraId": cfg["camera_id"],
+                                "roundId": cfg["round_id"],
+                                "trackId": str(track_id),
+                                "vehicleType": vehicle_name,
+                                "crossedAt": now(),
+                                "snapshotUrl": path,
+                                "totalCount": total,
+                            }
+                        )
 
-                            logger.info(
-                                "Count: %d (%s #%d)",
-                                total,
-                                vehicle_name,
-                                track_id,
-                            )
+                        logger.info(
+                            "Count: %d (%s #%d)",
+                            total,
+                            vehicle_name,
+                            track_id,
+                        )
 
                     last_positions[track_id] = (cx, cy)
 
@@ -538,6 +672,7 @@ def main():
                 counted_ids.discard(tid)
 
         stream_annotated = annotate_frame(frame, roi, line, detections_list, total)
+        runtime_stats.record_processed_frame(total)
         streamer.update(stream_annotated)
 
         if cfg.get("show_window", True):

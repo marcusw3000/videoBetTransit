@@ -13,6 +13,9 @@ build/
 bin/
 obj/
 appsettings.Development.json
+*.db
+*.db-shm
+*.db-wal
 
 # IDE
 .vscode/

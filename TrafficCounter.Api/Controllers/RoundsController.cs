@@ -31,6 +31,12 @@ public class RoundsController : ControllerBase
         return Ok(_roundService.GetHistory());
     }
 
+    [HttpGet("{roundId}/count-events")]
+    public IActionResult GetCountEvents(string roundId)
+    {
+        return Ok(_roundService.GetCountEvents(roundId));
+    }
+
     [HttpPost("settle")]
     public async Task<IActionResult> Settle()
     {
@@ -42,15 +48,13 @@ public class RoundsController : ControllerBase
             await _hubContext.Clients.All.SendAsync("round_settled", newRound);
         }
 
-        // Sempre retorna o round atual (novo ou já existente)
         return Ok(_roundService.GetCurrent());
     }
 
     [HttpPost("count-events")]
     public async Task<IActionResult> ReceiveCountEvent([FromBody] CountEvent evt)
     {
-        // Sincroniza com o total acumulado do Python para evitar divergência
-        var round = _roundService.SyncCount(evt.TotalCount);
+        var round = _roundService.SyncCount(evt);
 
         await _hubContext.Clients.All.SendAsync("count_updated", round);
 

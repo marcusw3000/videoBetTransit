@@ -12,7 +12,7 @@ Python app.py
   - publica video anotado via MJPEG
 
 Backend .NET 8
-  - mantem round atual e historico em memoria
+  - persiste round atual, historico, count-events e camera-config em SQLite
   - recebe count-events da engine
   - publica atualizacoes via SignalR
 
@@ -104,15 +104,19 @@ Observacao importante:
 Principais rotas:
 - `GET /api/rounds/current`
 - `GET /api/rounds/history`
+- `GET /api/rounds/{roundId}/count-events`
 - `POST /api/rounds/settle`
 - `POST /api/rounds/count-events`
+- `GET /api/camera-config/{cameraId}`
+- `POST /api/camera-config/{cameraId}`
 
 Eventos SignalR:
 - `count_updated`
 - `round_settled`
 
 Caracteristicas atuais:
-- armazenamento em memoria
+- persistencia local em SQLite via EF Core
+- migracao inicial versionada em `TrafficCounter.Api/Migrations`
 - rounds com encerramento automatico
 - CORS habilitado para desenvolvimento local
 
@@ -144,7 +148,7 @@ Observacao:
 
 ## Pontos de Atencao
 
-- O backend e in-memory. Reiniciar apaga round atual e historico.
+- O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
 - Se o frontend estiver em HTTPS e o MJPEG em HTTP, pode haver bloqueio por mixed content.
 - A `.venv` precisa estar atualizada com `requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.

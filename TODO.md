@@ -171,11 +171,11 @@ Entregavel esperado:
 ## P1 - Robustez e manutencao
 
 ### 5. Adicionar testes unitarios para a engine Python
-- [ ] Criar testes para `inside_roi`.
-- [ ] Criar testes para `crossed_horizontal_segment`.
-- [ ] Criar testes para `bbox_area`.
-- [ ] Criar testes para regras de contagem e prevencao de dupla contagem.
-- [ ] Cobrir cenarios de `count_direction` (`up`, `down`, `any`).
+- [x] Criar testes para `inside_roi`.
+- [x] Criar testes para `crossed_horizontal_segment`.
+- [x] Criar testes para `bbox_area`.
+- [x] Criar testes para regras de contagem e prevencao de dupla contagem.
+- [x] Cobrir cenarios de `count_direction` (`up`, `down`, `any`).
 
 Objetivo:
 - Garantir que a logica critica de contagem continue correta.
@@ -184,11 +184,11 @@ Entregavel esperado:
 - Suite minima de testes da engine com execucao previsivel.
 
 ### 6. Adicionar testes de integracao no backend .NET
-- [ ] Testar `GET /api/rounds/current`.
-- [ ] Testar `GET /api/rounds/history`.
-- [ ] Testar `POST /api/rounds/settle`.
-- [ ] Testar `POST /api/rounds/count-events`.
-- [ ] Verificar comportamento quando o round ja foi encerrado.
+- [x] Testar `GET /api/rounds/current`.
+- [x] Testar `GET /api/rounds/history`.
+- [x] Testar `POST /api/rounds/settle`.
+- [x] Testar `POST /api/rounds/count-events`.
+- [x] Verificar comportamento quando o round ja foi encerrado.
 
 Objetivo:
 - Validar o contrato da API.
@@ -198,11 +198,11 @@ Entregavel esperado:
 - Backend com cobertura minima dos endpoints principais.
 
 ### 7. Melhorar observabilidade
-- [ ] Logar FPS medio e FPS instantaneo.
-- [ ] Logar tempo de inferencia por frame.
-- [ ] Logar tempo de encode JPEG do MJPEG.
-- [ ] Expor numero de clientes conectados ao feed MJPEG.
-- [ ] Melhorar o endpoint `/health` para incluir status basico de stream/backend.
+- [x] Logar FPS medio e FPS instantaneo.
+- [x] Logar tempo de inferencia por frame.
+- [x] Logar tempo de encode JPEG do MJPEG.
+- [x] Expor numero de clientes conectados ao feed MJPEG.
+- [x] Melhorar o endpoint `/health` para incluir status basico de stream/backend.
 
 Objetivo:
 - Facilitar diagnostico.
@@ -212,9 +212,9 @@ Entregavel esperado:
 - Logs e sinais operacionais mais confiaveis.
 
 ### 8. Melhorar resiliencia da comunicacao com backend
-- [ ] Revisar `backend_client.py` para timeout, retry e logging mais claros.
-- [ ] Tratar queda temporaria do backend sem travar o loop principal.
-- [ ] Evitar explosao de threads se o backend estiver indisponivel.
+- [x] Revisar `backend_client.py` para timeout, retry e logging mais claros.
+- [x] Tratar queda temporaria do backend sem travar o loop principal.
+- [x] Evitar explosao de threads se o backend estiver indisponivel.
 - [ ] Considerar fila interna com descarte controlado para eventos.
 
 Objetivo:
@@ -264,11 +264,11 @@ Entregavel esperado:
 - Arquitetura de publicacao coerente.
 
 ### 12. Persistir rounds, eventos e configuracoes
-- [ ] Substituir armazenamento in-memory do backend por banco.
-- [ ] Persistir rounds.
-- [ ] Persistir count-events.
-- [ ] Persistir configuracoes da camera, ROI e linha.
-- [ ] Criar migracoes e estrategia de inicializacao.
+- [x] Substituir armazenamento in-memory do backend por banco.
+- [x] Persistir rounds.
+- [x] Persistir count-events.
+- [x] Persistir configuracoes da camera, ROI e linha.
+- [x] Criar migracoes e estrategia de inicializacao.
 
 Objetivo:
 - Manter historico real.

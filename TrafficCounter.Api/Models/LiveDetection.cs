@@ -67,3 +67,17 @@ public class CameraConfigDto
     public CountLineDto CountLine { get; set; } = new();
     public string CountDirection { get; set; } = "any";
 }
+
+public class CameraConfig
+{
+    public string CameraId { get; set; } = string.Empty;
+    public int RoiX { get; set; }
+    public int RoiY { get; set; }
+    public int RoiW { get; set; }
+    public int RoiH { get; set; }
+    public int CountLineX1 { get; set; }
+    public int CountLineY1 { get; set; }
+    public int CountLineX2 { get; set; }
+    public int CountLineY2 { get; set; }
+    public string CountDirection { get; set; } = "any";
+}

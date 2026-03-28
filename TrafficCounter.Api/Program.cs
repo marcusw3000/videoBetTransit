@@ -1,16 +1,22 @@
+using Microsoft.EntityFrameworkCore;
+using TrafficCounter.Api.Data;
 using TrafficCounter.Api.Hubs;
 using TrafficCounter.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Services
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? "Data Source=trafficcounter.db";
+
+builder.Services.AddDbContextFactory<TrafficCounterDbContext>(options =>
+    options.UseSqlite(connectionString));
+
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<RoundService>();
 builder.Services.AddSingleton<CameraConfigService>();
 builder.Services.AddHostedService<RoundWorker>();
 
-// CORS — permite React dev server e qualquer localhost
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -29,11 +35,20 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<TrafficCounterDbContext>>();
+    using var db = dbFactory.CreateDbContext();
+    db.Database.Migrate();
+}
+
 app.UseCors();
 app.MapControllers();
 app.MapHub<RoundHub>("/hubs/round");
 app.MapHub<OverlayHub>("/hubs/overlay");
 
-Console.WriteLine("🚀 TrafficCounter.Api rodando em http://localhost:5000");
+Console.WriteLine("TrafficCounter.Api rodando em http://localhost:5000");
 
 app.Run();
+
+public partial class Program;
