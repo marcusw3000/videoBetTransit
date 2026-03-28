@@ -7,7 +7,7 @@ export default function VideoPlayer({ src, title = 'Ao Vivo' }) {
     <div className="card video-card">
       <div className="video-header">
         <div>
-          <span className="label">Transmissão</span>
+          <span className="label">Transmissao</span>
           <h2>{title}</h2>
         </div>
 

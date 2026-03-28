@@ -164,6 +164,67 @@ def bbox_area(x1: int, y1: int, x2: int, y2: int) -> int:
     return max(0, x2 - x1) * max(0, y2 - y1)
 
 
+def annotate_frame(
+    frame,
+    roi: dict,
+    line: dict,
+    detections_list: list[dict],
+    total: int,
+):
+    annotated = frame.copy()
+
+    cv2.rectangle(
+        annotated,
+        (roi["x"], roi["y"]),
+        (roi["x"] + roi["w"], roi["y"] + roi["h"]),
+        (255, 255, 0),
+        2,
+    )
+    cv2.line(
+        annotated,
+        (line["x1"], line["y1"]),
+        (line["x2"], line["y2"]),
+        (0, 0, 255),
+        3,
+    )
+
+    for det in detections_list:
+        dx = det["bbox"]["x"]
+        dy = det["bbox"]["y"]
+        dw = det["bbox"]["w"]
+        dh = det["bbox"]["h"]
+        tid = det["trackId"]
+        vtype = det["vehicleType"]
+        color = (0, 255, 0) if det["counted"] else (0, 165, 255)
+
+        cv2.rectangle(annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
+        cv2.putText(
+            annotated,
+            f"#{tid} {vtype}",
+            (dx, dy - 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+        )
+
+        cx_d = det["center"]["x"]
+        cy_d = det["center"]["y"]
+        cv2.circle(annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
+
+    cv2.putText(
+        annotated,
+        f"TOTAL: {total}",
+        (30, 50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.2,
+        (0, 255, 0),
+        3,
+    )
+
+    return annotated
+
+
 # ---------------------------------------------------------------------------
 # Stream com reconexão automática
 # ---------------------------------------------------------------------------
@@ -476,113 +537,14 @@ def main():
                 track_hits.pop(tid, None)
                 counted_ids.discard(tid)
 
-        stream_annotated = frame.copy()
-        cv2.rectangle(
-            stream_annotated,
-            (roi["x"], roi["y"]),
-            (roi["x"] + roi["w"], roi["y"] + roi["h"]),
-            (255, 255, 0),
-            2,
-        )
-        cv2.line(
-            stream_annotated,
-            (line["x1"], line["y1"]),
-            (line["x2"], line["y2"]),
-            (0, 0, 255),
-            3,
-        )
-
-        for det in detections_list:
-            dx = det["bbox"]["x"]
-            dy = det["bbox"]["y"]
-            dw = det["bbox"]["w"]
-            dh = det["bbox"]["h"]
-            tid = det["trackId"]
-            vtype = det["vehicleType"]
-            color = (0, 255, 0) if det["counted"] else (0, 165, 255)
-            cv2.rectangle(stream_annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
-            cv2.putText(
-                stream_annotated,
-                f"#{tid} {vtype}",
-                (dx, dy - 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                color,
-                1,
-            )
-            cx_d = det["center"]["x"]
-            cy_d = det["center"]["y"]
-            cv2.circle(stream_annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
-
-        cv2.putText(
-            stream_annotated,
-            f"TOTAL: {total}",
-            (30, 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.2,
-            (0, 255, 0),
-            3,
-        )
+        stream_annotated = annotate_frame(frame, roi, line, detections_list, total)
         streamer.update(stream_annotated)
 
         if cfg.get("show_window", True):
-            annotated = frame.copy()
-
-            # Desenhar ROI
-            cv2.rectangle(
-                annotated,
-                (roi["x"], roi["y"]),
-                (roi["x"] + roi["w"], roi["y"] + roi["h"]),
-                (255, 255, 0),
-                2,
-            )
-
-            # Desenhar linha de contagem
-            cv2.line(
-                annotated,
-                (line["x1"], line["y1"]),
-                (line["x2"], line["y2"]),
-                (0, 0, 255),
-                3,
-            )
-
-            # Desenhar bboxes + IDs dos veículos trackados
-            for det in detections_list:
-                dx = det["bbox"]["x"]
-                dy = det["bbox"]["y"]
-                dw = det["bbox"]["w"]
-                dh = det["bbox"]["h"]
-                tid = det["trackId"]
-                vtype = det["vehicleType"]
-                color = (0, 255, 0) if det["counted"] else (0, 165, 255)
-                cv2.rectangle(annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
-                cv2.putText(
-                    annotated,
-                    f"#{tid} {vtype}",
-                    (dx, dy - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    1,
-                )
-                # Desenhar anchor point
-                cx_d = det["center"]["x"]
-                cy_d = det["center"]["y"]
-                cv2.circle(annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
-
-            cv2.putText(
-                annotated,
-                f"TOTAL: {total}",
-                (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.2,
-                (0, 255, 0),
-                3,
-            )
-
-            cv2.imshow("Traffic Counter", annotated)
+            cv2.imshow("Traffic Counter", stream_annotated)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
+            continue
 
     stream.release()
     cv2.destroyAllWindows()

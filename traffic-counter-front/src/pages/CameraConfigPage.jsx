@@ -1,67 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
-import Hls from 'hls.js'
 import axios from 'axios'
+import { API_BASE_URL, CAMERA_PREVIEW_URL } from '../config'
 
-const api = axios.create({ baseURL: 'http://localhost:5000/api' })
+const api = axios.create({ baseURL: API_BASE_URL })
 
-/**
- * Página admin para configurar ROI e linha de contagem por câmera.
- * O admin pode:
- * - Desenhar ROI arrastando o mouse (click + drag)
- * - Desenhar linha de contagem com 2 cliques
- * - Salvar a configuração
- */
 export default function CameraConfigPage() {
-  const videoRef = useRef(null)
+  const previewRef = useRef(null)
   const canvasRef = useRef(null)
   const [isReady, setIsReady] = useState(false)
 
-  const [mode, setMode] = useState('idle') // 'idle' | 'roi' | 'line'
+  const [mode, setMode] = useState('idle')
   const [roi, setRoi] = useState(null)
   const [line, setLine] = useState(null)
   const [direction, setDirection] = useState('any')
   const [cameraId] = useState('cam_001')
-  const [streamUrl] = useState('https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8')
+  const [previewUrl] = useState(CAMERA_PREVIEW_URL)
   const [message, setMessage] = useState('')
 
-  // Temporários para desenho
   const drawStart = useRef(null)
   const lineStart = useRef(null)
-
-  // Tamanho real do frame (detectado pelo vídeo)
   const frameSize = useRef({ w: 640, h: 360 })
 
-  // HLS setup
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
+    const preview = previewRef.current
+    if (!preview) return
 
-    let hls = null
-
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = streamUrl
-      video.addEventListener('loadedmetadata', () => {
-        frameSize.current = { w: video.videoWidth, h: video.videoHeight }
-        setIsReady(true)
-        video.play().catch(() => {})
-      }, { once: true })
-    } else if (Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true, lowLatencyMode: true })
-      hls.loadSource(streamUrl)
-      hls.attachMedia(video)
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setIsReady(true)
-        video.play().catch(() => {})
-      })
-      video.addEventListener('loadedmetadata', () => {
-        frameSize.current = { w: video.videoWidth || 640, h: video.videoHeight || 360 }
-      }, { once: true })
+    function handleLoad() {
+      frameSize.current = {
+        w: preview.naturalWidth || 640,
+        h: preview.naturalHeight || 360,
+      }
+      setIsReady(true)
     }
 
-    return () => { if (hls) hls.destroy() }
-  }, [streamUrl])
+    preview.addEventListener('load', handleLoad)
+    return () => preview.removeEventListener('load', handleLoad)
+  }, [previewUrl])
 
-  // Carregar config existente
   useEffect(() => {
     api.get(`/camera-config/${cameraId}`).then(({ data }) => {
       if (data.roi) setRoi(data.roi)
@@ -70,7 +45,6 @@ export default function CameraConfigPage() {
     }).catch(() => {})
   }, [cameraId])
 
-  // Redesenha canvas quando ROI ou linha mudam
   useEffect(() => {
     drawCanvas()
   })
@@ -81,7 +55,7 @@ export default function CameraConfigPage() {
     const displayX = e.clientX - rect.left
     const displayY = e.clientY - rect.top
     const { w, h } = frameSize.current
-    // Converte de coordenadas do display para coordenadas do frame
+
     return {
       x: Math.round((displayX / rect.width) * w),
       y: Math.round((displayY / rect.height) * h),
@@ -140,11 +114,11 @@ export default function CameraConfigPage() {
 
   function drawCanvas() {
     const canvas = canvasRef.current
-    const video = videoRef.current
-    if (!canvas || !video) return
+    const preview = previewRef.current
+    if (!canvas || !preview) return
 
-    const displayW = video.clientWidth
-    const displayH = video.clientHeight
+    const displayW = preview.clientWidth
+    const displayH = preview.clientHeight
     canvas.width = displayW
     canvas.height = displayH
 
@@ -155,7 +129,6 @@ export default function CameraConfigPage() {
     const sx = (x) => (x / fw) * displayW
     const sy = (y) => (y / fh) * displayH
 
-    // Desenha ROI
     if (roi) {
       ctx.strokeStyle = 'rgba(60, 130, 255, 0.8)'
       ctx.lineWidth = 2
@@ -164,14 +137,11 @@ export default function CameraConfigPage() {
       ctx.setLineDash([])
       ctx.fillStyle = 'rgba(60, 130, 255, 0.1)'
       ctx.fillRect(sx(roi.x), sy(roi.y), sx(roi.w), sy(roi.h))
-
-      // Label
       ctx.fillStyle = 'rgba(60, 130, 255, 0.9)'
       ctx.font = 'bold 13px Inter, sans-serif'
       ctx.fillText('ROI', sx(roi.x) + 6, sy(roi.y) + 16)
     }
 
-    // Desenha Linha
     if (line) {
       ctx.strokeStyle = 'rgba(255, 220, 40, 0.9)'
       ctx.lineWidth = 3
@@ -185,14 +155,7 @@ export default function CameraConfigPage() {
       ctx.fillText('LINHA', sx(line.x1) + 6, sy(line.y1) - 8)
     }
 
-    // Cursor mode indicator
-    if (mode === 'roi') {
-      canvas.style.cursor = 'crosshair'
-    } else if (mode === 'line') {
-      canvas.style.cursor = 'crosshair'
-    } else {
-      canvas.style.cursor = 'default'
-    }
+    canvas.style.cursor = mode === 'idle' ? 'default' : 'crosshair'
   }
 
   async function handleSave() {
@@ -203,10 +166,10 @@ export default function CameraConfigPage() {
         countLine: line || { x1: 0, y1: 360, x2: 1920, y2: 360 },
         countDirection: direction,
       })
-      setMessage('✅ Configuração salva!')
+      setMessage('Configuracao salva com sucesso!')
     } catch (err) {
       console.error(err)
-      setMessage('❌ Falha ao salvar.')
+      setMessage('Falha ao salvar a configuracao.')
     }
   }
 
@@ -215,29 +178,35 @@ export default function CameraConfigPage() {
       <div className="container">
         <header className="hero">
           <div>
-            <h1>Configuração de Câmera</h1>
-            <div className="badge">Câmera: {cameraId}</div>
+            <h1>Configuracao de Camera</h1>
+            <div className="badge">Camera: {cameraId}</div>
           </div>
           <a href="#/" className="primary-button" style={{ textDecoration: 'none', textAlign: 'center' }}>
-            ← Voltar ao Market
+            Voltar ao Market
           </a>
         </header>
 
         {message && <div className="info-banner">{message}</div>}
 
-        {/* Toolbar */}
         <div className="config-toolbar">
           <button
             className={`config-btn ${mode === 'roi' ? 'config-btn-active' : ''}`}
-            onClick={() => { setMode('roi'); setMessage('Clique e arraste para desenhar a ROI...') }}
+            onClick={() => {
+              setMode('roi')
+              setMessage('Clique e arraste para desenhar a ROI...')
+            }}
           >
-            📐 Desenhar ROI
+            Desenhar ROI
           </button>
           <button
             className={`config-btn ${mode === 'line' ? 'config-btn-active' : ''}`}
-            onClick={() => { setMode('line'); lineStart.current = null; setMessage('Clique no ponto inicial da linha...') }}
+            onClick={() => {
+              setMode('line')
+              lineStart.current = null
+              setMessage('Clique no ponto inicial da linha...')
+            }}
           >
-            ✏️ Desenhar Linha
+            Desenhar Linha
           </button>
 
           <select
@@ -245,27 +214,25 @@ export default function CameraConfigPage() {
             value={direction}
             onChange={(e) => setDirection(e.target.value)}
           >
-            <option value="any">Direção: Qualquer</option>
-            <option value="down">Direção: Descendo ↓</option>
-            <option value="up">Direção: Subindo ↑</option>
+            <option value="any">Direcao: Qualquer</option>
+            <option value="down">Direcao: Descendo</option>
+            <option value="up">Direcao: Subindo</option>
           </select>
 
           <button className="config-btn config-btn-save" onClick={handleSave}>
-            💾 Salvar Configuração
+            Salvar Configuracao
           </button>
         </div>
 
-        {/* Video + Canvas */}
         <div className="card video-card" style={{ marginTop: 16 }}>
           <div className="video-frame">
-            {!isReady && <div className="video-overlay-message">Carregando stream...</div>}
+            {!isReady && <div className="video-overlay-message">Carregando preview...</div>}
 
-            <video
-              ref={videoRef}
+            <img
+              ref={previewRef}
+              src={previewUrl}
+              alt="Preview da camera"
               className="video-element"
-              muted
-              autoPlay
-              playsInline
             />
 
             <canvas
@@ -286,18 +253,17 @@ export default function CameraConfigPage() {
           </div>
         </div>
 
-        {/* Config preview */}
         <div className="config-preview">
           <div className="card" style={{ padding: 16 }}>
             <span className="label">ROI Atual</span>
-            <pre>{roi ? JSON.stringify(roi, null, 2) : 'Não definida'}</pre>
+            <pre>{roi ? JSON.stringify(roi, null, 2) : 'Nao definida'}</pre>
           </div>
           <div className="card" style={{ padding: 16 }}>
             <span className="label">Linha Atual</span>
-            <pre>{line ? JSON.stringify(line, null, 2) : 'Não definida'}</pre>
+            <pre>{line ? JSON.stringify(line, null, 2) : 'Nao definida'}</pre>
           </div>
           <div className="card" style={{ padding: 16 }}>
-            <span className="label">Direção</span>
+            <span className="label">Direcao</span>
             <pre>{direction}</pre>
           </div>
         </div>

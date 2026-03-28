@@ -1,4 +1,5 @@
 import * as signalR from '@microsoft/signalr'
+import { SIGNALR_BASE_URL } from '../config'
 
 let connection = null
 let connectionPromise = null
@@ -25,7 +26,7 @@ export async function startRoundConnection({ onCountUpdated, onRoundSettled }) {
   }
 
   const conn = new signalR.HubConnectionBuilder()
-    .withUrl('http://localhost:5000/hubs/round')
+    .withUrl(`${SIGNALR_BASE_URL}/hubs/round`)
     .withAutomaticReconnect()
     .build()
 

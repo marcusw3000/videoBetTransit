@@ -3,11 +3,11 @@ cd /d "%~dp0"
 set "D=%~dp0"
 
 echo ============================================================
-echo  Rodovia Market — Inicializando sistema
+echo  Rodovia Market - Inicializando sistema
 echo ============================================================
 echo.
 
-:: ─── Verificar pré-requisitos ────────────────────────────────
+:: Verificar pre-requisitos
 echo Verificando pre-requisitos...
 
 where dotnet >nul 2>&1
@@ -50,23 +50,23 @@ if errorlevel 1 (
 echo [OK] Dependencias Python prontas.
 echo.
 
-:: ─── Criar pasta de logs ──────────────────────────────────────
+:: Criar pasta de logs
 if not exist "%D%logs" mkdir "%D%logs"
 
-:: ─── 1. Backend .NET ──────────────────────────────────────────
+:: 1. Backend .NET
 echo 1. Iniciando API .NET (Backend)...
 start cmd /k "cd /d %D%TrafficCounter.Api && title [BACKEND] .NET API && dotnet run"
 
-:: ─── 2. Frontend React ────────────────────────────────────────
+:: 2. Frontend React
 echo 2. Iniciando React (Frontend)...
 if exist "%D%traffic-counter-front\node_modules" (
     start cmd /k "cd /d %D%traffic-counter-front && title [FRONTEND] React Vite && npm run dev"
 ) else (
-    echo    [INFO] node_modules ausente — rodando npm install ^(so na primeira vez^)...
+    echo    [INFO] node_modules ausente - rodando npm install ^(so na primeira vez^)...
     start cmd /k "cd /d %D%traffic-counter-front && title [FRONTEND] React Vite && npm install && npm run dev"
 )
 
-:: ─── 3. Engine YOLO — aguarda backend subir (5s) ─────────────
+:: 3. Engine YOLO - aguarda backend subir (5s)
 echo 3. Aguardando backend inicializar ^(5s^)...
 timeout /t 5 /nobreak >nul
 echo 3. Iniciando Engine YOLO (Python)...

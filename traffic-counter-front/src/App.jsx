@@ -10,6 +10,7 @@ import { getCurrentRound, getRoundHistory, settleRound } from './services/roundA
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { startOverlayConnection, stopOverlayConnection } from './services/overlaySignalr'
 import { getTimeLeftInSeconds } from './utils/time'
+import { MJPEG_URL } from './config'
 
 const MAX_HISTORY_POINTS = 30
 
@@ -23,12 +24,12 @@ function MarketPage() {
   const [countHistory, setCountHistory] = useState([])
   const [toast, setToast] = useState(null)
 
-  const liveStreamUrl = 'http://127.0.0.1:8090/video_feed'
+  const liveStreamUrl = MJPEG_URL
 
   function showToast(message) {
     const id = Date.now()
     setToast({ message, id })
-    setTimeout(() => setToast(t => t?.id === id ? null : t), 4000)
+    setTimeout(() => setToast((t) => (t?.id === id ? null : t)), 4000)
   }
 
   async function loadCurrentRound() {
@@ -69,11 +70,10 @@ function MarketPage() {
     loadCurrentRound()
     loadHistory()
 
-    // Round SignalR
     startRoundConnection({
       onCountUpdated: (data) => {
         setRound(data)
-        setCountHistory(prev => {
+        setCountHistory((prev) => {
           const next = [...prev, data.currentCount]
           return next.length > MAX_HISTORY_POINTS ? next.slice(-MAX_HISTORY_POINTS) : next
         })
@@ -83,17 +83,16 @@ function MarketPage() {
         setCountHistory([])
         await loadCurrentRound()
         await loadHistory()
-      }
+      },
     }).catch((err) => {
       console.error(err)
       setError('Falha ao conectar em tempo real.')
     })
 
-    // Overlay SignalR
     startOverlayConnection({
       onLiveDetections: (data) => {
         setDetectionFrame(data)
-      }
+      },
     }).catch((err) => {
       console.error('[Overlay]', err)
     })
@@ -134,7 +133,7 @@ function MarketPage() {
           </div>
 
           <div className="hero-actions">
-            <a href="#/admin/config" className="secondary-button">⚙️ Configurar</a>
+            <a href="#/admin/config" className="secondary-button">Configurar</a>
             <button className="primary-button" onClick={handleSettle} disabled={isSettling}>
               {isSettling ? 'Encerrando...' : 'Encerrar / Novo Round'}
             </button>
@@ -142,16 +141,11 @@ function MarketPage() {
         </header>
 
         {error && <div className="error-banner">{error}</div>}
-        {toast && (
-          <div className="toast" key={toast.id}>{toast.message}</div>
-        )}
+        {toast && <div className="toast" key={toast.id}>{toast.message}</div>}
 
         <section className="top-grid">
           <div className="video-column">
-            <VideoPlayer
-              src={liveStreamUrl}
-              title="Rodovia Norte - Faixa A"
-            />
+            <VideoPlayer src={liveStreamUrl} title="Rodovia Norte - Faixa A" />
           </div>
 
           <div className="stats-column">
@@ -160,7 +154,6 @@ function MarketPage() {
           </div>
         </section>
 
-        {/* Lista de detecções */}
         <section style={{ marginBottom: 28 }}>
           <DetectionsList detections={detectionFrame?.detections || []} />
         </section>
@@ -183,7 +176,7 @@ function MarketPage() {
         </section>
 
         <section className="history-section">
-          <h2>Histórico</h2>
+          <h2>Historico</h2>
           <div className="history-list">
             {history.length === 0 && <div className="empty-state">Nenhum round finalizado ainda.</div>}
 
@@ -197,7 +190,6 @@ function MarketPage() {
   )
 }
 
-// Simple hash-based router
 export default function App() {
   const [page, setPage] = useState(window.location.hash)
 

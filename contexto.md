@@ -132,7 +132,8 @@ Fluxo atual:
 
 Observacao:
 - `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
-- `hls.js` deixou de ser necessario para o fluxo principal atual
+- a tela de configuracao tambem usa preview MJPEG
+- `hls.js` foi removido do fluxo principal
 
 ## Portas e Endpoints Locais
 

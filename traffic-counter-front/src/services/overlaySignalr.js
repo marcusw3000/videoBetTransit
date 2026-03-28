@@ -1,4 +1,5 @@
 import * as signalR from '@microsoft/signalr'
+import { SIGNALR_BASE_URL } from '../config'
 
 let connection = null
 let connectionPromise = null
@@ -21,7 +22,7 @@ export async function startOverlayConnection({ onLiveDetections }) {
   }
 
   const conn = new signalR.HubConnectionBuilder()
-    .withUrl('http://localhost:5000/hubs/overlay')
+    .withUrl(`${SIGNALR_BASE_URL}/hubs/overlay`)
     .withAutomaticReconnect()
     .build()
 
