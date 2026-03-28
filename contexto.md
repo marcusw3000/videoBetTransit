@@ -9,7 +9,7 @@ Python app.py
   - consome o stream de camera
   - roda YOLO + tracking + contagem
   - envia eventos HTTP para o backend
-  - publica video anotado via MJPEG
+  - publica video anotado via MJPEG com Flask + waitress
 
 Backend .NET 8
   - persiste round atual, historico, count-events e camera-config em SQLite
@@ -83,7 +83,7 @@ Responsabilidades principais:
 - contar cruzamento da linha
 - salvar snapshots opcionais
 - enviar `count-events` e `live-detections`
-- servir `/health` e `/video_feed` via Flask
+- servir `/health` e `/video_feed` via Flask, publicados por `waitress`
 
 Configuracoes relevantes em `config.json`:
 - `stream_url`: URL do stream da camera
@@ -104,6 +104,7 @@ Observacao importante:
 - o frame anotado sai pronto do Python
 - isso evita o atraso visual entre video e boxes
 - o feed MJPEG pode exigir `token` na query string
+- a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 
 ## Backend .NET
 

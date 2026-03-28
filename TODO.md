@@ -241,9 +241,9 @@ Entregavel esperado:
 ## P2 - Pronto para producao
 
 ### 10. Substituir o servidor de desenvolvimento do Flask
-- [ ] Trocar `Flask.run()` por `waitress` ou outra opcao apropriada para Windows.
-- [ ] Isolar a criacao do app Flask para facilitar deploy.
-- [ ] Garantir encerramento limpo do servidor.
+- [x] Trocar `Flask.run()` por `waitress` ou outra opcao apropriada para Windows.
+- [x] Isolar a criacao do app Flask para facilitar deploy.
+- [x] Garantir encerramento limpo do servidor.
 
 Objetivo:
 - Tornar o servidor MJPEG mais adequado para carga real.
@@ -355,6 +355,13 @@ Entregavel esperado:
 - [ ] Avaliar reduzir resolucao ou `imgsz` dinamicamente por camera.
 - [ ] Avaliar mover snapshots para armazenamento externo.
 - [ ] Criar comando unico de validacao local com build e testes.
+- [ ] Testar `imgsz=640` ou maior para melhorar deteccao de veiculos pequenos.
+- [ ] Avaliar troca de `yolov8s.pt` para `yolov8m.pt` ou modelo fine-tunado por camera.
+- [ ] Ajustar `conf`, `min_hits_to_count` e `min_bbox_area` com base em erros reais da pista.
+- [ ] Adicionar thresholds de area por classe (`car`, `motorcycle`, `bus`, `truck`).
+- [ ] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
+- [ ] Avaliar filtros dependentes da posicao vertical/perspectiva da camera.
+- [ ] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia.
 
 ---
 
@@ -378,7 +385,7 @@ Entregavel esperado:
 - [ ] Medir gargalos de MJPEG em ambiente real
 
 ### Fase 4 - Producao
-- [ ] Servidor MJPEG apropriado
+- [x] Servidor MJPEG apropriado
 - [x] Persistencia
 - [x] Seguranca
 - [ ] Estrategia de deploy unificada

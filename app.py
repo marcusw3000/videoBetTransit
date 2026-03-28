@@ -3,11 +3,13 @@ import logging
 import os
 import threading
 import time
+import atexit
 from datetime import datetime, timezone
 
 import cv2
 from flask import Flask, Response, jsonify, request
 from ultralytics import YOLO
+from waitress import create_server
 
 from backend_client import BackendClient
 
@@ -105,6 +107,8 @@ class RuntimeStats:
 runtime_stats = RuntimeStats()
 backend_client_ref: BackendClient | None = None
 mjpeg_token_ref: str = ""
+active_stream_ref = None
+active_mjpeg_server_ref = None
 
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
@@ -137,14 +141,6 @@ class AnnotatedFrameStreamer:
 
 
 streamer = AnnotatedFrameStreamer(jpeg_quality=80, stats=runtime_stats)
-mjpeg_app = Flask(__name__)
-
-
-@mjpeg_app.get("/health")
-def health():
-    backend_health = backend_client_ref.get_health_snapshot() if backend_client_ref else {}
-    return jsonify(runtime_stats.snapshot(backend_health))
-
 
 def is_mjpeg_request_authorized() -> bool:
     if not mjpeg_token_ref:
@@ -155,60 +151,105 @@ def is_mjpeg_request_authorized() -> bool:
     return header_token == mjpeg_token_ref or query_token == mjpeg_token_ref
 
 
-@mjpeg_app.get("/video_feed")
-def video_feed():
-    if not is_mjpeg_request_authorized():
-        return jsonify({"message": "Invalid or missing MJPEG token."}), 401
+def create_mjpeg_app() -> Flask:
+    app = Flask(__name__)
 
-    def generate():
-        last_sent = None
-        runtime_stats.add_mjpeg_client()
+    @app.get("/health")
+    def health():
+        backend_health = (
+            backend_client_ref.get_health_snapshot() if backend_client_ref else {}
+        )
+        return jsonify(runtime_stats.snapshot(backend_health))
 
-        try:
-            while True:
-                frame = streamer.get_latest()
-                if frame is None:
-                    time.sleep(0.03)
-                    continue
+    @app.get("/video_feed")
+    def video_feed():
+        if not is_mjpeg_request_authorized():
+            return jsonify({"message": "Invalid or missing MJPEG token."}), 401
 
-                if frame is last_sent:
-                    time.sleep(0.01)
-                    continue
+        def generate():
+            last_sent = None
+            runtime_stats.add_mjpeg_client()
 
-                last_sent = frame
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    b"Cache-Control: no-cache\r\n\r\n"
-                    + frame
-                    + b"\r\n"
-                )
-        finally:
-            runtime_stats.remove_mjpeg_client()
+            try:
+                while True:
+                    frame = streamer.get_latest()
+                    if frame is None:
+                        time.sleep(0.03)
+                        continue
 
-    return Response(
-        generate(),
-        mimetype="multipart/x-mixed-replace; boundary=frame",
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-        },
-    )
+                    if frame is last_sent:
+                        time.sleep(0.01)
+                        continue
+
+                    last_sent = frame
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Cache-Control: no-cache\r\n\r\n"
+                        + frame
+                        + b"\r\n"
+                    )
+            finally:
+                runtime_stats.remove_mjpeg_client()
+
+        return Response(
+            generate(),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
+
+    return app
 
 
-def run_mjpeg_server(host: str = "0.0.0.0", port: int = 8090):
-    thread = threading.Thread(
-        target=lambda: mjpeg_app.run(
+class MjpegServer:
+    def __init__(self, app: Flask, host: str, port: int, threads: int = 8):
+        self._server = create_server(
+            app,
             host=host,
             port=port,
-            threaded=True,
-            debug=False,
-            use_reloader=False,
-        ),
-        daemon=True,
-    )
-    thread.start()
-    logger.info("MJPEG server iniciado em http://%s:%s/video_feed", host, port)
+            threads=threads,
+        )
+        self._thread = threading.Thread(target=self._server.run, daemon=True)
+        self.host = host
+        self.port = port
+
+    def start(self):
+        self._thread.start()
+        logger.info("MJPEG server iniciado em http://%s:%s/video_feed", self.host, self.port)
+
+    def stop(self):
+        logger.info("Encerrando servidor MJPEG...")
+        self._server.close()
+        self._thread.join(timeout=5)
+
+
+mjpeg_app = create_mjpeg_app()
+
+
+def run_mjpeg_server(host: str = "0.0.0.0", port: int = 8090) -> MjpegServer:
+    server = MjpegServer(mjpeg_app, host=host, port=port)
+    server.start()
+    return server
+
+
+def cleanup_runtime():
+    global active_stream_ref, active_mjpeg_server_ref
+
+    if active_stream_ref is not None:
+        active_stream_ref.release()
+        active_stream_ref = None
+
+    if active_mjpeg_server_ref is not None:
+        active_mjpeg_server_ref.stop()
+        active_mjpeg_server_ref = None
+
+    cv2.destroyAllWindows()
+
+
+atexit.register(cleanup_runtime)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -412,7 +453,7 @@ CONFIG_POLL_INTERVAL = 10
 
 
 def main():
-    global backend_client_ref, mjpeg_token_ref
+    global backend_client_ref, mjpeg_token_ref, active_stream_ref, active_mjpeg_server_ref
 
     cfg = load_config()
 
@@ -423,10 +464,12 @@ def main():
     backend_client_ref = backend
     mjpeg_token_ref = str(cfg.get("mjpeg_token", "")).strip()
     stream = StreamCapture(cfg["stream_url"], stats=runtime_stats)
-    run_mjpeg_server(
+    active_stream_ref = stream
+    mjpeg_server = run_mjpeg_server(
         host=cfg.get("mjpeg_host", "0.0.0.0"),
         port=int(cfg.get("mjpeg_port", 8090)),
     )
+    active_mjpeg_server_ref = mjpeg_server
 
     class_names = build_class_names(cfg["allowed_classes"])
 
@@ -695,8 +738,7 @@ def main():
                 break
             continue
 
-    stream.release()
-    cv2.destroyAllWindows()
+    cleanup_runtime()
 
 
 if __name__ == "__main__":
@@ -704,3 +746,4 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         logger.info("Encerrando por Ctrl+C.")
+        cleanup_runtime()
