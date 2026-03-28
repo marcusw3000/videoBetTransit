@@ -1,7 +1,17 @@
 import { useState } from 'react'
 
-export default function VideoPlayer({ src, title = 'Ao Vivo' }) {
+export default function VideoPlayer({ src, title = 'Ao Vivo', onStreamStatusChange }) {
   const [hasError, setHasError] = useState(false)
+
+  function handleLoad() {
+    setHasError(false)
+    onStreamStatusChange?.('online')
+  }
+
+  function handleError() {
+    setHasError(true)
+    onStreamStatusChange?.('error')
+  }
 
   return (
     <div className="card video-card">
@@ -25,7 +35,8 @@ export default function VideoPlayer({ src, title = 'Ao Vivo' }) {
             src={src}
             alt={title}
             className="video-element"
-            onError={() => setHasError(true)}
+            onLoad={handleLoad}
+            onError={handleError}
           />
         )}
       </div>

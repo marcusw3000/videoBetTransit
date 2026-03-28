@@ -295,11 +295,11 @@ Entregavel esperado:
 ## P3 - Evolucao de produto
 
 ### 14. Melhorar a tela operacional
-- [ ] Mostrar status da camera.
-- [ ] Mostrar status do backend.
-- [ ] Mostrar status do feed MJPEG.
-- [ ] Mostrar FPS e latencia estimada.
-- [ ] Mostrar ultimo evento recebido.
+- [x] Mostrar status da camera.
+- [x] Mostrar status do backend.
+- [x] Mostrar status do feed MJPEG.
+- [x] Mostrar FPS e latencia estimada.
+- [x] Mostrar ultimo evento recebido.
 
 Objetivo:
 - Dar visibilidade operacional para quem acompanha a contagem.
@@ -393,9 +393,9 @@ Entregavel esperado:
 - [ ] Estrategia de deploy unificada
 
 ### Fase 5 - Produto
-- [ ] Dashboard operacional
+- [x] Dashboard operacional
 - [ ] Historico avancado
-- [~] Editor visual de ROI/linha
+- [x] Editor visual de ROI/linha
 - [ ] Alertas
 
 ---

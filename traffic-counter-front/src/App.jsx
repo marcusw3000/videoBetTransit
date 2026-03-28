@@ -5,9 +5,11 @@ import RangeCard from './components/RangeCard'
 import HistoryCard from './components/HistoryCard'
 import VideoPlayer from './components/VideoPlayer'
 import DetectionsList from './components/DetectionsList'
+import OperationsCard from './components/OperationsCard'
 import { getCurrentRound, getRoundHistory, settleRound } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { startOverlayConnection, stopOverlayConnection } from './services/overlaySignalr'
+import { getOperationsHealth } from './services/operationsApi'
 import { getTimeLeftInSeconds } from './utils/time'
 import { MJPEG_URL } from './config'
 
@@ -22,6 +24,9 @@ function MarketPage() {
   const [detectionFrame, setDetectionFrame] = useState(null)
   const [countHistory, setCountHistory] = useState([])
   const [toast, setToast] = useState(null)
+  const [operations, setOperations] = useState({ health: null, backendError: null, updatedAt: null })
+  const [streamState, setStreamState] = useState('connecting')
+  const [lastEvent, setLastEvent] = useState(null)
 
   const liveStreamUrl = MJPEG_URL
 
@@ -36,9 +41,11 @@ function MarketPage() {
       const data = await getCurrentRound()
       setRound(data)
       setError('')
+      setOperations((prev) => ({ ...prev, backendError: null }))
     } catch (err) {
       console.error(err)
       setError('Falha ao carregar o round atual.')
+      setOperations((prev) => ({ ...prev, backendError: err?.message || 'Falha ao consultar backend.' }))
     }
   }
 
@@ -55,6 +62,10 @@ function MarketPage() {
     try {
       setIsSettling(true)
       await settleRound()
+      setLastEvent({
+        label: 'Round encerrado manualmente',
+        at: new Date().toISOString(),
+      })
       await loadCurrentRound()
       await loadHistory()
     } catch (err) {
@@ -65,13 +76,36 @@ function MarketPage() {
     }
   }
 
+  async function loadOperationsHealth() {
+    try {
+      const health = await getOperationsHealth()
+      setOperations({
+        health,
+        backendError: null,
+        updatedAt: new Date().toISOString(),
+      })
+    } catch (err) {
+      console.error('[Operations]', err)
+      setOperations((prev) => ({
+        health: prev.health,
+        backendError: err?.message || 'Falha ao consultar health operacional.',
+        updatedAt: new Date().toISOString(),
+      }))
+    }
+  }
+
   useEffect(() => {
     loadCurrentRound()
     loadHistory()
+    loadOperationsHealth()
 
     startRoundConnection({
       onCountUpdated: (data) => {
         setRound(data)
+        setLastEvent({
+          label: `Contagem atualizada para ${data.currentCount}`,
+          at: new Date().toISOString(),
+        })
         setCountHistory((prev) => {
           const next = [...prev, data.currentCount]
           return next.length > MAX_HISTORY_POINTS ? next.slice(-MAX_HISTORY_POINTS) : next
@@ -79,6 +113,10 @@ function MarketPage() {
       },
       onRoundSettled: async () => {
         showToast('Round encerrado! Novo round iniciado.')
+        setLastEvent({
+          label: 'Round encerrado automaticamente e reiniciado',
+          at: new Date().toISOString(),
+        })
         setCountHistory([])
         await loadCurrentRound()
         await loadHistory()
@@ -91,6 +129,10 @@ function MarketPage() {
     startOverlayConnection({
       onLiveDetections: (data) => {
         setDetectionFrame(data)
+        setLastEvent({
+          label: `${data?.detections?.length ?? 0} deteccoes ao vivo recebidas`,
+          at: new Date().toISOString(),
+        })
       },
     }).catch((err) => {
       console.error('[Overlay]', err)
@@ -113,6 +155,14 @@ function MarketPage() {
 
     return () => clearInterval(intervalId)
   }, [round])
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      loadOperationsHealth()
+    }, 5000)
+
+    return () => clearInterval(intervalId)
+  }, [])
 
   const statusClass = useMemo(() => {
     const value = (round?.status || '').toLowerCase()
@@ -141,9 +191,21 @@ function MarketPage() {
         {error && <div className="error-banner">{error}</div>}
         {toast && <div className="toast" key={toast.id}>{toast.message}</div>}
 
+        <section className="operations-section">
+          <OperationsCard
+            operations={operations}
+            streamState={streamState}
+            lastEvent={lastEvent}
+          />
+        </section>
+
         <section className="top-grid">
           <div className="video-column">
-            <VideoPlayer src={liveStreamUrl} title="Rodovia Norte - Faixa A" />
+            <VideoPlayer
+              src={liveStreamUrl}
+              title="Rodovia Norte - Faixa A"
+              onStreamStatusChange={setStreamState}
+            />
           </div>
 
           <div className="stats-column">

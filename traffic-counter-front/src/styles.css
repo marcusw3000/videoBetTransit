@@ -144,6 +144,10 @@ body {
   margin-bottom: 28px;
 }
 
+.operations-section {
+  margin-bottom: 22px;
+}
+
 .video-column,
 .stats-column {
   min-width: 0;
@@ -179,6 +183,119 @@ body {
   justify-content: center;
   align-items: center;
   text-align: center;
+}
+
+.operations-card {
+  padding: 20px 22px;
+}
+
+.operations-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.operations-header h3 {
+  margin: 4px 0 0 0;
+  font-size: 22px;
+}
+
+.operations-updated {
+  color: #9b9bb6;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.operations-pills {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ops-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ops-pill-label {
+  font-size: 12px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #9b9bb6;
+}
+
+.ops-pill-ok {
+  border-color: rgba(48, 209, 107, 0.22);
+  background: rgba(48, 209, 107, 0.1);
+}
+
+.ops-pill-warn {
+  border-color: rgba(199, 156, 47, 0.22);
+  background: rgba(199, 156, 47, 0.1);
+}
+
+.ops-pill-error {
+  border-color: rgba(220, 84, 84, 0.25);
+  background: rgba(220, 84, 84, 0.1);
+}
+
+.operations-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ops-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 92px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ops-metric span {
+  color: #9b9bb6;
+  font-size: 13px;
+}
+
+.ops-metric strong {
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.operations-footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.ops-event {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ops-footer-label {
+  color: #9b9bb6;
+  font-size: 12px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
 }
 
 .label {
@@ -645,6 +762,17 @@ body {
 /* ── Responsive: Config ───────────────────────────────── */
 
 @media (max-width: 980px) {
+  .operations-header,
+  .operations-footer,
+  .operations-pills,
+  .operations-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-header {
+    display: grid;
+  }
+
   .config-preview {
     grid-template-columns: 1fr;
   }
