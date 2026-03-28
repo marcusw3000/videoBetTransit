@@ -55,6 +55,7 @@ Entregavel:
 - [ ] Definir rollout controlado por operador
 - [ ] Definir monitoracao, alertas e runbooks
 - [ ] Definir estrategia final de latencia e transparencia para o cliente final.
+- [~] Levar como baseline tecnica atual: tuning moderado de FFmpeg + engine mais leve, sem prometer latencia subsegundo com HLS.
 
 Entregavel:
 - plano de entrada em producao regulada

@@ -188,7 +188,17 @@ Sempre deixar claro:
 Status atual:
 - [x] documento de estrategia criado
 - [x] instrumentacao basica da pipeline adicionada ao `/health`
-- [ ] medir diferenca real entre stream original e stream anotado
+- [x] medir diferenca real entre stream original e stream anotado
+- [x] encontrar um baseline estavel de baixa latencia sem alterar a arquitetura base
+
+Baseline encontrada:
+- tuning moderado da captura FFmpeg melhorou fortemente o buffer de entrada
+- reduzir `imgsz` para `320` reduziu o custo da engine o suficiente para aproximar muito a stream anotada da referencia original
+- tentar agressividade maior no FFmpeg piorou a latencia, entao a configuracao moderada virou o ponto recomendado
+
+Leitura importante:
+- o grande atraso original vinha muito mais de buffer da origem/captura do que de render do frontend
+- HLS continua impondo um piso de latencia; a baseline atual melhora bastante, mas nao substitui uma revisao futura de protocolo
 
 ## Fase 2 - Reducao de atraso com baixo risco
 

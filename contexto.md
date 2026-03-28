@@ -117,6 +117,10 @@ Observacao importante:
 - o feed MJPEG pode exigir `token` na query string
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
+- a baseline atual de latencia ficou boa com:
+  - `ffmpeg_capture_options`: `fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;32768`
+  - `stream_buffer_size`: `1`
+  - `imgsz`: `320`
 
 ## Backend .NET
 
@@ -173,6 +177,7 @@ Latencia:
 - o `/health` do Python expõe tambem latencia interna basica da pipeline
 - `lastPipelineMs` e `avgPipelineMs` representam o tempo entre a captura local do frame e a publicacao do frame anotado na memoria do MJPEG
 - esses numeros ajudam a separar atraso interno da engine do atraso percebido da origem do stream
+- a maior parte do atraso historico estava na captura/origem HLS; depois do tuning moderado e da reducao do `imgsz`, a stream anotada passou a ficar muito proxima da original
 
 ## Ambientes
 

@@ -16,6 +16,10 @@ Estado congelado:
 - tracking funcionando
 - video no Python rodando bem
 - prioridade: nao quebrar a base operacional
+- baseline atual de latencia:
+  - tuning moderado da captura FFmpeg
+  - `imgsz: 320`
+  - atraso percebido caiu de aproximadamente `2 min` para algo proximo do stream original
 
 Regra de trabalho:
 - qualquer nova evolucao deve partir deste ponto
@@ -60,9 +64,10 @@ Objetivo:
 - melhorar deteccao sem repetir regressao de estabilidade
 
 ### Etapa E - Performance
-- [ ] Medir FPS e latencia reais no estado base
-- [ ] Atacar primeiro configuracao e encode, nao arquitetura de captura
+- [x] Medir FPS e latencia reais no estado base
+- [x] Atacar primeiro configuracao e encode, nao arquitetura de captura
 - [ ] So testar captura assincrona em branch separada e com rollback facil
+- [x] Encontrar um baseline operacional de baixa latencia sem trocar a arquitetura da captura
 
 Objetivo:
 - evitar nova quebra da janela Python
