@@ -38,12 +38,32 @@ public class RoundsController : ControllerBase
         return Ok(_roundService.GetCountEvents(roundId));
     }
 
+    public sealed class VoidRoundRequest
+    {
+        public string? Reason { get; set; }
+    }
+
     [HttpPost("settle")]
     [RequireApiKey]
     public async Task<IActionResult> Settle()
     {
         var currentId = _roundService.GetCurrent().Id;
         var newRound = _roundService.Settle(currentId);
+
+        if (newRound != null)
+        {
+            await _hubContext.Clients.All.SendAsync("round_settled", newRound);
+        }
+
+        return Ok(_roundService.GetCurrent());
+    }
+
+    [HttpPost("void")]
+    [RequireApiKey]
+    public async Task<IActionResult> VoidRound([FromBody] VoidRoundRequest? request)
+    {
+        var currentId = _roundService.GetCurrent().Id;
+        var newRound = _roundService.Void(currentId, request?.Reason);
 
         if (newRound != null)
         {

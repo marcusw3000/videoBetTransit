@@ -11,6 +11,9 @@ public class RoundService
     public const string StatusSettling = "settling";
     public const string StatusSettled = "settled";
     public const string StatusVoid = "void";
+    public const int RoundDurationSeconds = 120;
+    public const int BetCloseLeadSeconds = 30;
+    public const string TurboDisplayName = "Rodada Turbo";
 
     private readonly IDbContextFactory<TrafficCounterDbContext> _dbContextFactory;
     private readonly object _lock = new();
@@ -75,6 +78,25 @@ public class RoundService
         }
     }
 
+    public Round? Void(string currentId, string? reason)
+    {
+        lock (_lock)
+        {
+            using var db = _dbContextFactory.CreateDbContext();
+            var current = db.Rounds
+                .Include(r => r.Ranges)
+                .SingleOrDefault(r => r.Id == currentId);
+
+            if (current is null || current.Status == StatusSettled || current.Status == StatusVoid)
+                return null;
+
+            var newRound = VoidRound(db, current, reason);
+            db.SaveChanges();
+
+            return CloneRound(newRound);
+        }
+    }
+
     public Round SyncCount(CountEvent evt)
     {
         lock (_lock)
@@ -82,6 +104,7 @@ public class RoundService
             using var db = _dbContextFactory.CreateDbContext();
             var now = DateTime.UtcNow;
             var current = GetOrCreateCurrentTracked(db);
+            var requestedRoundId = evt.RoundId;
 
             if (ApplyLifecycleState(current, now))
             {
@@ -92,6 +115,11 @@ public class RoundService
             {
                 current = FinalizeRound(db, current);
                 db.SaveChanges();
+            }
+
+            if (!string.IsNullOrWhiteSpace(requestedRoundId) && !string.Equals(requestedRoundId, current.Id, StringComparison.Ordinal))
+            {
+                return CloneRound(current);
             }
 
             var alreadyRecorded = db.CountEvents.Any(x =>
@@ -197,12 +225,13 @@ public class RoundService
         var id = $"rnd_{Guid.NewGuid().ToString()[..8]}";
         const int targetValue = 20;
         var createdAt = DateTime.UtcNow;
-        var betCloseAt = createdAt.AddSeconds(50);
-        var endsAt = createdAt.AddSeconds(60);
+        var betCloseAt = createdAt.AddSeconds(RoundDurationSeconds - BetCloseLeadSeconds);
+        var endsAt = createdAt.AddSeconds(RoundDurationSeconds);
 
         return new Round
         {
             Id = id,
+            DisplayName = TurboDisplayName,
             Status = StatusOpen,
             CurrentCount = 0,
             CreatedAt = createdAt,
@@ -240,10 +269,31 @@ public class RoundService
     {
         current.Status = StatusSettled;
         current.FinalCount = current.CurrentCount;
+        current.SettledAt = DateTime.UtcNow;
+        current.VoidedAt = null;
+        current.VoidReason = null;
 
         foreach (var market in current.Ranges)
         {
             market.IsWinner = IsWinningMarket(market, current.CurrentCount);
+        }
+
+        var newRound = CreateNewRound();
+        db.Rounds.Add(newRound);
+        return newRound;
+    }
+
+    private static Round VoidRound(TrafficCounterDbContext db, Round current, string? reason)
+    {
+        current.Status = StatusVoid;
+        current.FinalCount = null;
+        current.SettledAt = null;
+        current.VoidedAt = DateTime.UtcNow;
+        current.VoidReason = string.IsNullOrWhiteSpace(reason) ? "Falha tecnica relevante" : reason.Trim();
+
+        foreach (var market in current.Ranges)
+        {
+            market.IsWinner = null;
         }
 
         var newRound = CreateNewRound();
@@ -268,11 +318,15 @@ public class RoundService
         return new Round
         {
             Id = round.Id,
+            DisplayName = round.DisplayName,
             Status = round.Status,
             CurrentCount = round.CurrentCount,
             CreatedAt = round.CreatedAt,
             BetCloseAt = round.BetCloseAt,
             EndsAt = round.EndsAt,
+            SettledAt = round.SettledAt,
+            VoidedAt = round.VoidedAt,
+            VoidReason = round.VoidReason,
             FinalCount = round.FinalCount,
             Ranges = round.Ranges
                 .Select(r => new RoundRange

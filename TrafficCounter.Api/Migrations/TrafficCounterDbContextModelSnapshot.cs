@@ -117,15 +117,30 @@ namespace TrafficCounter.Api.Migrations
                     b.Property<int>("CurrentCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("EndsAt")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("FinalCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("SettledAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("VoidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

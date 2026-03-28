@@ -56,6 +56,15 @@ body {
   background-clip: text;
 }
 
+.hero-kicker {
+  margin: 0 0 10px 0;
+  color: #f0b31f;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
 /* ── Badges ───────────────────────────────────────────── */
 
 .badge {

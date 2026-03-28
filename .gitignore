@@ -25,3 +25,4 @@ appsettings.Development.json
 
 # Project specific
 snapshots/
+artifacts/

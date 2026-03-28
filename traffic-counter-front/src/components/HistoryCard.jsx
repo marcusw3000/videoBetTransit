@@ -18,6 +18,17 @@ function formatDate(iso) {
   })
 }
 
+function getHistoryStatusLabel(item) {
+  switch ((item.status || '').toLowerCase()) {
+    case 'settled':
+      return 'Encerrada'
+    case 'void':
+      return 'Anulada'
+    default:
+      return item.status || '--'
+  }
+}
+
 export default function HistoryCard({ item, summary }) {
   const winners = getWinningMarkets(item)
   const cameraLabel = summary?.cameraIds?.length ? summary.cameraIds.join(', ') : 'Sem camera'
@@ -28,8 +39,10 @@ export default function HistoryCard({ item, summary }) {
       <div className="history-main">
         <div className="history-id">{item.id}</div>
         <div className="history-meta">
+          <span>{item.displayName || 'Rodada Turbo'}</span>
           <span>{cameraLabel}</span>
           <span>{eventsCount} evento(s)</span>
+          <span>{getHistoryStatusLabel(item)}</span>
         </div>
       </div>
       <div className="history-count">
@@ -37,11 +50,13 @@ export default function HistoryCard({ item, summary }) {
         <strong>{item.finalCount ?? '--'}</strong>
       </div>
       <div className="history-range">
-        {winners.length ? (
+        {item.status === 'void' ? (
+          <span className="history-winner">{item.voidReason || 'Round anulado'}</span>
+        ) : winners.length ? (
           <span className="history-winner">{winners.map((winner) => `${winner.marketType === 'exact' ? `Exact ${winner.targetValue}` : winner.label} - ${winner.odds}x`).join(' | ')}</span>
         ) : '--'}
       </div>
-      <div className="history-date">{formatDate(item.endsAt)}</div>
+      <div className="history-date">{formatDate(item.settledAt || item.voidedAt || item.endsAt)}</div>
     </div>
   )
 }

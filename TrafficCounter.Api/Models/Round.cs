@@ -3,11 +3,15 @@ namespace TrafficCounter.Api.Models;
 public class Round
 {
     public string Id { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = "Rodada Turbo";
     public string Status { get; set; } = "open";
     public int CurrentCount { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime BetCloseAt { get; set; }
     public DateTime EndsAt { get; set; }
+    public DateTime? SettledAt { get; set; }
+    public DateTime? VoidedAt { get; set; }
+    public string? VoidReason { get; set; }
     public int? FinalCount { get; set; }
     public List<RoundRange> Ranges { get; set; } = new();
 }

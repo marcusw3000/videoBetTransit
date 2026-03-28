@@ -5,11 +5,44 @@ import HistoryCard from './components/HistoryCard'
 import VideoPlayer from './components/VideoPlayer'
 import { getCurrentRound, getRoundHistory, settleRound } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
-import { getTimeLeftInSeconds } from './utils/time'
+import { getRoundPhase, getTimeLeftInSeconds } from './utils/time'
 import { MJPEG_URL } from './config'
 
 const MAX_HISTORY_POINTS = 30
 const RECENT_HISTORY_LIMIT = 6
+
+function getRoundPhaseLabel(roundPhase) {
+  switch (roundPhase) {
+    case 'open':
+      return 'Apostas Abertas'
+    case 'closing':
+      return 'Apostas Fechadas'
+    case 'settling':
+      return 'Apurando'
+    case 'settled':
+      return 'Encerrada'
+    case 'void':
+      return 'Anulada'
+    default:
+      return 'Carregando'
+  }
+}
+
+function getDisplayName(round) {
+  return round?.displayName || 'Rodada Turbo'
+}
+
+function getRoundDurationLabel(round) {
+  if (!round?.createdAt || !round?.endsAt) return null
+
+  const created = new Date(round.createdAt).getTime()
+  const ends = new Date(round.endsAt).getTime()
+  if (Number.isNaN(created) || Number.isNaN(ends) || ends <= created) return null
+
+  const minutes = Math.round((ends - created) / 60000)
+  if (minutes <= 0) return null
+  return `${minutes} ${minutes === 1 ? 'MINUTO' : 'MINUTOS'}`
+}
 
 function MarketPage() {
   const [round, setRound] = useState(null)
@@ -21,6 +54,9 @@ function MarketPage() {
   const [toast, setToast] = useState(null)
 
   const liveStreamUrl = MJPEG_URL
+  const roundPhase = getRoundPhase(round)
+  const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
+  const roundDurationLabel = getRoundDurationLabel(round)
 
   function showToast(message) {
     const id = Date.now()
@@ -105,12 +141,11 @@ function MarketPage() {
   }, [round])
 
   const statusClass = useMemo(() => {
-    const value = (round?.status || '').toLowerCase()
-
-    if (value === 'running') return 'badge badge-live'
-    if (value === 'settled') return 'badge badge-settled'
+    if (roundPhase === 'open') return 'badge badge-live'
+    if (roundPhase === 'closing') return 'badge badge-closing'
+    if (roundPhase === 'settled') return 'badge badge-settled'
     return 'badge'
-  }, [round])
+  }, [roundPhase])
 
   const recentHistory = useMemo(
     () => history.slice(0, RECENT_HISTORY_LIMIT),
@@ -123,7 +158,12 @@ function MarketPage() {
         <header className="hero">
           <div>
             <h1>Rodovia Market</h1>
-            <div className={statusClass}>Status: {round?.status || 'loading'}</div>
+            <p className="hero-kicker">
+              {roundDurationLabel
+                ? `${getDisplayName(round).toUpperCase()} · ${roundDurationLabel}`
+                : getDisplayName(round).toUpperCase()}
+            </p>
+            <div className={statusClass}>Status: {getRoundPhaseLabel(roundPhase)}</div>
           </div>
 
           <div className="hero-actions">
@@ -147,7 +187,11 @@ function MarketPage() {
 
           <div className="stats-column">
             <CounterCard value={round?.currentCount} history={countHistory} />
-            <TimerCard seconds={timeLeftSeconds} />
+            <TimerCard
+              seconds={roundPhase === 'open' ? betCloseSeconds : timeLeftSeconds}
+              label={roundPhase === 'open' ? 'Apostas Abertas Ate' : roundPhase === 'closing' ? 'Rodada em Fechamento' : 'Tempo Restante'}
+              tone={roundPhase === 'closing' || roundPhase === 'settling' ? 'warning' : 'default'}
+            />
           </div>
         </section>
 

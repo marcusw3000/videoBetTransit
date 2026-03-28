@@ -20,7 +20,9 @@ public class TrafficCounterDbContext : DbContext
         modelBuilder.Entity<Round>(entity =>
         {
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.DisplayName).HasMaxLength(64);
             entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.VoidReason).HasMaxLength(256);
             entity.HasMany(x => x.Ranges)
                 .WithOne()
                 .HasForeignKey(x => x.RoundId)

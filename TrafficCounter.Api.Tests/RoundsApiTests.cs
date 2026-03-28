@@ -19,9 +19,10 @@ public class RoundsApiTests
 
         Assert.NotNull(round);
         Assert.Equal(RoundService.StatusOpen, round.Status);
+        Assert.Equal(RoundService.TurboDisplayName, round.DisplayName);
         Assert.False(string.IsNullOrWhiteSpace(round.Id));
-        Assert.InRange((round.BetCloseAt - round.CreatedAt).TotalSeconds, 49, 51);
-        Assert.InRange((round.EndsAt - round.CreatedAt).TotalSeconds, 59, 61);
+        Assert.InRange((round.BetCloseAt - round.CreatedAt).TotalSeconds, 89, 91);
+        Assert.InRange((round.EndsAt - round.CreatedAt).TotalSeconds, 119, 121);
         Assert.Equal(4, round.Ranges.Count);
         Assert.Contains(round.Ranges, market => market.MarketType == "under" && market.TargetValue == 20);
         Assert.Contains(round.Ranges, market => market.MarketType == "range");
@@ -123,10 +124,42 @@ public class RoundsApiTests
         var settledRound = Assert.Single(history, r => r.Id == previousRound.Id);
         Assert.Equal(RoundService.StatusSettled, settledRound.Status);
         Assert.Equal(3, settledRound.FinalCount);
+        Assert.NotNull(settledRound.SettledAt);
         Assert.Contains(settledRound.Ranges, market => market.MarketType == "under" && market.IsWinner == true);
         Assert.Contains(settledRound.Ranges, market => market.MarketType == "range" && market.IsWinner == false);
         Assert.Contains(settledRound.Ranges, market => market.MarketType == "over" && market.IsWinner == false);
         Assert.Contains(settledRound.Ranges, market => market.MarketType == "exact" && market.IsWinner == false);
+    }
+
+    [Fact]
+    public async Task Void_CreatesNewCurrentRound_AndMarksPreviousAsVoid()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
+
+        var previousRound = await client.GetFromJsonAsync<Round>("/api/rounds/current");
+        Assert.NotNull(previousRound);
+
+        var voidResponse = await client.PostAsJsonAsync("/api/rounds/void", new
+        {
+            reason = "Stream indisponivel",
+        });
+        voidResponse.EnsureSuccessStatusCode();
+
+        var newCurrentRound = await voidResponse.Content.ReadFromJsonAsync<Round>();
+        var history = await client.GetFromJsonAsync<List<Round>>("/api/rounds/history");
+
+        Assert.NotNull(newCurrentRound);
+        Assert.NotEqual(previousRound.Id, newCurrentRound.Id);
+        Assert.Equal(RoundService.StatusOpen, newCurrentRound.Status);
+
+        Assert.NotNull(history);
+        var voidedRound = Assert.Single(history, r => r.Id == previousRound.Id);
+        Assert.Equal(RoundService.StatusVoid, voidedRound.Status);
+        Assert.Equal("Stream indisponivel", voidedRound.VoidReason);
+        Assert.NotNull(voidedRound.VoidedAt);
+        Assert.Null(voidedRound.FinalCount);
     }
 
     [Fact]
