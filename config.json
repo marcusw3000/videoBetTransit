@@ -14,6 +14,7 @@
     "truck": 7
   },
   "conf": 0.2,
+  "imgsz": 640,
   "line": {
     "x1": 600,
     "y1": 305,
@@ -32,7 +33,30 @@
   "snapshot_dir": "snapshots",
   "mjpeg_host": "0.0.0.0",
   "mjpeg_port": 8090,
+  "line_dead_zone_px": 8,
   "min_hits_to_count": 4,
   "max_track_history_age": 300,
-  "min_bbox_area": 100
+  "min_bbox_area": 100,
+  "class_thresholds": {
+    "car": {
+      "min_bbox_area": 140,
+      "min_hits_to_count": 4,
+      "min_confidence": 0.2
+    },
+    "motorcycle": {
+      "min_bbox_area": 80,
+      "min_hits_to_count": 5,
+      "min_confidence": 0.18
+    },
+    "bus": {
+      "min_bbox_area": 260,
+      "min_hits_to_count": 3,
+      "min_confidence": 0.22
+    },
+    "truck": {
+      "min_bbox_area": 220,
+      "min_hits_to_count": 3,
+      "min_confidence": 0.22
+    }
+  }
 }

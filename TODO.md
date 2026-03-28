@@ -402,11 +402,11 @@ Objetivo:
 - transformar ajuste empirico em calibracao guiada por evidencia
 
 Itens:
-- [ ] Testar `imgsz=640` ou maior para melhorar deteccao de veiculos pequenos.
+- [~] Testar `imgsz=640` ou maior para melhorar deteccao de veiculos pequenos.
 - [ ] Avaliar troca de `yolov8s.pt` para `yolov8m.pt` ou modelo fine-tunado por camera.
 - [ ] Ajustar `conf`, `min_hits_to_count` e `min_bbox_area` com base em erros reais da pista.
-- [ ] Adicionar thresholds de area por classe (`car`, `motorcycle`, `bus`, `truck`).
-- [ ] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
+- [x] Adicionar thresholds de area por classe (`car`, `motorcycle`, `bus`, `truck`).
+- [x] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
 - [ ] Avaliar filtros dependentes da posicao vertical/perspectiva da camera.
 - [ ] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia.
 

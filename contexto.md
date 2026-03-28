@@ -98,13 +98,16 @@ Configuracoes relevantes em `config.json`:
 - `tracker`: arquivo do tracker
 - `api_key`: chave usada para falar com o backend protegido
 - `mjpeg_token`: token exigido pelo endpoint MJPEG
+- `imgsz`: tamanho de inferencia do YOLO
 - `roi`: regiao de interesse
 - `line`: linha de contagem
+- `line_dead_zone_px`: banda de seguranca em torno da linha para reduzir dupla contagem por oscilacao
 - `count_direction`: `up`, `down` ou `any`
 - `show_window`: mostra janela OpenCV local
 - `save_snapshots`: salva recortes dos veiculos contados
 - `mjpeg_host`: host do servidor MJPEG
 - `mjpeg_port`: porta do servidor MJPEG
+- `class_thresholds`: thresholds especificos por classe para area minima, hits minimos e confianca minima
 
 Observacao importante:
 - o browser nao desenha mais overlay separado sobre HLS
@@ -115,6 +118,7 @@ Observacao importante:
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
 - `count-events` usa backlog curto com descarte explicito quando a fila enche
 - `live-detections` prioriza o frame mais recente quando a fila satura
+- a calibracao de deteccao agora aceita thresholds por classe e zona morta perto da linha
 
 ## Backend .NET
 

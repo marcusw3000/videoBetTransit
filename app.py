@@ -290,19 +290,26 @@ def crossed_horizontal_segment(
     x1: int,
     x2: int,
     direction: str,
+    dead_zone_px: int = 0,
 ) -> bool:
     inside_segment = min(x1, x2) <= cx <= max(x1, x2)
     if not inside_segment:
         return False
 
+    upper_band = line_y - dead_zone_px
+    lower_band = line_y + dead_zone_px
+
     if direction == "down":
-        return prev_y < line_y <= curr_y
+        return prev_y < upper_band and curr_y >= lower_band
 
     if direction == "up":
-        return prev_y > line_y >= curr_y
+        return prev_y > lower_band and curr_y <= upper_band
 
     if direction == "any":
-        return (prev_y < line_y <= curr_y) or (prev_y > line_y >= curr_y)
+        return (
+            (prev_y < upper_band and curr_y >= lower_band)
+            or (prev_y > lower_band and curr_y <= upper_band)
+        )
 
     return False
 
@@ -316,6 +323,7 @@ def should_count_track(
     hits: int,
     min_hits_to_count: int,
     already_counted: bool,
+    dead_zone_px: int = 0,
 ) -> bool:
     if prev_y is None or already_counted or hits < min_hits_to_count:
         return False
@@ -328,6 +336,7 @@ def should_count_track(
         x1=line["x1"],
         x2=line["x2"],
         direction=direction,
+        dead_zone_px=dead_zone_px,
     )
 
 
@@ -345,6 +354,20 @@ def build_class_names(allowed_classes: dict) -> dict[int, str]:
 
 def bbox_area(x1: int, y1: int, x2: int, y2: int) -> int:
     return max(0, x2 - x1) * max(0, y2 - y1)
+
+
+def get_class_thresholds(cfg: dict, vehicle_name: str) -> dict:
+    defaults = {
+        "min_bbox_area": int(cfg.get("min_bbox_area", 100)),
+        "min_hits_to_count": int(cfg.get("min_hits_to_count", 4)),
+        "min_confidence": float(cfg.get("conf", 0.2)),
+    }
+    thresholds = cfg.get("class_thresholds", {}).get(vehicle_name, {})
+    return {
+        "min_bbox_area": int(thresholds.get("min_bbox_area", defaults["min_bbox_area"])),
+        "min_hits_to_count": int(thresholds.get("min_hits_to_count", defaults["min_hits_to_count"])),
+        "min_confidence": float(thresholds.get("min_confidence", defaults["min_confidence"])),
+    }
 
 
 def annotate_frame(
@@ -859,9 +882,9 @@ def main():
     roi = cfg["roi"]
     line = cfg["line"]
     count_direction = cfg["count_direction"]
-    min_hits_to_count = int(cfg.get("min_hits_to_count", 4))
     max_track_history_age = int(cfg.get("max_track_history_age", 300))
-    min_bbox_area = int(cfg.get("min_bbox_area", 100))
+    line_dead_zone_px = int(cfg.get("line_dead_zone_px", 0))
+    imgsz = int(cfg.get("imgsz", 416))
     editor = None
     control_panel = None
 
@@ -898,7 +921,13 @@ def main():
         control_panel = EditorControlPanel(editor, save_editor_state)
         active_control_panel_ref = control_panel
 
-    logger.info("Iniciando contagem... | tracker: %s | conf: %s", cfg["tracker"], cfg["conf"])
+    logger.info(
+        "Iniciando contagem... | tracker: %s | conf: %s | imgsz: %s | dead-zone: %spx",
+        cfg["tracker"],
+        cfg["conf"],
+        imgsz,
+        line_dead_zone_px,
+    )
 
     fps_frame_count = 0
     fps_start_ts = time.time()
@@ -952,7 +981,7 @@ def main():
                 tracker=cfg["tracker"],
                 conf=cfg["conf"],
                 classes=list(cfg["allowed_classes"].values()),
-                imgsz=416,
+                imgsz=imgsz,
                 verbose=False,
             )
         except Exception as exc:
@@ -1012,10 +1041,15 @@ def main():
                 cls_id = int(cls_ids[i])
                 conf = float(confs[i])
 
-                if bbox_area(x1, y1, x2, y2) < min_bbox_area:
+                vehicle_name = class_names.get(cls_id, str(cls_id))
+                class_thresholds = get_class_thresholds(cfg, vehicle_name)
+
+                if conf < class_thresholds["min_confidence"]:
                     continue
 
-                vehicle_name = class_names.get(cls_id, str(cls_id))
+                if bbox_area(x1, y1, x2, y2) < class_thresholds["min_bbox_area"]:
+                    continue
+
                 cx, cy = anchor_point(x1, y1, x2, y2)
 
                 track_hits[track_id] = track_hits.get(track_id, 0) + 1
@@ -1036,8 +1070,9 @@ def main():
                         line=line,
                         direction=count_direction,
                         hits=track_hits.get(track_id, 0),
-                        min_hits_to_count=min_hits_to_count,
+                        min_hits_to_count=class_thresholds["min_hits_to_count"],
                         already_counted=track_id in counted_ids,
+                        dead_zone_px=line_dead_zone_px,
                     ):
                         counted_ids.add(track_id)
                         total += 1
