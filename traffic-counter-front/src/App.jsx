@@ -5,7 +5,6 @@ import RangeCard from './components/RangeCard'
 import HistoryCard from './components/HistoryCard'
 import VideoPlayer from './components/VideoPlayer'
 import DetectionsList from './components/DetectionsList'
-import CameraConfigPage from './pages/CameraConfigPage'
 import { getCurrentRound, getRoundHistory, settleRound } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { startOverlayConnection, stopOverlayConnection } from './services/overlaySignalr'
@@ -133,7 +132,6 @@ function MarketPage() {
           </div>
 
           <div className="hero-actions">
-            <a href="#/admin/config" className="secondary-button">Configurar</a>
             <button className="primary-button" onClick={handleSettle} disabled={isSettling}>
               {isSettling ? 'Encerrando...' : 'Encerrar / Novo Round'}
             </button>
@@ -191,17 +189,5 @@ function MarketPage() {
 }
 
 export default function App() {
-  const [page, setPage] = useState(window.location.hash)
-
-  useEffect(() => {
-    const onHashChange = () => setPage(window.location.hash)
-    window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
-  }, [])
-
-  if (page === '#/admin/config') {
-    return <CameraConfigPage />
-  }
-
   return <MarketPage />
 }

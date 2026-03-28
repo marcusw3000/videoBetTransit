@@ -4,6 +4,8 @@ import os
 import threading
 import time
 import atexit
+import tkinter as tk
+from tkinter import ttk
 from datetime import datetime, timezone
 
 import cv2
@@ -109,6 +111,7 @@ backend_client_ref: BackendClient | None = None
 mjpeg_token_ref: str = ""
 active_stream_ref = None
 active_mjpeg_server_ref = None
+active_control_panel_ref = None
 
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
@@ -236,7 +239,7 @@ def run_mjpeg_server(host: str = "0.0.0.0", port: int = 8090) -> MjpegServer:
 
 
 def cleanup_runtime():
-    global active_stream_ref, active_mjpeg_server_ref
+    global active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref
 
     if active_stream_ref is not None:
         active_stream_ref.release()
@@ -245,6 +248,10 @@ def cleanup_runtime():
     if active_mjpeg_server_ref is not None:
         active_mjpeg_server_ref.stop()
         active_mjpeg_server_ref = None
+
+    if active_control_panel_ref is not None:
+        active_control_panel_ref.close()
+        active_control_panel_ref = None
 
     cv2.destroyAllWindows()
 
@@ -257,6 +264,11 @@ atexit.register(cleanup_runtime)
 def load_config(path: str = "config.json") -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def save_config(path: str, cfg: dict):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
 
 
 def now() -> str:
@@ -396,6 +408,366 @@ def annotate_frame(
     return annotated
 
 
+class ConfigEditor:
+    HANDLE_RADIUS = 10
+    LINE_HIT_TOLERANCE = 12
+
+    def __init__(self, roi: dict, line: dict):
+        self.mode = "idle"
+        self.message = "R: ROI | L: line | S: save | C: cancel | Q: quit"
+        self.roi = dict(roi)
+        self.line = dict(line)
+        self._saved_roi = dict(roi)
+        self._saved_line = dict(line)
+        self._drag_action = None
+        self._drag_start = None
+        self._roi_start = None
+        self._line_start = None
+        self._frame_w = 0
+        self._frame_h = 0
+        self.dirty = False
+
+    def set_frame_size(self, width: int, height: int):
+        self._frame_w = width
+        self._frame_h = height
+
+    def sync_external_values(self, roi: dict, line: dict):
+        if self.dirty or self.mode != "idle":
+            return
+        self.roi = dict(roi)
+        self.line = dict(line)
+        self._saved_roi = dict(roi)
+        self._saved_line = dict(line)
+
+    def begin_roi_mode(self):
+        self.mode = "roi"
+        self._reset_drag()
+        self.message = "ROI mode: drag corners, drag inside to move, drag empty area to create"
+
+    def begin_line_mode(self):
+        self.mode = "line"
+        self._reset_drag()
+        self.message = "Line mode: drag endpoints, drag line to move, drag empty area to create"
+
+    def clear_mode(self):
+        self.mode = "idle"
+        self._reset_drag()
+        self.message = "Edit mode cleared"
+
+    def cancel(self):
+        self.mode = "idle"
+        self.roi = dict(self._saved_roi)
+        self.line = dict(self._saved_line)
+        self.dirty = False
+        self._reset_drag()
+        self.message = "Changes canceled"
+
+    def save(self, cfg: dict, path: str):
+        cfg["roi"] = dict(self.roi)
+        cfg["line"] = dict(self.line)
+        save_config(path, cfg)
+        self._saved_roi = dict(self.roi)
+        self._saved_line = dict(self.line)
+        self.dirty = False
+        self.mode = "idle"
+        self._reset_drag()
+        self.message = f"Saved to {path}"
+
+    def handle_mouse(self, event, x: int, y: int, _flags, _param):
+        x = clamp(x, 0, max(self._frame_w - 1, 0))
+        y = clamp(y, 0, max(self._frame_h - 1, 0))
+
+        if self.mode == "roi":
+            self._handle_roi_mouse(event, x, y)
+        elif self.mode == "line":
+            self._handle_line_mouse(event, x, y)
+
+    def draw_overlay(self, frame):
+        cv2.putText(
+            frame,
+            f"EDIT: {self.mode.upper()}",
+            (30, 85),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 255),
+            2,
+        )
+        cv2.putText(
+            frame,
+            self.message[:90],
+            (30, 115),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            1,
+        )
+
+        for hx, hy in self._roi_handles():
+            cv2.circle(frame, (hx, hy), 6, (255, 255, 0), -1)
+
+        cv2.circle(frame, (self.line["x1"], self.line["y1"]), 7, (0, 0, 255), -1)
+        cv2.circle(frame, (self.line["x2"], self.line["y2"]), 7, (0, 0, 255), -1)
+
+    def _handle_roi_mouse(self, event, x: int, y: int):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            handle = self._hit_test_roi_handle(x, y)
+            if handle is not None:
+                self._drag_action = ("roi_handle", handle)
+            elif self._point_in_roi(x, y, self.roi):
+                self._drag_action = ("roi_move", None)
+            else:
+                self._drag_action = ("roi_new", None)
+                self.roi = {"x": x, "y": y, "w": 0, "h": 0}
+            self._drag_start = (x, y)
+            self._roi_start = dict(self.roi)
+            return
+
+        if event == cv2.EVENT_MOUSEMOVE and self._drag_action and self._drag_start:
+            start_x, start_y = self._drag_start
+            action, handle = self._drag_action
+            if action == "roi_new":
+                self.roi = self._normalize_roi(
+                    {"x": start_x, "y": start_y, "w": x - start_x, "h": y - start_y}
+                )
+            elif action == "roi_move" and self._roi_start is not None:
+                dx = x - start_x
+                dy = y - start_y
+                self.roi = self._clamp_roi(
+                    {
+                        "x": self._roi_start["x"] + dx,
+                        "y": self._roi_start["y"] + dy,
+                        "w": self._roi_start["w"],
+                        "h": self._roi_start["h"],
+                    }
+                )
+            elif action == "roi_handle" and handle and self._roi_start is not None:
+                self.roi = self._resize_roi(handle, x, y, self._roi_start)
+            self.dirty = True
+            return
+
+        if event == cv2.EVENT_LBUTTONUP:
+            self.roi = self._clamp_roi(self._normalize_roi(self.roi))
+            self._reset_drag()
+            self.message = "ROI updated. Press S to save or C to cancel"
+
+    def _handle_line_mouse(self, event, x: int, y: int):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            handle = self._hit_test_line_handle(x, y)
+            if handle is not None:
+                self._drag_action = ("line_handle", handle)
+            elif self._point_near_line(x, y):
+                self._drag_action = ("line_move", None)
+            else:
+                self._drag_action = ("line_new", None)
+                self.line = {"x1": x, "y1": y, "x2": x, "y2": y}
+            self._drag_start = (x, y)
+            self._line_start = dict(self.line)
+            return
+
+        if event == cv2.EVENT_MOUSEMOVE and self._drag_action and self._drag_start:
+            start_x, start_y = self._drag_start
+            action, handle = self._drag_action
+            if action == "line_new" and self._line_start is not None:
+                self.line = {
+                    "x1": self._line_start["x1"],
+                    "y1": self._line_start["y1"],
+                    "x2": x,
+                    "y2": y,
+                }
+            elif action == "line_move" and self._line_start is not None:
+                dx = x - start_x
+                dy = y - start_y
+                self.line = self._clamp_line(
+                    {
+                        "x1": self._line_start["x1"] + dx,
+                        "y1": self._line_start["y1"] + dy,
+                        "x2": self._line_start["x2"] + dx,
+                        "y2": self._line_start["y2"] + dy,
+                    }
+                )
+            elif action == "line_handle" and handle and self._line_start is not None:
+                next_line = dict(self._line_start)
+                next_line[handle] = x
+                next_line["y" + handle[1]] = y
+                self.line = self._clamp_line(next_line)
+            self.dirty = True
+            return
+
+        if event == cv2.EVENT_LBUTTONUP:
+            self.line = self._clamp_line(self.line)
+            self._reset_drag()
+            self.message = "Line updated. Press S to save or C to cancel"
+
+    def _roi_handles(self) -> list[tuple[int, int]]:
+        return [
+            (self.roi["x"], self.roi["y"]),
+            (self.roi["x"] + self.roi["w"], self.roi["y"]),
+            (self.roi["x"], self.roi["y"] + self.roi["h"]),
+            (self.roi["x"] + self.roi["w"], self.roi["y"] + self.roi["h"]),
+        ]
+
+    def _hit_test_roi_handle(self, x: int, y: int) -> str | None:
+        labels = ["tl", "tr", "bl", "br"]
+        for label, (hx, hy) in zip(labels, self._roi_handles()):
+            if abs(x - hx) <= self.HANDLE_RADIUS and abs(y - hy) <= self.HANDLE_RADIUS:
+                return label
+        return None
+
+    def _hit_test_line_handle(self, x: int, y: int) -> str | None:
+        if abs(x - self.line["x1"]) <= self.HANDLE_RADIUS and abs(y - self.line["y1"]) <= self.HANDLE_RADIUS:
+            return "x1"
+        if abs(x - self.line["x2"]) <= self.HANDLE_RADIUS and abs(y - self.line["y2"]) <= self.HANDLE_RADIUS:
+            return "x2"
+        return None
+
+    def _point_in_roi(self, x: int, y: int, roi: dict) -> bool:
+        return roi["x"] <= x <= roi["x"] + roi["w"] and roi["y"] <= y <= roi["y"] + roi["h"]
+
+    def _point_near_line(self, x: int, y: int) -> bool:
+        x1 = self.line["x1"]
+        y1 = self.line["y1"]
+        x2 = self.line["x2"]
+        y2 = self.line["y2"]
+        dx = x2 - x1
+        dy = y2 - y1
+        if dx == 0 and dy == 0:
+            return abs(x - x1) <= self.LINE_HIT_TOLERANCE and abs(y - y1) <= self.LINE_HIT_TOLERANCE
+        t = ((x - x1) * dx + (y - y1) * dy) / float(dx * dx + dy * dy)
+        t = max(0.0, min(1.0, t))
+        proj_x = x1 + t * dx
+        proj_y = y1 + t * dy
+        return ((x - proj_x) ** 2 + (y - proj_y) ** 2) ** 0.5 <= self.LINE_HIT_TOLERANCE
+
+    def _normalize_roi(self, roi: dict) -> dict:
+        x1 = roi["x"]
+        y1 = roi["y"]
+        x2 = roi["x"] + roi["w"]
+        y2 = roi["y"] + roi["h"]
+        left = min(x1, x2)
+        top = min(y1, y2)
+        right = max(x1, x2)
+        bottom = max(y1, y2)
+        return {"x": left, "y": top, "w": right - left, "h": bottom - top}
+
+    def _clamp_roi(self, roi: dict) -> dict:
+        roi = dict(roi)
+        roi["w"] = max(0, roi["w"])
+        roi["h"] = max(0, roi["h"])
+        roi["x"] = clamp(roi["x"], 0, max(self._frame_w - roi["w"], 0))
+        roi["y"] = clamp(roi["y"], 0, max(self._frame_h - roi["h"], 0))
+        roi["w"] = min(roi["w"], max(self._frame_w - roi["x"], 0))
+        roi["h"] = min(roi["h"], max(self._frame_h - roi["y"], 0))
+        return roi
+
+    def _resize_roi(self, handle: str, x: int, y: int, base_roi: dict) -> dict:
+        left = base_roi["x"]
+        top = base_roi["y"]
+        right = base_roi["x"] + base_roi["w"]
+        bottom = base_roi["y"] + base_roi["h"]
+
+        if "l" in handle:
+            left = x
+        else:
+            right = x
+
+        if "t" in handle:
+            top = y
+        else:
+            bottom = y
+
+        return self._clamp_roi(
+            self._normalize_roi(
+                {"x": left, "y": top, "w": right - left, "h": bottom - top}
+            )
+        )
+
+    def _clamp_line(self, line: dict) -> dict:
+        return {
+            "x1": clamp(line["x1"], 0, max(self._frame_w - 1, 0)),
+            "y1": clamp(line["y1"], 0, max(self._frame_h - 1, 0)),
+            "x2": clamp(line["x2"], 0, max(self._frame_w - 1, 0)),
+            "y2": clamp(line["y2"], 0, max(self._frame_h - 1, 0)),
+        }
+
+    def _reset_drag(self):
+        self._drag_action = None
+        self._drag_start = None
+        self._roi_start = None
+        self._line_start = None
+
+
+class EditorControlPanel:
+    def __init__(self, editor: ConfigEditor, cfg: dict, config_path: str):
+        self.editor = editor
+        self.cfg = cfg
+        self.config_path = config_path
+        self.should_close = False
+        self._root = tk.Tk()
+        self._root.title("Controles de Configuracao")
+        self._root.resizable(False, False)
+        self._root.protocol("WM_DELETE_WINDOW", self.request_close)
+
+        frame = ttk.Frame(self._root, padding=12)
+        frame.grid(row=0, column=0, sticky="nsew")
+
+        ttk.Label(frame, text="Ajuste de ROI e Linha", font=("Segoe UI", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+
+        ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
+            row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
+            row=1, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(frame, text="Salvar", command=self.save).grid(
+            row=2, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
+            row=2, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(frame, text="Fechar", command=self.request_close).grid(
+            row=3, column=0, columnspan=2, sticky="ew"
+        )
+
+        self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
+        self._message_var = tk.StringVar(value=self.editor.message)
+        ttk.Label(frame, textvariable=self._mode_var).grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=(10, 0)
+        )
+        ttk.Label(frame, textvariable=self._message_var, wraplength=260).grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(4, 0)
+        )
+
+        ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, Q").grid(
+            row=6, column=0, columnspan=2, sticky="w", pady=(10, 0)
+        )
+
+    def refresh(self):
+        self._mode_var.set(f"Modo: {self.editor.mode}")
+        self._message_var.set(self.editor.message)
+        try:
+            self._root.update_idletasks()
+            self._root.update()
+        except tk.TclError:
+            self.should_close = True
+
+    def save(self):
+        self.editor.save(self.cfg, self.config_path)
+
+    def cancel(self):
+        self.editor.cancel()
+
+    def request_close(self):
+        self.should_close = True
+
+    def close(self):
+        try:
+            self._root.destroy()
+        except tk.TclError:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Stream com reconexão automática
 # ---------------------------------------------------------------------------
@@ -450,12 +822,14 @@ class StreamCapture:
 # ---------------------------------------------------------------------------
 LIVE_SEND_INTERVAL = 0.2
 CONFIG_POLL_INTERVAL = 10
+WINDOW_NAME = "Traffic Counter"
 
 
 def main():
-    global backend_client_ref, mjpeg_token_ref, active_stream_ref, active_mjpeg_server_ref
+    global backend_client_ref, mjpeg_token_ref, active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref
 
-    cfg = load_config()
+    config_path = "config.json"
+    cfg = load_config(config_path)
 
     os.makedirs(cfg["snapshot_dir"], exist_ok=True)
 
@@ -489,6 +863,15 @@ def main():
     min_hits_to_count = int(cfg.get("min_hits_to_count", 4))
     max_track_history_age = int(cfg.get("max_track_history_age", 300))
     min_bbox_area = int(cfg.get("min_bbox_area", 100))
+    editor = None
+    control_panel = None
+
+    if cfg.get("show_window", True):
+        editor = ConfigEditor(roi, line)
+        cv2.namedWindow(WINDOW_NAME)
+        cv2.setMouseCallback(WINDOW_NAME, lambda event, x, y, flags, param: editor.handle_mouse(event, x, y, flags, param))
+        control_panel = EditorControlPanel(editor, cfg, config_path)
+        active_control_panel_ref = control_panel
 
     logger.info("Iniciando contagem... | tracker: %s | conf: %s", cfg["tracker"], cfg["conf"])
 
@@ -513,7 +896,7 @@ def main():
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
             last_config_poll = now_ts
             admin_cfg = backend.fetch_camera_config(cfg["camera_id"])
-            if admin_cfg:
+            if admin_cfg and (editor is None or (editor.mode == "idle" and not editor.dirty)):
                 if admin_cfg.get("roi"):
                     roi = admin_cfg["roi"]
 
@@ -533,6 +916,8 @@ def main():
                     line,
                     count_direction,
                 )
+                if editor is not None:
+                    editor.sync_external_values(roi, line)
 
         inference_start = time.perf_counter()
         try:
@@ -554,6 +939,12 @@ def main():
         h, w = frame.shape[:2]
         line_y = line["y1"]
         detections_list = []
+
+        if editor is not None:
+            editor.set_frame_size(w, h)
+            roi = dict(editor.roi)
+            line = dict(editor.line)
+            line_y = line["y1"]
 
         boxes = results[0].boxes
 
@@ -729,12 +1120,34 @@ def main():
                 counted_ids.discard(tid)
 
         stream_annotated = annotate_frame(frame, roi, line, detections_list, total)
+        if editor is not None:
+            editor.draw_overlay(stream_annotated)
         runtime_stats.record_processed_frame(total)
         streamer.update(stream_annotated)
 
         if cfg.get("show_window", True):
-            cv2.imshow("Traffic Counter", stream_annotated)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            if control_panel is not None:
+                control_panel.refresh()
+                if control_panel.should_close:
+                    break
+
+            cv2.imshow(WINDOW_NAME, stream_annotated)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("r") and editor is not None:
+                editor.begin_roi_mode()
+            elif key == ord("l") and editor is not None:
+                editor.begin_line_mode()
+            elif key == ord("s") and editor is not None:
+                editor.save(cfg, config_path)
+                roi = dict(editor.roi)
+                line = dict(editor.line)
+            elif key == ord("c") and editor is not None:
+                editor.cancel()
+                roi = dict(editor.roi)
+                line = dict(editor.line)
+            elif key == 27 and editor is not None:
+                editor.clear_mode()
+            elif key == ord("q"):
                 break
             continue
 
