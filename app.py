@@ -697,10 +697,9 @@ class ConfigEditor:
 
 
 class EditorControlPanel:
-    def __init__(self, editor: ConfigEditor, cfg: dict, config_path: str):
+    def __init__(self, editor: ConfigEditor, on_save):
         self.editor = editor
-        self.cfg = cfg
-        self.config_path = config_path
+        self.on_save = on_save
         self.should_close = False
         self._root = tk.Tk()
         self._root.title("Controles de Configuracao")
@@ -753,7 +752,7 @@ class EditorControlPanel:
             self.should_close = True
 
     def save(self):
-        self.editor.save(self.cfg, self.config_path)
+        self.on_save()
 
     def cancel(self):
         self.editor.cancel()
@@ -866,11 +865,37 @@ def main():
     editor = None
     control_panel = None
 
+    def save_editor_state():
+        nonlocal roi, line
+
+        if editor is None:
+            return
+
+        editor.save(cfg, config_path)
+        roi = dict(editor.roi)
+        line = dict(editor.line)
+
+        saved_backend = backend.save_camera_config(
+            camera_id=cfg["camera_id"],
+            roi=roi,
+            line={
+                "x1": line["x1"],
+                "y1": line["y1"],
+                "x2": line["x2"],
+                "y2": line["y2"],
+            },
+            count_direction=count_direction,
+        )
+        if saved_backend:
+            editor.message = f"Saved locally and synced to backend ({cfg['camera_id']})"
+        else:
+            editor.message = "Saved locally, but backend sync failed"
+
     if cfg.get("show_window", True):
         editor = ConfigEditor(roi, line)
         cv2.namedWindow(WINDOW_NAME)
         cv2.setMouseCallback(WINDOW_NAME, lambda event, x, y, flags, param: editor.handle_mouse(event, x, y, flags, param))
-        control_panel = EditorControlPanel(editor, cfg, config_path)
+        control_panel = EditorControlPanel(editor, save_editor_state)
         active_control_panel_ref = control_panel
 
     logger.info("Iniciando contagem... | tracker: %s | conf: %s", cfg["tracker"], cfg["conf"])
@@ -1138,9 +1163,7 @@ def main():
             elif key == ord("l") and editor is not None:
                 editor.begin_line_mode()
             elif key == ord("s") and editor is not None:
-                editor.save(cfg, config_path)
-                roi = dict(editor.roi)
-                line = dict(editor.line)
+                save_editor_state()
             elif key == ord("c") and editor is not None:
                 editor.cancel()
                 roi = dict(editor.roi)

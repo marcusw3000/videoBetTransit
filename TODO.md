@@ -321,11 +321,13 @@ Entregavel esperado:
 - Historico mais exploravel.
 
 ### 16. Editor visual de ROI e linha
-- [ ] Permitir ajustar ROI no painel.
-- [ ] Permitir ajustar linha de contagem no painel.
-- [ ] Mostrar preview ao vivo.
-- [ ] Persistir as configuracoes no backend.
-- [ ] Aplicar configuracoes sem reiniciar a engine.
+- [x] Permitir ajustar ROI no proprio Python por arraste.
+- [x] Permitir ajustar linha de contagem no proprio Python por arraste.
+- [x] Mostrar preview ao vivo na janela OpenCV.
+- [x] Persistir as configuracoes em `config.json`.
+- [x] Persistir as configuracoes tambem no backend.
+- [x] Aplicar configuracoes sem reiniciar a engine.
+- [x] Adicionar janela de controle com botoes no executavel Python.
 
 Objetivo:
 - Reduzir atrito na calibracao da camera.
@@ -393,7 +395,7 @@ Entregavel esperado:
 ### Fase 5 - Produto
 - [ ] Dashboard operacional
 - [ ] Historico avancado
-- [ ] Editor visual de ROI/linha
+- [~] Editor visual de ROI/linha
 - [ ] Alertas
 
 ---

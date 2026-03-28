@@ -20,7 +20,6 @@ Backend .NET 8
 Frontend React
   - consome REST e SignalR do backend
   - exibe o feed MJPEG anotado vindo do Python
-  - envia API key nas acoes administrativas
   - mostra contador, timer, faixas e historico
 ```
 
@@ -81,6 +80,7 @@ Responsabilidades principais:
 - rodar YOLO e tracker
 - filtrar por ROI
 - contar cruzamento da linha
+- permitir calibrar ROI e linha por arraste na propria janela Python
 - salvar snapshots opcionais
 - enviar `count-events` e `live-detections`
 - servir `/health` e `/video_feed` via Flask, publicados por `waitress`
@@ -105,6 +105,7 @@ Observacao importante:
 - isso evita o atraso visual entre video e boxes
 - o feed MJPEG pode exigir `token` na query string
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
+- a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
 
 ## Backend .NET
 
@@ -144,10 +145,9 @@ Fluxo atual:
 
 Observacao:
 - `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
-- a tela de configuracao tambem usa preview MJPEG
-- `VITE_BACKEND_API_KEY` protege chamadas administrativas do frontend
 - `VITE_MJPEG_TOKEN` e anexado ao feed no browser
-- `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL`, `VITE_BACKEND_API_KEY`, `VITE_MJPEG_URL` e `VITE_MJPEG_TOKEN` devem ser definidos por ambiente
+- o frontend nao possui mais tela de configuracao de ROI/linha
+- `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL`, `VITE_MJPEG_URL` e `VITE_MJPEG_TOKEN` devem ser definidos por ambiente
 - `hls.js` foi removido do fluxo principal
 
 ## Ambientes

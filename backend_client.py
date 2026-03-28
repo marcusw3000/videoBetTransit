@@ -75,6 +75,52 @@ class BackendClient:
             logger.warning("[BACKEND] Erro ao buscar configuracao da camera %s: %s", camera_id, exc)
             return None
 
+    def save_camera_config(
+        self,
+        camera_id: str,
+        roi: dict,
+        line: dict,
+        count_direction: str,
+    ) -> bool:
+        payload = {
+            "cameraId": camera_id,
+            "roi": roi,
+            "countLine": line,
+            "countDirection": count_direction,
+        }
+        try:
+            resp = self._session.post(
+                f"{self.camera_config_url}/{camera_id}",
+                json=payload,
+                headers=self._default_headers,
+                timeout=5,
+            )
+            if resp.status_code < 400:
+                self._mark_success()
+                return True
+
+            self._mark_error(
+                f"save camera config HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+            logger.warning(
+                "[BACKEND] Falha ao salvar configuracao da camera %s (HTTP %d)",
+                camera_id,
+                resp.status_code,
+            )
+            return False
+        except requests.Timeout:
+            self._mark_error(f"timeout saving camera config for {camera_id}")
+            logger.warning("[BACKEND] Timeout ao salvar configuracao da camera %s", camera_id)
+            return False
+        except requests.ConnectionError:
+            self._mark_error(f"connection error saving camera config for {camera_id}")
+            logger.warning("[BACKEND] Sem conexao ao salvar configuracao da camera %s", camera_id)
+            return False
+        except Exception as exc:
+            self._mark_error(f"unexpected save_camera_config error: {exc}")
+            logger.warning("[BACKEND] Erro ao salvar configuracao da camera %s: %s", camera_id, exc)
+            return False
+
     def send_count_event(self, payload: dict):
         if not self._count_sem.acquire(blocking=False):
             self._increment_stat("countDropped")
