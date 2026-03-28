@@ -396,6 +396,8 @@ Itens:
 - [ ] Revisar consumo de CPU do encode JPEG.
 - [ ] Avaliar reduzir resolucao ou `imgsz` dinamicamente por camera.
 - [ ] Medir gargalos de MJPEG em ambiente real com camera e navegador conectados.
+- [x] Instrumentar a engine para expor latencia interna basica da pipeline (`capture -> annotate -> encode`).
+- [ ] Medir diferenca percebida entre stream original e stream anotado em ambiente real.
 
 Definicao de pronto:
 - existe uma medicao comparativa antes/depois

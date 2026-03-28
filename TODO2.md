@@ -54,6 +54,7 @@ Entregavel:
 - [ ] Definir trusted origins, CSP e frame policy
 - [ ] Definir rollout controlado por operador
 - [ ] Definir monitoracao, alertas e runbooks
+- [ ] Definir estrategia final de latencia e transparencia para o cliente final.
 
 Entregavel:
 - plano de entrada em producao regulada

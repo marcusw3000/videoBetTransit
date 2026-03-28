@@ -71,9 +71,10 @@ Foco:
 - otimizar sem quebrar a janela Python
 
 Itens:
-- [ ] medir latencia e FPS do estado base
+- [~] medir latencia e FPS do estado base
 - [ ] otimizar encode/configuracao primeiro
 - [ ] testar mudancas mais profundas em branch separada
+- [ ] comparar stream original vs stream anotado e decidir diretriz de produto para o cliente final
 
 Gate:
 - video mais fluido sem perda de estabilidade

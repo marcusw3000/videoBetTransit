@@ -31,6 +31,7 @@ class RuntimeStats:
         self._lock = threading.Lock()
         self._started_at = time.time()
         self._frames_processed = 0
+        self._last_capture_at = None
         self._last_frame_at = None
         self._fps_instant = 0.0
         self._fps_average = 0.0
@@ -38,11 +39,17 @@ class RuntimeStats:
         self._avg_inference_ms = 0.0
         self._last_jpeg_encode_ms = 0.0
         self._avg_jpeg_encode_ms = 0.0
+        self._last_pipeline_ms = 0.0
+        self._avg_pipeline_ms = 0.0
         self._mjpeg_clients = 0
         self._stream_connected = False
         self._stream_failures = 0
         self._last_stream_error_at = None
         self._total_count = 0
+
+    def record_capture(self, captured_at: float):
+        with self._lock:
+            self._last_capture_at = captured_at
 
     def record_processed_frame(self, total_count: int):
         now_ts = time.time()
@@ -70,6 +77,12 @@ class RuntimeStats:
             n = self._frames_processed or 1
             self._avg_jpeg_encode_ms += (duration_ms - self._avg_jpeg_encode_ms) / n
 
+    def record_pipeline_ms(self, duration_ms: float):
+        with self._lock:
+            self._last_pipeline_ms = duration_ms
+            n = self._frames_processed or 1
+            self._avg_pipeline_ms += (duration_ms - self._avg_pipeline_ms) / n
+
     def set_stream_status(self, connected: bool, failures: int):
         with self._lock:
             self._stream_connected = connected
@@ -96,9 +109,12 @@ class RuntimeStats:
                 "avgInferenceMs": round(self._avg_inference_ms, 2),
                 "lastJpegEncodeMs": round(self._last_jpeg_encode_ms, 2),
                 "avgJpegEncodeMs": round(self._avg_jpeg_encode_ms, 2),
+                "lastPipelineMs": round(self._last_pipeline_ms, 2),
+                "avgPipelineMs": round(self._avg_pipeline_ms, 2),
                 "mjpegClients": self._mjpeg_clients,
                 "streamConnected": self._stream_connected,
                 "streamFailures": self._stream_failures,
+                "lastCaptureAt": self._last_capture_at,
                 "lastFrameAt": self._last_frame_at,
                 "lastStreamErrorAt": self._last_stream_error_at,
                 "totalCount": self._total_count,
@@ -273,6 +289,19 @@ def save_config(path: str, cfg: dict):
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_ffmpeg_capture_options(options) -> str:
+    if isinstance(options, str):
+        return options.strip()
+
+    if isinstance(options, dict):
+        parts = []
+        for key, value in options.items():
+            parts.append(f"{key};{value}")
+        return "|".join(parts)
+
+    return ""
 
 
 def inside_roi(cx: int, cy: int, roi: dict) -> bool:
@@ -773,19 +802,51 @@ class EditorControlPanel:
 class StreamCapture:
     MAX_FAILURES = 30
 
-    def __init__(self, url: str, stats: RuntimeStats | None = None):
+    def __init__(
+        self,
+        url: str,
+        stats: RuntimeStats | None = None,
+        *,
+        ffmpeg_options=None,
+        buffer_size: int = 1,
+        open_timeout_ms: int = 5000,
+        read_timeout_ms: int = 5000,
+    ):
         self.url = url
         self.stats = stats
         self.cap: cv2.VideoCapture | None = None
         self._fail_count = 0
+        self.ffmpeg_options = normalize_ffmpeg_capture_options(ffmpeg_options)
+        self.buffer_size = max(1, int(buffer_size))
+        self.open_timeout_ms = max(0, int(open_timeout_ms))
+        self.read_timeout_ms = max(0, int(read_timeout_ms))
         self._connect()
 
     def _connect(self):
         if self.cap is not None:
             self.cap.release()
 
+        if self.ffmpeg_options:
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = self.ffmpeg_options
+
         logger.info("Conectando ao stream: %s", self.url)
+        if self.ffmpeg_options:
+            logger.info("FFmpeg capture options: %s", self.ffmpeg_options)
         self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
+        except Exception:
+            pass
+        try:
+            if self.open_timeout_ms > 0:
+                self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.open_timeout_ms)
+        except Exception:
+            pass
+        try:
+            if self.read_timeout_ms > 0:
+                self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.read_timeout_ms)
+        except Exception:
+            pass
         self._fail_count = 0
         if self.stats is not None:
             self.stats.set_stream_status(self.cap.isOpened(), self._fail_count)
@@ -836,7 +897,14 @@ def main():
     backend = BackendClient(cfg["backend_url"], cfg["api_key"])
     backend_client_ref = backend
     mjpeg_token_ref = str(cfg.get("mjpeg_token", "")).strip()
-    stream = StreamCapture(cfg["stream_url"], stats=runtime_stats)
+    stream = StreamCapture(
+        cfg["stream_url"],
+        stats=runtime_stats,
+        ffmpeg_options=cfg.get("ffmpeg_capture_options"),
+        buffer_size=int(cfg.get("stream_buffer_size", 1)),
+        open_timeout_ms=int(cfg.get("stream_open_timeout_ms", 5000)),
+        read_timeout_ms=int(cfg.get("stream_read_timeout_ms", 5000)),
+    )
     active_stream_ref = stream
     mjpeg_server = run_mjpeg_server(
         host=cfg.get("mjpeg_host", "0.0.0.0"),
@@ -862,6 +930,7 @@ def main():
     min_hits_to_count = int(cfg.get("min_hits_to_count", 4))
     max_track_history_age = int(cfg.get("max_track_history_age", 300))
     min_bbox_area = int(cfg.get("min_bbox_area", 100))
+    imgsz = int(cfg.get("imgsz", 416))
     editor = None
     control_panel = None
 
@@ -898,7 +967,12 @@ def main():
         control_panel = EditorControlPanel(editor, save_editor_state)
         active_control_panel_ref = control_panel
 
-    logger.info("Iniciando contagem... | tracker: %s | conf: %s", cfg["tracker"], cfg["conf"])
+    logger.info(
+        "Iniciando contagem... | tracker: %s | conf: %s | imgsz: %s",
+        cfg["tracker"],
+        cfg["conf"],
+        imgsz,
+    )
 
     fps_frame_count = 0
     fps_start_ts = time.time()
@@ -909,6 +983,8 @@ def main():
             if frame_count == 0:
                 logger.warning("Nenhum frame recebido ainda do stream...")
             continue
+        captured_at = time.time()
+        runtime_stats.record_capture(captured_at)
 
         frame_count += 1
 
@@ -952,7 +1028,7 @@ def main():
                 tracker=cfg["tracker"],
                 conf=cfg["conf"],
                 classes=list(cfg["allowed_classes"].values()),
-                imgsz=416,
+                imgsz=imgsz,
                 verbose=False,
             )
         except Exception as exc:
@@ -980,10 +1056,11 @@ def main():
             snapshot = runtime_stats.snapshot(backend.get_health_snapshot())
             logger.info("FPS médio: %.1f | Total contado: %d", fps_frame_count / elapsed if elapsed > 0 else 0, total)
             logger.info(
-                "FPS inst: %.1f | inferencia media: %.1f ms | JPEG medio: %.1f ms | MJPEG clientes: %d | live descartados: %d",
+                "FPS inst: %.1f | inferencia media: %.1f ms | JPEG medio: %.1f ms | pipeline media: %.1f ms | MJPEG clientes: %d | live descartados: %d",
                 snapshot["fpsInstant"],
                 snapshot["avgInferenceMs"],
                 snapshot["avgJpegEncodeMs"],
+                snapshot["avgPipelineMs"],
                 snapshot["mjpegClients"],
                 snapshot["backend"].get("liveDropped", 0),
             )
@@ -1149,6 +1226,7 @@ def main():
             editor.draw_overlay(stream_annotated)
         runtime_stats.record_processed_frame(total)
         streamer.update(stream_annotated)
+        runtime_stats.record_pipeline_ms((time.time() - captured_at) * 1000)
 
         if cfg.get("show_window", True):
             if control_panel is not None:
