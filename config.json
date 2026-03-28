@@ -31,6 +31,7 @@
   "show_window": true,
   "save_snapshots": true,
   "snapshot_dir": "snapshots",
+  "calibration_review_dir": "calibration_review",
   "mjpeg_host": "0.0.0.0",
   "mjpeg_port": 8090,
   "line_dead_zone_px": 8,

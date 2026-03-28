@@ -105,6 +105,7 @@ Configuracoes relevantes em `config.json`:
 - `count_direction`: `up`, `down` ou `any`
 - `show_window`: mostra janela OpenCV local
 - `save_snapshots`: salva recortes dos veiculos contados
+- `calibration_review_dir`: diretorio para salvar casos manuais de calibracao
 - `mjpeg_host`: host do servidor MJPEG
 - `mjpeg_port`: porta do servidor MJPEG
 - `class_thresholds`: thresholds especificos por classe para area minima, hits minimos e confianca minima
@@ -119,6 +120,7 @@ Observacao importante:
 - `count-events` usa backlog curto com descarte explicito quando a fila enche
 - `live-detections` prioriza o frame mais recente quando a fila satura
 - a calibracao de deteccao agora aceita thresholds por classe e zona morta perto da linha
+- pressionar `E` na janela OpenCV salva um caso manual de calibracao com imagem anotada e manifesto `jsonl`
 
 ## Backend .NET
 

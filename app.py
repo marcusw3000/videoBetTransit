@@ -271,6 +271,14 @@ def save_config(path: str, cfg: dict):
         json.dump(cfg, f, indent=2)
 
 
+def append_jsonl(path: str, payload: dict):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -368,6 +376,47 @@ def get_class_thresholds(cfg: dict, vehicle_name: str) -> dict:
         "min_hits_to_count": int(thresholds.get("min_hits_to_count", defaults["min_hits_to_count"])),
         "min_confidence": float(thresholds.get("min_confidence", defaults["min_confidence"])),
     }
+
+
+def save_calibration_case(
+    cfg: dict,
+    *,
+    frame,
+    case_type: str,
+    frame_id: int,
+    total_count: int,
+    detections_list: list[dict],
+    roi: dict,
+    line: dict,
+    extra: dict | None = None,
+) -> str:
+    review_dir = cfg.get("calibration_review_dir", "calibration_review")
+    os.makedirs(review_dir, exist_ok=True)
+
+    image_name = f"{case_type}_{frame_id}_{int(time.time() * 1000)}.jpg"
+    image_path = os.path.join(review_dir, image_name)
+    cv2.imwrite(image_path, frame)
+
+    append_jsonl(
+        os.path.join(review_dir, "cases.jsonl"),
+        {
+            "savedAt": now(),
+            "caseType": case_type,
+            "cameraId": cfg.get("camera_id"),
+            "frameId": frame_id,
+            "totalCount": total_count,
+            "imagePath": image_path,
+            "roi": roi,
+            "line": line,
+            "countDirection": cfg.get("count_direction"),
+            "imgsz": cfg.get("imgsz"),
+            "conf": cfg.get("conf"),
+            "lineDeadZonePx": cfg.get("line_dead_zone_px", 0),
+            "detections": detections_list,
+            "extra": extra or {},
+        },
+    )
+    return image_path
 
 
 def annotate_frame(
@@ -1197,6 +1246,23 @@ def main():
                 editor.begin_roi_mode()
             elif key == ord("l") and editor is not None:
                 editor.begin_line_mode()
+            elif key == ord("e"):
+                try:
+                    saved_case = save_calibration_case(
+                        cfg,
+                        frame=stream_annotated,
+                        case_type="manual_review",
+                        frame_id=frame_count,
+                        total_count=total,
+                        detections_list=detections_list,
+                        roi=roi,
+                        line=line,
+                    )
+                    logger.info("Caso de calibracao salvo em %s", saved_case)
+                    if editor is not None:
+                        editor.message = f"Calibration case saved ({os.path.basename(saved_case)})"
+                except Exception as exc:
+                    logger.warning("Falha ao salvar caso de calibracao: %s", exc)
             elif key == ord("s") and editor is not None:
                 save_editor_state()
             elif key == ord("c") and editor is not None:

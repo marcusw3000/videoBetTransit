@@ -396,6 +396,11 @@ Definicao de pronto:
 Prioridade:
 - `P1`
 
+Observacao critica:
+- esta trilha e obrigatoria antes de considerar o projeto `100% concluido`
+- a calibracao com evidencias reais da pista deve acontecer antes do fechamento final do TODO
+- nao considerar o TODO encerrado apenas com thresholds configurados; e necessario validar em operacao real
+
 Objetivo:
 - aumentar precisao da contagem
 - reduzir falso positivo, falso negativo e dupla contagem
@@ -404,16 +409,17 @@ Objetivo:
 Itens:
 - [~] Testar `imgsz=640` ou maior para melhorar deteccao de veiculos pequenos.
 - [ ] Avaliar troca de `yolov8s.pt` para `yolov8m.pt` ou modelo fine-tunado por camera.
-- [ ] Ajustar `conf`, `min_hits_to_count` e `min_bbox_area` com base em erros reais da pista.
+- [ ] Ajustar `conf`, `min_hits_to_count` e `min_bbox_area` com base em erros reais da pista. `EXTREMAMENTE NECESSARIO`
 - [x] Adicionar thresholds de area por classe (`car`, `motorcycle`, `bus`, `truck`).
 - [x] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
 - [ ] Avaliar filtros dependentes da posicao vertical/perspectiva da camera.
-- [ ] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia.
+- [~] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia.
 
 Definicao de pronto:
 - existe baseline de erro por camera
 - pelo menos uma rodada de calibracao foi feita com evidencias reais
 - os parametros deixam de ser genericos demais para todos os cenarios
+- `conf`, `min_hits_to_count` e `min_bbox_area` foram recalibrados com base em casos reais revisados
 
 ### BT4 - Operacao e armazenamento
 
