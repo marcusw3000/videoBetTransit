@@ -336,10 +336,10 @@ Entregavel esperado:
 - Configuracao operacional feita direto pela interface.
 
 ### 17. Alertas e monitoramento
-- [ ] Alertar quando o stream cair.
-- [ ] Alertar quando a contagem ficar zerada por tempo suspeito.
-- [ ] Alertar quando o backend ficar indisponivel.
-- [ ] Alertar quando o feed MJPEG nao tiver frames recentes.
+- [x] Alertar quando o stream cair.
+- [x] Alertar quando a contagem ficar zerada por tempo suspeito.
+- [x] Alertar quando o backend ficar indisponivel.
+- [x] Alertar quando o feed MJPEG nao tiver frames recentes.
 
 Objetivo:
 - Detectar falhas cedo.
@@ -396,7 +396,7 @@ Entregavel esperado:
 - [x] Dashboard operacional
 - [ ] Historico avancado
 - [x] Editor visual de ROI/linha
-- [ ] Alertas
+- [x] Alertas
 
 ---
 

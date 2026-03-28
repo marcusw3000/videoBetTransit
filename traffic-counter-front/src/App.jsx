@@ -6,6 +6,7 @@ import HistoryCard from './components/HistoryCard'
 import VideoPlayer from './components/VideoPlayer'
 import DetectionsList from './components/DetectionsList'
 import OperationsCard from './components/OperationsCard'
+import AlertsPanel from './components/AlertsPanel'
 import { getCurrentRound, getRoundHistory, settleRound } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { startOverlayConnection, stopOverlayConnection } from './services/overlaySignalr'
@@ -14,6 +15,17 @@ import { getTimeLeftInSeconds } from './utils/time'
 import { MJPEG_URL } from './config'
 
 const MAX_HISTORY_POINTS = 30
+const STALE_FRAME_THRESHOLD_SECONDS = 10
+const ZERO_COUNT_ALERT_SECONDS = 120
+
+function secondsSince(value) {
+  if (!value) return null
+
+  const parsed = Number.isFinite(value) ? value * 1000 : Date.parse(value)
+  if (Number.isNaN(parsed)) return null
+
+  return Math.max(0, Math.floor((Date.now() - parsed) / 1000))
+}
 
 function MarketPage() {
   const [round, setRound] = useState(null)
@@ -172,6 +184,65 @@ function MarketPage() {
     return 'badge'
   }, [round])
 
+  const alerts = useMemo(() => {
+    const next = []
+    const health = operations?.health
+    const backend = health?.backend ?? {}
+    const lastFrameAgeSeconds = secondsSince(health?.lastFrameAt)
+    const lastCountSignalAgeSeconds = secondsSince(lastEvent?.at)
+
+    if (streamState === 'error') {
+      next.push({
+        id: 'stream-down',
+        severity: 'error',
+        badge: 'Feed',
+        title: 'Stream anotado indisponivel',
+        message: 'O navegador nao conseguiu carregar o MJPEG anotado.',
+        at: operations?.updatedAt,
+      })
+    }
+
+    if (operations?.backendError || backend?.lastError) {
+      next.push({
+        id: 'backend-offline',
+        severity: 'error',
+        badge: 'Backend',
+        title: 'Backend com falha recente',
+        message: operations?.backendError || backend?.lastError || 'A integracao com o backend apresentou falha.',
+        at: backend?.lastErrorAt || operations?.updatedAt,
+      })
+    }
+
+    if (lastFrameAgeSeconds !== null && lastFrameAgeSeconds > STALE_FRAME_THRESHOLD_SECONDS) {
+      next.push({
+        id: 'frames-stale',
+        severity: 'warn',
+        badge: 'Frames',
+        title: 'Feed sem frames recentes',
+        message: `A engine nao reporta frames novos ha ${lastFrameAgeSeconds}s.`,
+        at: health?.lastFrameAt,
+      })
+    }
+
+    if (
+      health?.streamConnected &&
+      Number(health?.totalCount ?? 0) === 0 &&
+      lastCountSignalAgeSeconds !== null &&
+      lastCountSignalAgeSeconds > ZERO_COUNT_ALERT_SECONDS
+    ) {
+      next.push({
+        id: 'zero-count',
+        severity: 'warn',
+        badge: 'Contagem',
+        title: 'Contagem zerada por tempo suspeito',
+        message: `Nenhum evento relevante chegou ha ${lastCountSignalAgeSeconds}s, apesar do stream estar ativo.`,
+        at: lastEvent?.at,
+      })
+    }
+
+    return next
+  }, [lastEvent, operations, streamState])
+
   return (
     <div className="page">
       <div className="container">
@@ -197,6 +268,10 @@ function MarketPage() {
             streamState={streamState}
             lastEvent={lastEvent}
           />
+        </section>
+
+        <section className="alerts-section">
+          <AlertsPanel alerts={alerts} />
         </section>
 
         <section className="top-grid">
