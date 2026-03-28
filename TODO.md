@@ -2,6 +2,17 @@
 
 Checklist de evolucao do projeto, organizado por prioridade, impacto e area tecnica. A ideia e servir como guia pratico de implementacao nas proximas iteracoes.
 
+## Estado de referencia atual
+
+Ponto de restauracao:
+- commit atual de referencia: `9230acf` (`todo 82`)
+
+Observacao importante:
+- este arquivo continua registrando o backlog historico do projeto
+- depois do rollback, parte do que foi planejado ou experimentado acima do `9230acf` deixou de estar refletido no codigo atual
+- os proximos passos seguros ficam detalhados em [`RETOMADA.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\RETOMADA.md)
+- os planejamentos de expansao de produto e integracao regulada foram reorganizados em [`TODO2.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\TODO2.md), [`TODO3.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\TODO3.md) e [`SPRINTS.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\SPRINTS.md)
+
 ## Como usar este arquivo
 
 - `[ ]` nao iniciado
