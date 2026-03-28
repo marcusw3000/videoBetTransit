@@ -1,10 +1,10 @@
 function getWinningRange(item) {
   if (item.finalCount == null || !item.ranges?.length) return null
-  return item.ranges.find(r => item.finalCount >= r.min && item.finalCount <= r.max)
+  return item.ranges.find((range) => item.finalCount >= range.min && item.finalCount <= range.max)
 }
 
 function formatDate(iso) {
-  if (!iso) return '–'
+  if (!iso) return '--'
   return new Date(iso).toLocaleString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -13,20 +13,28 @@ function formatDate(iso) {
   })
 }
 
-export default function HistoryCard({ item }) {
+export default function HistoryCard({ item, summary }) {
   const winner = getWinningRange(item)
+  const cameraLabel = summary?.cameraIds?.length ? summary.cameraIds.join(', ') : 'Sem camera'
+  const eventsCount = summary?.eventsCount ?? 0
 
   return (
     <div className="card history-card">
-      <div className="history-id">{item.id}</div>
+      <div className="history-main">
+        <div className="history-id">{item.id}</div>
+        <div className="history-meta">
+          <span>{cameraLabel}</span>
+          <span>{eventsCount} evento(s)</span>
+        </div>
+      </div>
       <div className="history-count">
         <span className="label">Total</span>
-        <strong>{item.finalCount ?? '–'}</strong>
+        <strong>{item.finalCount ?? '--'}</strong>
       </div>
       <div className="history-range">
         {winner ? (
-          <span className="history-winner">{winner.label} · {winner.odds}x</span>
-        ) : '–'}
+          <span className="history-winner">{winner.label} - {winner.odds}x</span>
+        ) : '--'}
       </div>
       <div className="history-date">{formatDate(item.endsAt)}</div>
     </div>

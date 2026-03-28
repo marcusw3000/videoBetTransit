@@ -7,7 +7,7 @@ import VideoPlayer from './components/VideoPlayer'
 import DetectionsList from './components/DetectionsList'
 import OperationsCard from './components/OperationsCard'
 import AlertsPanel from './components/AlertsPanel'
-import { getCurrentRound, getRoundHistory, settleRound } from './services/roundApi'
+import { getCurrentRound, getRoundCountEvents, getRoundHistory, settleRound } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { startOverlayConnection, stopOverlayConnection } from './services/overlaySignalr'
 import { getOperationsHealth } from './services/operationsApi'
@@ -27,6 +27,75 @@ function secondsSince(value) {
   return Math.max(0, Math.floor((Date.now() - parsed) / 1000))
 }
 
+function isWithinPeriod(isoDate, period) {
+  if (!isoDate || period === 'all') return true
+
+  const value = new Date(isoDate).getTime()
+  if (Number.isNaN(value)) return false
+
+  const now = Date.now()
+  if (period === 'today') {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return value >= today.getTime()
+  }
+
+  const periodDays = { '7d': 7, '30d': 30 }
+  const days = periodDays[period]
+  if (!days) return true
+  return value >= now - days * 24 * 60 * 60 * 1000
+}
+
+function escapeCsv(value) {
+  const normalized = value == null ? '' : String(value)
+  return `"${normalized.replaceAll('"', '""')}"`
+}
+
+function buildRoundsCsv(rounds, summaries) {
+  const header = ['round_id', 'status', 'created_at', 'ends_at', 'final_count', 'camera_ids', 'events_count']
+  const rows = rounds.map((round) => {
+    const summary = summaries[round.id] || { cameraIds: [], eventsCount: 0 }
+    return [
+      round.id,
+      round.status,
+      round.createdAt,
+      round.endsAt,
+      round.finalCount ?? '',
+      summary.cameraIds.join('|'),
+      summary.eventsCount,
+    ].map(escapeCsv).join(',')
+  })
+  return [header.join(','), ...rows].join('\n')
+}
+
+function buildEventsCsv(rounds, eventsByRound) {
+  const header = ['round_id', 'camera_id', 'track_id', 'vehicle_type', 'crossed_at', 'total_count', 'snapshot_url']
+  const rows = rounds.flatMap((round) => (
+    (eventsByRound[round.id] || []).map((event) => (
+      [
+        round.id,
+        event.cameraId,
+        event.trackId,
+        event.vehicleType,
+        event.crossedAt,
+        event.totalCount,
+        event.snapshotUrl,
+      ].map(escapeCsv).join(',')
+    ))
+  ))
+  return [header.join(','), ...rows].join('\n')
+}
+
+function downloadCsv(filename, content) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 function MarketPage() {
   const [round, setRound] = useState(null)
   const [history, setHistory] = useState([])
@@ -39,6 +108,11 @@ function MarketPage() {
   const [operations, setOperations] = useState({ health: null, backendError: null, updatedAt: null })
   const [streamState, setStreamState] = useState('connecting')
   const [lastEvent, setLastEvent] = useState(null)
+  const [historyEventsByRound, setHistoryEventsByRound] = useState({})
+  const [historySummaryByRound, setHistorySummaryByRound] = useState({})
+  const [historyCameraFilter, setHistoryCameraFilter] = useState('all')
+  const [historyPeriodFilter, setHistoryPeriodFilter] = useState('all')
+  const [historyRoundQuery, setHistoryRoundQuery] = useState('')
 
   const liveStreamUrl = MJPEG_URL
 
@@ -65,6 +139,28 @@ function MarketPage() {
     try {
       const data = await getRoundHistory()
       setHistory(data)
+      const eventsEntries = await Promise.all(
+        data.map(async (round) => {
+          try {
+            const events = await getRoundCountEvents(round.id)
+            return [round.id, events]
+          } catch (err) {
+            console.error(`[History] Falha ao carregar eventos do round ${round.id}`, err)
+            return [round.id, []]
+          }
+        }),
+      )
+
+      const nextEventsByRound = Object.fromEntries(eventsEntries)
+      const nextSummaryByRound = Object.fromEntries(
+        eventsEntries.map(([roundId, events]) => {
+          const cameraIds = [...new Set(events.map((event) => event.cameraId).filter(Boolean))]
+          return [roundId, { cameraIds, eventsCount: events.length }]
+        }),
+      )
+
+      setHistoryEventsByRound(nextEventsByRound)
+      setHistorySummaryByRound(nextSummaryByRound)
     } catch (err) {
       console.error(err)
     }
@@ -243,6 +339,54 @@ function MarketPage() {
     return next
   }, [lastEvent, operations, streamState])
 
+  const availableHistoryCameras = useMemo(() => {
+    const cameras = Object.values(historySummaryByRound)
+      .flatMap((summary) => summary.cameraIds || [])
+      .filter(Boolean)
+
+    return [...new Set(cameras)].sort()
+  }, [historySummaryByRound])
+
+  const filteredHistory = useMemo(() => {
+    const normalizedQuery = historyRoundQuery.trim().toLowerCase()
+
+    return history.filter((item) => {
+      const summary = historySummaryByRound[item.id] || { cameraIds: [] }
+      const matchesCamera = historyCameraFilter === 'all' || summary.cameraIds.includes(historyCameraFilter)
+      const matchesPeriod = isWithinPeriod(item.endsAt || item.createdAt, historyPeriodFilter)
+      const matchesRound = !normalizedQuery || item.id.toLowerCase().includes(normalizedQuery)
+      return matchesCamera && matchesPeriod && matchesRound
+    })
+  }, [history, historyCameraFilter, historyPeriodFilter, historyRoundQuery, historySummaryByRound])
+
+  const historyTrend = useMemo(() => {
+    const points = filteredHistory.map((item) => item.finalCount ?? 0).reverse()
+
+    if (!points.length) {
+      return { average: 0, peak: 0, totalEvents: 0, points: '' }
+    }
+
+    const average = points.reduce((sum, value) => sum + value, 0) / points.length
+    const peak = Math.max(...points)
+    const totalEvents = filteredHistory.reduce((sum, item) => sum + (historySummaryByRound[item.id]?.eventsCount ?? 0), 0)
+    const width = 260
+    const height = 56
+    const max = Math.max(...points, 1)
+    const polyline = points.map((value, index) => {
+      const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width
+      const y = height - (value / max) * (height - 8) - 4
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+
+    return { average, peak, totalEvents, points: polyline }
+  }, [filteredHistory, historySummaryByRound])
+
+  function handleExportHistory() {
+    const stamp = new Date().toISOString().slice(0, 19).replaceAll(':', '-')
+    downloadCsv(`rounds-${stamp}.csv`, buildRoundsCsv(filteredHistory, historySummaryByRound))
+    downloadCsv(`count-events-${stamp}.csv`, buildEventsCsv(filteredHistory, historyEventsByRound))
+  }
+
   return (
     <div className="page">
       <div className="container">
@@ -312,11 +456,85 @@ function MarketPage() {
 
         <section className="history-section">
           <h2>Historico</h2>
-          <div className="history-list">
-            {history.length === 0 && <div className="empty-state">Nenhum round finalizado ainda.</div>}
+          <div className="history-toolbar">
+            <input
+              className="history-input"
+              placeholder="Buscar por ID do round"
+              value={historyRoundQuery}
+              onChange={(event) => setHistoryRoundQuery(event.target.value)}
+            />
+            <select
+              className="history-select"
+              value={historyCameraFilter}
+              onChange={(event) => setHistoryCameraFilter(event.target.value)}
+            >
+              <option value="all">Todas as cameras</option>
+              {availableHistoryCameras.map((cameraId) => (
+                <option key={cameraId} value={cameraId}>{cameraId}</option>
+              ))}
+            </select>
+            <select
+              className="history-select"
+              value={historyPeriodFilter}
+              onChange={(event) => setHistoryPeriodFilter(event.target.value)}
+            >
+              <option value="all">Todo periodo</option>
+              <option value="today">Hoje</option>
+              <option value="7d">Ultimos 7 dias</option>
+              <option value="30d">Ultimos 30 dias</option>
+            </select>
+            <button className="secondary-button" onClick={handleExportHistory}>
+              Exportar CSV
+            </button>
+          </div>
 
-            {history.map((item) => (
-              <HistoryCard key={item.id} item={item} />
+          <div className="history-summary">
+            <div className="card history-summary-card">
+              <span className="label">Tendencia</span>
+              <div className="history-summary-metrics">
+                <div>
+                  <span className="history-summary-label">Rounds filtrados</span>
+                  <strong>{filteredHistory.length}</strong>
+                </div>
+                <div>
+                  <span className="history-summary-label">Media final</span>
+                  <strong>{historyTrend.average.toFixed(1)}</strong>
+                </div>
+                <div>
+                  <span className="history-summary-label">Pico</span>
+                  <strong>{historyTrend.peak}</strong>
+                </div>
+                <div>
+                  <span className="history-summary-label">Eventos</span>
+                  <strong>{historyTrend.totalEvents}</strong>
+                </div>
+              </div>
+              {historyTrend.points ? (
+                <svg viewBox="0 0 260 56" className="history-trend" aria-hidden="true">
+                  <polyline
+                    points={historyTrend.points}
+                    fill="none"
+                    stroke="rgba(128, 216, 160, 0.95)"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : (
+                <div className="empty-state">Sem dados suficientes para tendencia.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="history-list">
+            {filteredHistory.length === 0 && <div className="empty-state">Nenhum round encontrado com os filtros atuais.</div>}
+
+            {filteredHistory.map((item) => (
+              <HistoryCard
+                key={item.id}
+                item={item}
+                summary={historySummaryByRound[item.id]}
+              />
             ))}
           </div>
         </section>

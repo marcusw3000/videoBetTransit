@@ -308,11 +308,11 @@ Entregavel esperado:
 - Dashboard mais util para uso real.
 
 ### 15. Melhorar historico e analise
-- [ ] Permitir filtro por camera.
-- [ ] Permitir filtro por periodo.
-- [ ] Permitir filtro por round.
-- [ ] Exibir tendencia de contagem.
-- [ ] Exportar rounds e eventos para CSV.
+- [x] Permitir filtro por camera.
+- [x] Permitir filtro por periodo.
+- [x] Permitir filtro por round.
+- [x] Exibir tendencia de contagem.
+- [x] Exportar rounds e eventos para CSV.
 
 Objetivo:
 - Transformar o sistema em fonte de consulta e nao apenas tela ao vivo.
@@ -394,7 +394,7 @@ Entregavel esperado:
 
 ### Fase 5 - Produto
 - [x] Dashboard operacional
-- [ ] Historico avancado
+- [x] Historico avancado
 - [x] Editor visual de ROI/linha
 - [x] Alertas
 

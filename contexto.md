@@ -21,7 +21,7 @@ Backend .NET 8
 Frontend React
   - consome REST e SignalR do backend
   - exibe o feed MJPEG anotado vindo do Python
-  - mostra contador, timer, faixas, historico, painel operacional e alertas de monitoramento
+  - mostra contador, timer, faixas, historico filtravel, painel operacional e alertas de monitoramento
 ```
 
 Fluxo resumido:
@@ -33,6 +33,7 @@ Fluxo resumido:
 6. O video mostrado no browser pode vir do proxy `http://localhost:5000/proxy/video-feed`, que encaminha para o MJPEG Python ja anotado.
 7. O painel operacional consulta `http://localhost:5000/proxy/health` para mostrar estado da camera, backend e metricas.
 8. A UI gera alertas quando stream, backend, frames ou contagem entram em estado suspeito.
+9. A secao de historico permite filtrar por camera, periodo e ID do round, alem de exportar CSV de rounds e count-events.
 
 ## Como Rodar
 
@@ -154,6 +155,7 @@ Observacao:
 - `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
 - `OperationsCard.jsx` mostra saude operacional usando o health proxied do backend
 - `AlertsPanel.jsx` mostra alertas para stream indisponivel, backend com falha, frames parados e contagem zerada suspeita
+- o historico usa `GET /api/rounds/history` e `GET /api/rounds/{roundId}/count-events` para filtros, tendencia e exportacao CSV
 - por padrao, `VITE_MJPEG_URL` aponta para o proxy do backend
 - por padrao, `VITE_MJPEG_HEALTH_URL` aponta para `http://localhost:5000/proxy/health`
 - o frontend nao possui mais tela de configuracao de ROI/linha

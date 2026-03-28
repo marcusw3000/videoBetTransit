@@ -32,6 +32,11 @@ export async function getRoundHistory() {
   return data
 }
 
+export async function getRoundCountEvents(roundId) {
+  const { data } = await withRetry(() => api.get(`/rounds/${roundId}/count-events`))
+  return data
+}
+
 export async function settleRound() {
   const { data } = await api.post('/rounds/settle', {})
   return data
