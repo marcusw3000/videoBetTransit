@@ -351,12 +351,57 @@ Entregavel esperado:
 
 ## Backlog tecnico complementar
 
+### BT1 - Robustez de engenharia
+
+Prioridade:
+- `P1`
+
+Objetivo:
+- reduzir regressao
+- melhorar ergonomia de desenvolvimento
+- encurtar a validacao local antes de publicar mudancas
+
+Itens:
+- [x] Criar comando unico de validacao local com build e testes.
 - [ ] Adicionar tipagem melhor no frontend onde fizer sentido.
 - [ ] Revisar chunk grande do build do Vite e considerar code splitting.
+
+Definicao de pronto:
+- um unico comando valida backend, frontend e testes principais
+- pontos mais sensiveis do frontend deixam de depender apenas de convencao informal
+- o bundle principal fica com estrategia clara de divisao ou justificativa documentada
+
+### BT2 - Performance de stream e encode
+
+Prioridade:
+- `P1`
+
+Objetivo:
+- reduzir custo operacional da pipeline MJPEG
+- melhorar uso de CPU no Python
+- preparar a engine para mais tempo de execucao sem degradacao
+
+Itens:
 - [ ] Revisar consumo de CPU do encode JPEG.
 - [ ] Avaliar reduzir resolucao ou `imgsz` dinamicamente por camera.
-- [ ] Avaliar mover snapshots para armazenamento externo.
-- [ ] Criar comando unico de validacao local com build e testes.
+- [ ] Medir gargalos de MJPEG em ambiente real com camera e navegador conectados.
+
+Definicao de pronto:
+- existe uma medicao comparativa antes/depois
+- a estrategia de qualidade JPEG e resolucao por camera fica explicita
+- o custo por frame deixa de ser caixa-preta
+
+### BT3 - Qualidade de deteccao
+
+Prioridade:
+- `P1`
+
+Objetivo:
+- aumentar precisao da contagem
+- reduzir falso positivo, falso negativo e dupla contagem
+- transformar ajuste empirico em calibracao guiada por evidencia
+
+Itens:
 - [ ] Testar `imgsz=640` ou maior para melhorar deteccao de veiculos pequenos.
 - [ ] Avaliar troca de `yolov8s.pt` para `yolov8m.pt` ou modelo fine-tunado por camera.
 - [ ] Ajustar `conf`, `min_hits_to_count` e `min_bbox_area` com base em erros reais da pista.
@@ -364,6 +409,37 @@ Entregavel esperado:
 - [ ] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
 - [ ] Avaliar filtros dependentes da posicao vertical/perspectiva da camera.
 - [ ] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia.
+
+Definicao de pronto:
+- existe baseline de erro por camera
+- pelo menos uma rodada de calibracao foi feita com evidencias reais
+- os parametros deixam de ser genericos demais para todos os cenarios
+
+### BT4 - Operacao e armazenamento
+
+Prioridade:
+- `P2`
+
+Objetivo:
+- preparar retenção, auditoria e escala operacional
+- diminuir acoplamento entre execucao local e retencao de artefatos
+
+Itens:
+- [ ] Avaliar mover snapshots para armazenamento externo.
+- [ ] Definir politica de retencao para snapshots e exportacoes.
+- [ ] Definir topologia final de deploy para frontend, backend e MJPEG.
+
+Definicao de pronto:
+- snapshots deixam de depender apenas do disco local
+- existe uma topologia de deploy decidida e documentada
+- a estrategia de retencao e limpeza de artefatos fica explicita
+
+### Ordem sugerida do backlog tecnico
+
+1. `BT1` para acelerar desenvolvimento e reduzir retrabalho.
+2. `BT2` para medir custo real da pipeline atual.
+3. `BT3` para melhorar a qualidade da contagem com base em dados.
+4. `BT4` para fechar as pendencias de operacao e producao.
 
 ---
 

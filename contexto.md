@@ -54,6 +54,7 @@ python app.py
 
 No Windows, `start.bat` sobe tudo e ainda garante a instalacao das dependencias Python antes de iniciar a engine.
 No ambiente local, o `start.bat` tambem sobe o backend com `ASPNETCORE_ENVIRONMENT=Development`.
+Para validar o projeto inteiro de uma vez, use `validate.bat` na raiz.
 
 ## Estrutura de Pastas
 
@@ -74,6 +75,7 @@ Arquivos importantes:
 - `backend_client.py`: cliente HTTP usado pela engine para falar com o backend.
 - `config.json`: stream, ROI, linha de contagem, modelo, MJPEG host e porta.
 - `start.bat`: inicializacao automatica do backend, frontend e engine.
+- `validate.bat`: validacao unica com sintaxe Python, testes Python, testes .NET e build do frontend.
 - `traffic-counter-front/src/App.jsx`: orquestra tela principal.
 - `traffic-counter-front/src/components/VideoPlayer.jsx`: exibe o feed MJPEG anotado.
 
