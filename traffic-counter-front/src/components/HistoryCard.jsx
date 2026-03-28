@@ -1,6 +1,11 @@
-function getWinningRange(item) {
-  if (item.finalCount == null || !item.ranges?.length) return null
-  return item.ranges.find((range) => item.finalCount >= range.min && item.finalCount <= range.max)
+function getWinningMarkets(item) {
+  if (!item.ranges?.length) return []
+
+  const explicitWinners = item.ranges.filter((range) => range.isWinner)
+  if (explicitWinners.length) return explicitWinners
+
+  if (item.finalCount == null) return []
+  return item.ranges.filter((range) => item.finalCount >= range.min && item.finalCount <= range.max)
 }
 
 function formatDate(iso) {
@@ -14,7 +19,7 @@ function formatDate(iso) {
 }
 
 export default function HistoryCard({ item, summary }) {
-  const winner = getWinningRange(item)
+  const winners = getWinningMarkets(item)
   const cameraLabel = summary?.cameraIds?.length ? summary.cameraIds.join(', ') : 'Sem camera'
   const eventsCount = summary?.eventsCount ?? 0
 
@@ -32,8 +37,8 @@ export default function HistoryCard({ item, summary }) {
         <strong>{item.finalCount ?? '--'}</strong>
       </div>
       <div className="history-range">
-        {winner ? (
-          <span className="history-winner">{winner.label} - {winner.odds}x</span>
+        {winners.length ? (
+          <span className="history-winner">{winners.map((winner) => `${winner.marketType === 'exact' ? `Exact ${winner.targetValue}` : winner.label} - ${winner.odds}x`).join(' | ')}</span>
         ) : '--'}
       </div>
       <div className="history-date">{formatDate(item.endsAt)}</div>

@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using TrafficCounter.Api.Models;
+using TrafficCounter.Api.Services;
 using Xunit;
 
 namespace TrafficCounter.Api.Tests;
@@ -9,7 +10,7 @@ public class RoundsApiTests
     private const string ApiKey = "SUA_API_KEY";
 
     [Fact]
-    public async Task GetCurrent_ReturnsRunningRound()
+    public async Task GetCurrent_ReturnsOpenRound()
     {
         using var factory = new CustomWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -17,9 +18,15 @@ public class RoundsApiTests
         var round = await client.GetFromJsonAsync<Round>("/api/rounds/current");
 
         Assert.NotNull(round);
-        Assert.Equal("running", round.Status);
+        Assert.Equal(RoundService.StatusOpen, round.Status);
         Assert.False(string.IsNullOrWhiteSpace(round.Id));
+        Assert.InRange((round.BetCloseAt - round.CreatedAt).TotalSeconds, 49, 51);
+        Assert.InRange((round.EndsAt - round.CreatedAt).TotalSeconds, 59, 61);
         Assert.Equal(4, round.Ranges.Count);
+        Assert.Contains(round.Ranges, market => market.MarketType == "under" && market.TargetValue == 20);
+        Assert.Contains(round.Ranges, market => market.MarketType == "range");
+        Assert.Contains(round.Ranges, market => market.MarketType == "over" && market.TargetValue == 20);
+        Assert.Contains(round.Ranges, market => market.MarketType == "exact" && market.TargetValue == 20);
     }
 
     [Fact]
@@ -109,13 +116,17 @@ public class RoundsApiTests
 
         Assert.NotNull(newCurrentRound);
         Assert.NotEqual(previousRound.Id, newCurrentRound.Id);
-        Assert.Equal("running", newCurrentRound.Status);
+        Assert.Equal(RoundService.StatusOpen, newCurrentRound.Status);
         Assert.Equal(0, newCurrentRound.CurrentCount);
 
         Assert.NotNull(history);
         var settledRound = Assert.Single(history, r => r.Id == previousRound.Id);
-        Assert.Equal("settled", settledRound.Status);
+        Assert.Equal(RoundService.StatusSettled, settledRound.Status);
         Assert.Equal(3, settledRound.FinalCount);
+        Assert.Contains(settledRound.Ranges, market => market.MarketType == "under" && market.IsWinner == true);
+        Assert.Contains(settledRound.Ranges, market => market.MarketType == "range" && market.IsWinner == false);
+        Assert.Contains(settledRound.Ranges, market => market.MarketType == "over" && market.IsWinner == false);
+        Assert.Contains(settledRound.Ranges, market => market.MarketType == "exact" && market.IsWinner == false);
     }
 
     [Fact]

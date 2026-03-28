@@ -83,6 +83,12 @@ body {
   border-color: #c79c2f;
 }
 
+.badge-closing {
+  background: rgba(92, 67, 16, 0.35);
+  border-color: #f0b31f;
+  color: #ffe9b0;
+}
+
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 12px rgba(46, 139, 87, 0.25); }
   50%      { box-shadow: 0 0 22px rgba(46, 139, 87, 0.5); }
@@ -512,12 +518,12 @@ body {
 
 /* ── Sections ─────────────────────────────────────────── */
 
-.ranges-section,
+.markets-section,
 .history-section {
   margin-bottom: 32px;
 }
 
-.ranges-section h2,
+.markets-section h2,
 .history-section h2 {
   margin: 0 0 16px 0;
   font-size: 22px;
@@ -560,44 +566,71 @@ body {
 
 /* ── Ranges Grid ──────────────────────────────────────── */
 
-.ranges-grid {
+.markets-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
-.range-card {
-  text-align: center;
+.market-card {
+  text-align: left;
   transition: transform 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   position: relative;
+  min-height: 220px;
 }
 
-.range-card:hover {
+.market-card:hover {
   transform: translateY(-4px);
 }
 
-.range-card h3 {
+.market-card h3 {
   margin: 0 0 8px 0;
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
 }
 
-.range-odds {
-  margin: 0 0 6px 0;
-  opacity: 0.85;
-  font-size: 15px;
-  font-weight: 600;
-  color: #b8b8e0;
+.market-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
-.range-card-active {
+.market-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #d7d7ea;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.market-description {
+  min-height: 72px;
+  margin: 0 0 18px 0;
+  color: #cbcbde;
+  line-height: 1.55;
+  font-size: 15px;
+}
+
+.market-odds {
+  margin: 0 0 6px 0;
+  opacity: 0.95;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.market-card-active {
   border-color: rgba(48, 209, 107, 0.5) !important;
   background: rgba(28, 87, 54, 0.3) !important;
   box-shadow: 0 0 20px rgba(48, 209, 107, 0.2) !important;
   transform: translateY(-4px);
 }
 
-.range-active-badge {
+.market-active-badge {
   display: inline-block;
   margin-top: 4px;
   padding: 3px 10px;
@@ -610,6 +643,54 @@ body {
   letter-spacing: 0.8px;
   text-transform: uppercase;
   animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.market-phase-closed {
+  background: rgba(240, 179, 31, 0.16);
+  border-color: rgba(240, 179, 31, 0.55);
+  color: #f0b31f;
+  animation: none;
+}
+
+.market-phase-settling {
+  background: rgba(150, 150, 170, 0.16);
+  border-color: rgba(200, 200, 220, 0.35);
+  color: #d8d8ef;
+  animation: none;
+}
+
+.market-result-win {
+  background: rgba(48, 209, 107, 0.2);
+  border-color: rgba(48, 209, 107, 0.5);
+  color: #30d16b;
+  animation: none;
+}
+
+.market-result-lose {
+  background: rgba(220, 84, 84, 0.16);
+  border-color: rgba(220, 84, 84, 0.45);
+  color: #ff9b9b;
+  animation: none;
+}
+
+.market-card-under h3,
+.market-card-under .market-odds {
+  color: #58d7ff;
+}
+
+.market-card-range h3,
+.market-card-range .market-odds {
+  color: #f0b31f;
+}
+
+.market-card-over h3,
+.market-card-over .market-odds {
+  color: #22d47c;
+}
+
+.market-card-exact h3,
+.market-card-exact .market-odds {
+  color: #ff7a86;
 }
 
 /* ── History List ─────────────────────────────────────── */
@@ -731,6 +812,13 @@ body {
   font-size: 13px;
 }
 
+.timer-card-warning .big-number {
+  background: linear-gradient(135deg, #ffe9b0 0%, #f0b31f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
 .history-date {
   text-align: right;
   font-size: 12px;
@@ -761,7 +849,7 @@ body {
     align-items: stretch;
   }
 
-  .ranges-grid {
+  .markets-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -793,7 +881,7 @@ body {
     font-size: 40px;
   }
 
-  .ranges-grid {
+  .markets-grid {
     grid-template-columns: 1fr;
   }
 

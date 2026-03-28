@@ -227,7 +227,7 @@ Entregavel esperado:
 - [x] Revisar `backend_client.py` para timeout, retry e logging mais claros.
 - [x] Tratar queda temporaria do backend sem travar o loop principal.
 - [x] Evitar explosao de threads se o backend estiver indisponivel.
-- [ ] Considerar fila interna com descarte controlado para eventos.
+- [x] Considerar fila interna com descarte controlado para eventos.
 
 Objetivo:
 - Fazer a engine degradar de forma segura em caso de falha externa.
@@ -264,7 +264,7 @@ Entregavel esperado:
 - Feed MJPEG servido por runtime mais estavel.
 
 ### 11. Colocar frontend, backend e MJPEG sob a mesma estrategia de publicacao
-- [ ] Definir topologia final de deploy.
+- [x] Definir topologia final de deploy.
 - [x] Evitar mixed content entre frontend HTTPS e MJPEG HTTP.
 - [x] Considerar reverse proxy unico para React, API e MJPEG.
 - [x] Documentar isso no [`contexto.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\contexto.md).
@@ -412,24 +412,30 @@ Definicao de pronto:
 Prioridade:
 - `P1`
 
+Observacao critica:
+- esta trilha e obrigatoria antes de considerar o projeto `100% concluido`
+- a calibracao com evidencias reais da pista deve acontecer antes do fechamento final do TODO
+- nao considerar o TODO encerrado apenas com thresholds configurados; e necessario validar em operacao real
+
 Objetivo:
 - aumentar precisao da contagem
 - reduzir falso positivo, falso negativo e dupla contagem
 - transformar ajuste empirico em calibracao guiada por evidencia
 
 Itens:
-- [ ] Testar `imgsz=640` ou maior para melhorar deteccao de veiculos pequenos.
+- [~] Testar `imgsz=640` ou maior para melhorar deteccao de veiculos pequenos.
 - [ ] Avaliar troca de `yolov8s.pt` para `yolov8m.pt` ou modelo fine-tunado por camera.
-- [ ] Ajustar `conf`, `min_hits_to_count` e `min_bbox_area` com base em erros reais da pista.
-- [ ] Adicionar thresholds de area por classe (`car`, `motorcycle`, `bus`, `truck`).
-- [ ] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
+- [ ] Ajustar `conf`, `min_hits_to_count` e `min_bbox_area` com base em erros reais da pista. `EXTREMAMENTE NECESSARIO`
+- [x] Adicionar thresholds de area por classe (`car`, `motorcycle`, `bus`, `truck`).
+- [x] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
 - [ ] Avaliar filtros dependentes da posicao vertical/perspectiva da camera.
-- [ ] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia.
+- [~] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia. Ferramenta inicial criada em `review_calibration_cases.py`
 
 Definicao de pronto:
 - existe baseline de erro por camera
 - pelo menos uma rodada de calibracao foi feita com evidencias reais
 - os parametros deixam de ser genericos demais para todos os cenarios
+- `conf`, `min_hits_to_count` e `min_bbox_area` foram recalibrados com base em casos reais revisados
 
 ### BT4 - Operacao e armazenamento
 
@@ -443,7 +449,7 @@ Objetivo:
 Itens:
 - [ ] Avaliar mover snapshots para armazenamento externo.
 - [ ] Definir politica de retencao para snapshots e exportacoes.
-- [ ] Definir topologia final de deploy para frontend, backend e MJPEG.
+- [x] Definir topologia final de deploy para frontend, backend e MJPEG.
 
 Definicao de pronto:
 - snapshots deixam de depender apenas do disco local
@@ -471,7 +477,7 @@ Definicao de pronto:
 - [x] Testes Python
 - [x] Testes backend
 - [x] Observabilidade
-- [~] Resiliencia do `backend_client.py`
+- [x] Resiliencia do `backend_client.py`
 
 ### Fase 3 - Operacao
 - [ ] Melhorar `start.bat`
@@ -482,7 +488,7 @@ Definicao de pronto:
 - [x] Servidor MJPEG apropriado
 - [x] Persistencia
 - [x] Seguranca
-- [ ] Estrategia de deploy unificada
+- [x] Estrategia de deploy unificada
 
 ### Fase 5 - Produto
 - [x] Dashboard operacional

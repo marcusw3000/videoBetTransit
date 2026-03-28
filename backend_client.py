@@ -1,4 +1,5 @@
 import logging
+import queue
 import threading
 import time
 
@@ -10,7 +11,17 @@ logger = logging.getLogger(__name__)
 
 
 class BackendClient:
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        *,
+        count_queue_size: int = 64,
+        live_queue_size: int = 4,
+        count_worker_count: int = 2,
+        live_worker_count: int = 1,
+        start_workers: bool = True,
+    ):
         self.base_url = base_url.rsplit("/", 2)[0]
         self.count_events_url = base_url
         self.current_round_url = f"{self.base_url}/rounds/current"
@@ -18,8 +29,8 @@ class BackendClient:
         self.camera_config_url = f"{self.base_url}/camera-config"
         self.api_key = api_key
 
-        self._live_sem = threading.Semaphore(3)
-        self._count_sem = threading.Semaphore(10)
+        self._count_queue = queue.Queue(maxsize=max(1, count_queue_size))
+        self._live_queue = queue.Queue(maxsize=max(1, live_queue_size))
         self._lock = threading.Lock()
         self._stats = {
             "lastSuccessAt": None,
@@ -29,6 +40,8 @@ class BackendClient:
             "countDropped": 0,
             "liveInFlight": 0,
             "countInFlight": 0,
+            "liveQueued": 0,
+            "countQueued": 0,
         }
 
         self._session = requests.Session()
@@ -47,6 +60,10 @@ class BackendClient:
             "Content-Type": "application/json",
             "X-API-Key": self.api_key,
         }
+        self._count_workers = []
+        self._live_workers = []
+        if start_workers:
+            self._start_workers(max(1, count_worker_count), max(1, live_worker_count))
 
     def fetch_camera_config(self, camera_id: str) -> dict | None:
         try:
@@ -151,48 +168,105 @@ class BackendClient:
             return False
 
     def send_count_event(self, payload: dict):
-        if not self._count_sem.acquire(blocking=False):
-            self._increment_stat("countDropped")
-            logger.warning("[BACKEND] Count-event descartado por excesso de requisicoes pendentes")
-            return
-
-        self._increment_stat("countInFlight")
-        thread = threading.Thread(
-            target=self._post_with_release,
-            args=(self.count_events_url, payload, self._count_sem, "countInFlight"),
-            daemon=True,
-        )
-        thread.start()
+        if self._enqueue_payload(
+            self._count_queue,
+            payload,
+            dropped_key="countDropped",
+            queued_key="countQueued",
+            label="count-event",
+            replace_oldest=False,
+        ):
+            logger.debug("[BACKEND] Count-event enfileirado")
+        else:
+            logger.warning("[BACKEND] Count-event descartado por fila cheia")
 
     def send_live_detections(self, payload: dict):
-        if not self._live_sem.acquire(blocking=False):
-            self._increment_stat("liveDropped")
-            return
-
-        self._increment_stat("liveInFlight")
-        thread = threading.Thread(
-            target=self._post_with_release,
-            args=(self.live_detections_url, payload, self._live_sem, "liveInFlight"),
-            daemon=True,
+        queued = self._enqueue_payload(
+            self._live_queue,
+            payload,
+            dropped_key="liveDropped",
+            queued_key="liveQueued",
+            label="live-detections",
+            replace_oldest=True,
         )
-        thread.start()
+        if not queued:
+            logger.debug("[BACKEND] Live-detections descartado por fila cheia")
 
     def get_health_snapshot(self) -> dict:
         with self._lock:
             return dict(self._stats)
 
-    def _post_with_release(
+    def _start_workers(self, count_worker_count: int, live_worker_count: int):
+        for index in range(count_worker_count):
+            worker = threading.Thread(
+                target=self._worker_loop,
+                args=(self._count_queue, self.count_events_url, "countInFlight", "countQueued"),
+                name=f"backend-count-worker-{index + 1}",
+                daemon=True,
+            )
+            worker.start()
+            self._count_workers.append(worker)
+
+        for index in range(live_worker_count):
+            worker = threading.Thread(
+                target=self._worker_loop,
+                args=(self._live_queue, self.live_detections_url, "liveInFlight", "liveQueued"),
+                name=f"backend-live-worker-{index + 1}",
+                daemon=True,
+            )
+            worker.start()
+            self._live_workers.append(worker)
+
+    def _worker_loop(
         self,
+        payload_queue: queue.Queue,
         url: str,
-        payload: dict,
-        semaphore: threading.Semaphore,
         inflight_key: str,
+        queued_key: str,
     ):
+        while True:
+            payload = payload_queue.get()
+            self._decrement_stat(queued_key)
+            self._increment_stat(inflight_key)
+            try:
+                self._post(url, payload)
+            finally:
+                self._decrement_stat(inflight_key)
+                payload_queue.task_done()
+
+    def _enqueue_payload(
+        self,
+        payload_queue: queue.Queue,
+        payload: dict,
+        *,
+        dropped_key: str,
+        queued_key: str,
+        label: str,
+        replace_oldest: bool,
+    ) -> bool:
         try:
-            self._post(url, payload)
-        finally:
-            self._decrement_stat(inflight_key)
-            semaphore.release()
+            payload_queue.put_nowait(payload)
+            self._increment_stat(queued_key)
+            return True
+        except queue.Full:
+            if replace_oldest:
+                try:
+                    payload_queue.get_nowait()
+                    payload_queue.task_done()
+                    self._decrement_stat(queued_key)
+                    self._increment_stat(dropped_key)
+                    logger.debug("[BACKEND] %s mais antigo descartado para priorizar o frame mais recente", label)
+                except queue.Empty:
+                    pass
+                try:
+                    payload_queue.put_nowait(payload)
+                    self._increment_stat(queued_key)
+                    return True
+                except queue.Full:
+                    pass
+
+            self._increment_stat(dropped_key)
+            return False
 
     def _post(self, url: str, payload: dict):
         try:
