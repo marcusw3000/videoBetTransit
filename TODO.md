@@ -282,7 +282,7 @@ Entregavel esperado:
 - [x] Proteger alteracao de configuracoes da camera.
 - [x] Proteger endpoint de settle manual.
 - [x] Definir se o feed MJPEG deve ser publico ou protegido.
-- [ ] Adicionar politica de CORS e segredos por ambiente.
+- [x] Adicionar politica de CORS e segredos por ambiente.
 
 Objetivo:
 - Evitar uso indevido em ambiente real.
@@ -380,7 +380,7 @@ Entregavel esperado:
 ### Fase 4 - Producao
 - [ ] Servidor MJPEG apropriado
 - [x] Persistencia
-- [~] Seguranca
+- [x] Seguranca
 - [ ] Estrategia de deploy unificada
 
 ### Fase 5 - Produto

@@ -7,6 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=trafficcounter.db";
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? Array.Empty<string>();
 
 builder.Services.AddDbContextFactory<TrafficCounterDbContext>(options =>
     options.UseSqlite(connectionString));
@@ -21,15 +23,33 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy
-            .WithOrigins(
-                "http://localhost:5173",
-                "http://localhost:3000",
-                "http://127.0.0.1:5173"
-            )
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
+        if (allowedOrigins.Length > 0)
+        {
+            policy
+                .WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+            return;
+        }
+
+        if (builder.Environment.IsDevelopment())
+        {
+            policy
+                .WithOrigins(
+                    "http://localhost:5173",
+                    "http://localhost:3000",
+                    "http://127.0.0.1:5173"
+                )
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "Cors:AllowedOrigins must be configured outside development."
+        );
     });
 });
 

@@ -1,0 +1,15 @@
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Data Source=trafficcounter.dev.db"
+  },
+  "Cors": {
+    "AllowedOrigins": [
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "http://127.0.0.1:5173"
+    ]
+  },
+  "Security": {
+    "BackendApiKey": "SUA_API_KEY_DEV"
+  }
+}

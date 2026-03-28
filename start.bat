@@ -55,7 +55,7 @@ if not exist "%D%logs" mkdir "%D%logs"
 
 :: 1. Backend .NET
 echo 1. Iniciando API .NET (Backend)...
-start cmd /k "cd /d %D%TrafficCounter.Api && title [BACKEND] .NET API && dotnet run"
+start cmd /k "cd /d %D%TrafficCounter.Api && title [BACKEND] .NET API && set ASPNETCORE_ENVIRONMENT=Development && dotnet run"
 
 :: 2. Frontend React
 echo 2. Iniciando React (Frontend)...

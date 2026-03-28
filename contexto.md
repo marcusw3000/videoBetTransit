@@ -50,6 +50,7 @@ python app.py
 ```
 
 No Windows, `start.bat` sobe tudo e ainda garante a instalacao das dependencias Python antes de iniciar a engine.
+No ambiente local, o `start.bat` tambem sobe o backend com `ASPNETCORE_ENVIRONMENT=Development`.
 
 ## Estrutura de Pastas
 
@@ -124,7 +125,7 @@ Caracteristicas atuais:
 - migracao inicial versionada em `TrafficCounter.Api/Migrations`
 - rounds com encerramento automatico
 - rotas sensiveis protegidas por API key
-- CORS habilitado para desenvolvimento local
+- CORS configurado por ambiente via `Cors:AllowedOrigins`
 
 ## Frontend React
 
@@ -147,6 +148,22 @@ Observacao:
 - `VITE_MJPEG_TOKEN` e anexado ao feed no browser
 - `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL`, `VITE_BACKEND_API_KEY`, `VITE_MJPEG_URL` e `VITE_MJPEG_TOKEN` devem ser definidos por ambiente
 - `hls.js` foi removido do fluxo principal
+
+## Ambientes
+
+Backend .NET:
+- `TrafficCounter.Api/appsettings.json`: base local atual
+- `TrafficCounter.Api/appsettings.Development.json.example`: exemplo para desenvolvimento
+- `TrafficCounter.Api/appsettings.Production.json.example`: exemplo para producao
+
+Frontend React:
+- `traffic-counter-front/.env.example`: exemplo generico
+- `traffic-counter-front/.env.development.example`: exemplo para desenvolvimento
+- `traffic-counter-front/.env.production.example`: exemplo para producao
+
+Observacao:
+- em producao, `Cors:AllowedOrigins` deve ser definido explicitamente
+- as chaves do backend e do MJPEG devem ser diferentes e fortes
 
 ## Portas e Endpoints Locais
 

@@ -1,0 +1,13 @@
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Data Source=trafficcounter.prod.db"
+  },
+  "Cors": {
+    "AllowedOrigins": [
+      "https://seu-front.exemplo.com"
+    ]
+  },
+  "Security": {
+    "BackendApiKey": "TROQUE_POR_UMA_CHAVE_FORTE"
+  }
+}
