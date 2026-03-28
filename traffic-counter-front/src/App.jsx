@@ -141,6 +141,7 @@ function MarketPage() {
             <VideoPlayer
               src={liveStreamUrl}
               title="Rodovia Norte - Faixa A"
+              resetKey={round?.id}
             />
           </div>
 

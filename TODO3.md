@@ -36,6 +36,10 @@ Entregavel:
 - [ ] Definir o que o jogador ve no stream
 - [ ] Garantir regra visual: somente `mark line` e boxes para o cliente final
 - [ ] Definir historico comercial curto na home
+- [x] Definir principio de confianca da UX:
+  - video como transparencia visual
+  - backend como resultado oficial
+  - fechamento antecipado como protecao de fairness
 
 Entregavel:
 - UX `v1` clara para jogador
@@ -46,6 +50,10 @@ Entregavel:
 - [ ] Definir perfis por camera
 - [ ] Definir trilha de auditoria de round
 - [ ] Definir evidencias minimas por settlement
+- [x] Assumir estrategia de curto prazo com HLS:
+  - nao prometer "tempo real absoluto"
+  - reforcar status do round, timer e settlement oficial
+  - tratar o video como referencia visual do evento
 
 Entregavel:
 - produto jogavel e auditavel

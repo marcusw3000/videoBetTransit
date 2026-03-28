@@ -440,6 +440,12 @@ body {
   font-size: 22px;
 }
 
+.video-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
 .live-dot-wrapper {
   display: inline-flex;
   align-items: center;
@@ -471,6 +477,7 @@ body {
   border-radius: 18px;
   background: #050507;
   border: 1px solid #2d2d36;
+  user-select: none;
 }
 
 .video-element {
@@ -479,6 +486,9 @@ body {
   object-fit: contain;
   object-position: center;
   background: #000000;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .video-overlay-message {
@@ -492,6 +502,12 @@ body {
   font-weight: 600;
   text-align: center;
   padding: 20px;
+}
+
+.video-overlay-stack {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
 }
 
 /* ── Sections ─────────────────────────────────────────── */
@@ -784,6 +800,14 @@ body {
   .video-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .video-toolbar {
+    justify-content: stretch;
+  }
+
+  .video-toolbar .secondary-button {
+    width: 100%;
   }
 }
 

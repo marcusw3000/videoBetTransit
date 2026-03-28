@@ -1,0 +1,510 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfCameraXML xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CameraXML>
+    <id>8</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Bertioga</municipio>
+    <sentido>São Sebastião</sentido>
+    <km>211,000</km>
+    <link>10.23.230.151</link>
+    <image>CamSP055KM211S1.jpg</image>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM211A/stream.m3u8</videoLink>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>  
+  <CameraXML>
+    <id>17</id>
+    <rodovia>SP 324</rodovia>
+    <localizacao>Miguel Melhado Campos</localizacao>
+    <municipio>Praça de Pedágio de Itupeva</municipio>
+    <sentido>Vinhedo</sentido>
+    <km>81,000</km>
+    <link>http://10.23.241.158/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP324-KM081/stream.m3u8</videoLink>
+    <image>CamSP324km081S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>18</id>
+    <rodovia>SP 063</rodovia>
+    <localizacao>Alkindar Monteiro Junqueira</localizacao>
+    <municipio>Itatiba</municipio>
+    <sentido>Bragança Paulista</sentido>
+    <km>28,000</km>
+    <link>http://10.23.202.4/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP063-KM028/stream.m3u8</videoLink>
+    <image>CamSP063KM028S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>  
+  <CameraXML>
+    <id>21</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Taubaté</municipio>
+    <sentido>Campos do Jordão</sentido>
+    <km>8,000</km>
+    <link>https://34.104.32.249.nip.io/SP055-KM055/stream.m3u8</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM008/stream.m3u8</videoLink>
+    <image>CamSP123km008S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>22</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Bertioga</municipio>
+    <sentido>Santos</sentido>
+    <km>211,000</km>
+    <link>10.23.230.152</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM211B/stream.m3u8</videoLink>
+    <image>CamSP055KM211S2.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>27</id>
+    <rodovia>SP 008</rodovia>
+    <localizacao>Pedro Astenori Mariagliani (Capitão)</localizacao>
+    <municipio>Bragança Paulista</municipio>
+    <sentido>Socorro</sentido>
+    <km>95,000</km>
+    <link>http://10.23.201.167/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP008-KM095/stream.m3u8</videoLink>
+    <image>CamSP008km095S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>29</id>
+    <rodovia>SP 046</rodovia>
+    <localizacao>Oswaldo Barbosa Guisadi</localizacao>
+    <municipio>Santo Antônio do Pinhal</municipio>
+    <sentido>Trevo - km  33 SP 123</sentido>
+    <km>167,000</km>
+    <link>http://10.23.202.54/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP046-KM167/stream.m3u8</videoLink>
+    <image>CamSP046km167S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>30</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>Taubaté</municipio>
+    <sentido>Ubatuba</sentido>
+    <km>14,000</km>
+    <link>http://10.23.202.228/snapshot/view0.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM014/stream.m3u8</videoLink>
+    <image>CamSP125km014S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>31</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>São Luís do Paraitinga</municipio>
+    <sentido>Ubatuba</sentido>
+    <km>42,000</km>
+    <link>http://10.23.202.244/snapshot/view0.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM042/stream.m3u8</videoLink>
+    <image>CamSP125km042S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>  
+  <CameraXML>
+    <id>37</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Ubatuba</municipio>
+    <sentido>Caraguatatuba</sentido>
+    <km>55,000</km>
+    <link>http://10.23.201.167/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM055/stream.m3u8</videoLink>
+    <image>CamSP055km055S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>41</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Caraguatatuba</municipio>
+    <sentido>São Sebastião</sentido>
+    <km>83,500</km>
+    <link>http://10.23.202.164/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM083/stream.m3u8</videoLink>
+    <image>CamSP055km083S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>42</id>
+    <rodovia>SP 360</rodovia>
+    <localizacao>Constancio Cintra, Engenheiro</localizacao>
+    <municipio>Amparo</municipio>
+    <sentido>Morungaba</sentido>
+    <km>110,000</km>
+    <link>http://10.23.203.4/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP360-KM110/stream.m3u8</videoLink>
+    <image>CamSP360km110S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>44</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>Ubatuba</municipio>
+    <sentido>Taubaté</sentido>
+    <km>88,000</km>
+    <link>http://10.23.203.36/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM088A/stream.m3u8</videoLink>
+    <image>CamSP125km088S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>46</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Santo Antônio do Pinhal</municipio>
+    <sentido>Campos do Jordão</sentido>
+    <km>33,000</km>
+    <link>http://10.23.202.53/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM033A/stream.m3u8</videoLink>
+    <image>CamSP123km033S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>306</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Pindamonhangaba</municipio>
+    <sentido>Taubaté</sentido>
+    <km>33,000</km>
+    <link>http://10.23.202.53/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM033B/stream.m3u8</videoLink>
+    <image>CamSP123km033S1.jpg</image>
+    <ativo>True</ativo>
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>47</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Campos do Jordão</municipio>
+    <sentido>Campos do Jordão</sentido>
+    <km>46,000</km>
+    <link>http://10.23.201.132/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM046/stream.m3u8</videoLink>
+    <image>CamSP123km046S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>    
+  </CameraXML>
+  <CameraXML>
+    <id>49</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Pindamonhangaba</municipio>
+    <sentido>Taubaté</sentido>
+    <km>26,500</km>
+    <link>http://10.23.201.166/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM026A/stream.m3u8</videoLink>
+    <image>CamSP123km026S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>48</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Pindamonhangaba</municipio>
+    <sentido>Campos do Jordão</sentido>
+    <km>26,500</km>
+    <link>http://10.23.201.167/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM026B/stream.m3u8</videoLink>
+    <image>CamSP123km026S2.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>51</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Pindamonhangaba</municipio>
+    <sentido>Taubaté</sentido>
+    <km>31,000</km>
+    <link>http://10.23.201.164/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM031A/stream.m3u8</videoLink>
+    <image>CamSP123KM031S2.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>52</id>
+    <rodovia>SP 123</rodovia>
+    <localizacao>Floriano Rodrigues Pinheiro</localizacao>
+    <municipio>Pindamonhangaba</municipio>
+    <sentido>Campos do Jordão</sentido>
+    <km>31,000</km>
+    <link>http://10.23.201.165/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP123-KM031B/stream.m3u8</videoLink>
+    <image>CamSP123Km031S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>53</id>
+    <rodovia>SP 354</rodovia>
+    <localizacao>Edgard Máximo Zambotto</localizacao>
+    <municipio>Jarinu</municipio>
+    <sentido>Jarinu</sentido>
+    <km>75,400</km>
+    <link>http://10.23.202.36/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP354-KM075/stream.m3u8</videoLink>
+    <image>CamSP354km075S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>55</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>São Sebastião</municipio>
+    <sentido>Caraguatatuba</sentido>
+    <km>136,000</km>
+    <link>http://10.23.202.84/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM136/stream.m3u8</videoLink>
+    <image>CamSP055km136S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>56</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>São Sebastião</municipio>
+    <sentido>Bertioga</sentido>
+    <km>168,000</km>
+    <link>http://10.23.202.100/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM168/stream.m3u8</videoLink>
+    <image>CamSP055km168S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>57</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>Ubatuba</municipio>
+    <sentido>Taubate</sentido>
+    <km>81,000</km>
+    <link>http://10.23.203.38/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM081/stream.m3u8</videoLink>
+    <image>CamSP125km081S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>59</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Bertioga</municipio>
+    <sentido>São Sebastião</sentido>
+    <km>193,000</km>
+    <link>http://10.23.201.167/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM193/stream.m3u8</videoLink>
+    <image>CamSP055KM193S2.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>74</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Caraguatatuba</municipio>
+    <sentido>Ubatuba</sentido>
+    <km>110,800</km>
+    <link>http://10.23.203.148/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM110A/stream.m3u8</videoLink>
+    <image>CamSP055km112S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>77</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Caraguatatuba</municipio>
+    <sentido>São Sebastião</sentido>
+    <km>110,800</km>
+    <link>http://10.23.203.149/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM110B/stream.m3u8</videoLink>
+    <image>CamSP055km112S2.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>88</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>Ubatuba</municipio>
+    <sentido>Taubaté</sentido>
+    <km>93,000</km>
+    <link>http://10.23.203.84/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8</videoLink>
+    <image>CamSP125km093S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>95</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>São Luís do Paraitinga</municipio>
+    <sentido>Taubaté</sentido>
+    <km>67,000</km>
+    <link>http://10.23.203.196/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM067/stream.m3u8</videoLink>
+    <image>CamSP125km067S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>96</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Ubatuba</municipio>
+    <sentido>Caraguatatuba</sentido>
+    <km>73,000</km>
+    <link>https://34.104.32.249.nip.io/SP055-KM073/stream.m3u8</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM073/stream.m3u8</videoLink>
+    <image>CamSP055km073S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>113</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>Taubaté</municipio>
+    <sentido>Taubaté</sentido>
+    <km>21,000</km>
+    <link>10.23.203.180</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM022/stream.m3u8</videoLink>
+    <image>CamSP125km022S1.jpg</image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+    <CameraXML>
+    <id>1</id>
+    <rodovia>SP 304</rodovia>
+    <localizacao>Luiz de Queiroz</localizacao>
+    <municipio>Piracicaba</municipio>
+    <sentido>Santa Barbara do Oeste</sentido>
+    <km>157,000</km>
+    <link>10.23.203.180</link>
+    <videoLink>https://34.104.32.249.nip.io/SP304-KM157/stream.m3u8</videoLink>
+    <image></image>
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+    <CameraXML>
+    <id>114</id>
+    <rodovia>SP 055</rodovia>
+    <localizacao>Doutor Manoel Hyppolito Rego</localizacao>
+    <municipio>Caraguatatuba</municipio>
+    <sentido>São Sebastião</sentido>
+    <km>92,500</km>
+    <link>10.23.203.180</link>
+    <videoLink>https://34.104.32.249.nip.io/SP055-KM092/stream.m3u8</videoLink>   
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+  <CameraXML>
+    <id>115</id>
+    <rodovia>SP 125</rodovia>
+    <localizacao>Oswaldo Cruz</localizacao>
+    <municipio>Ubatuba</municipio>
+    <sentido>Ubatuba</sentido>
+    <km>93,000</km>
+    <link>http://10.23.203.84/snap.jpg</link>
+    <videoLink>https://34.104.32.249.nip.io/SP125-KM093A/stream.m3u8</videoLink> 
+    <ativo>True</ativo>
+    <motivo />
+    <cam_der>True</cam_der>
+    <isVideo>True</isVideo>
+  </CameraXML>
+</ArrayOfCameraXML>

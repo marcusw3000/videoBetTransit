@@ -54,8 +54,14 @@ Entregavel:
 - [ ] Definir trusted origins, CSP e frame policy
 - [ ] Definir rollout controlado por operador
 - [ ] Definir monitoracao, alertas e runbooks
-- [ ] Definir estrategia final de latencia e transparencia para o cliente final.
-- [~] Levar como baseline tecnica atual: tuning moderado de FFmpeg + engine mais leve, sem prometer latencia subsegundo com HLS.
+- [~] Definir estrategia final de latencia e transparencia para o cliente final.
+- [x] Definir estrategia de curto prazo: manter HLS atual com backend como fonte oficial do resultado e fechar aposta antes do fim do round.
+- [x] Levar como baseline tecnica atual: tuning moderado de FFmpeg + engine mais leve, sem prometer latencia subsegundo com HLS.
+- [ ] Preparar pacote de transparencia para o operador:
+  - explicacao da `mark line`
+  - regra de fechamento antecipado
+  - criterio de `void`
+  - trilha de auditoria por `round_id`
 
 Entregavel:
 - plano de entrada em producao regulada

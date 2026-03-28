@@ -125,15 +125,18 @@ Quando usar:
 
 ## 3. Recomendacao para o produto
 
+Direcao escolhida para o curto prazo:
+- seguir a estrategia de confianca baseada em backend oficial e trilha de auditoria, mesmo mantendo HLS como origem publica atual
+
 Recomendacao principal:
 1. manter o backend como fonte oficial do resultado
-2. entregar ao cliente o video com o menor atraso possivel
+2. aceitar que o video do cliente pode ter atraso residual com HLS
 3. fechar apostas antes do fim do round
 4. mostrar apenas overlays minimos ao cliente
 5. manter trilha de auditoria completa
 
 Equilibrio recomendado:
-- curto prazo: melhorar a entrega atual sem quebrar estabilidade
+- curto prazo: seguir o Plano 2, reforcando transparencia e auditabilidade sem prometer latencia subsegundo
 - medio prazo: revisar protocolo de streaming
 - longo prazo: avaliar `WebRTC`
 
@@ -173,6 +176,42 @@ Sempre deixar claro:
 - o resultado oficial e consolidado ao final do round
 - rounds podem ser anulados em caso de falha tecnica relevante
 
+## 4.4 Fonte oficial e video de referencia
+
+Regra:
+- o video exibido ao cliente e uma referencia visual de transparencia
+- o resultado oficial do round vem do backend persistido
+
+Implicacao pratica:
+- a UX nao deve sugerir que o video por si so decide o resultado
+- a UX deve reforcar `round_id`, timer, status do round e settlement oficial
+
+## 4.5 Evidencias minimas por round
+
+Cada round deve manter pelo menos:
+- `round_id`
+- `camera_id`
+- `bet_close_at`
+- `ends_at`
+- `final_count`
+- `settlement_status`
+- `count-events`
+- motivo de `void`, quando existir
+
+Quando aplicavel:
+- snapshots de revisao
+- registro tecnico suficiente para disputa e auditoria
+
+## 4.6 Reset automatico da live na virada do round
+
+Regra:
+- sempre que um round terminar e um novo round iniciar, a live deve ser resetada automaticamente
+
+Objetivo:
+- tentar reduzir o drift acumulado da stream entre rounds
+- dar ao cliente uma nova conexao com menor buffer residual
+- alinhar a experiencia visual com a virada oficial do round
+
 ---
 
 ## 5. Estrategia de implementacao
@@ -190,6 +229,7 @@ Status atual:
 - [x] instrumentacao basica da pipeline adicionada ao `/health`
 - [x] medir diferenca real entre stream original e stream anotado
 - [x] encontrar um baseline estavel de baixa latencia sem alterar a arquitetura base
+- [x] escolher a estrategia de curto prazo baseada em transparencia, fechamento antecipado e settlement oficial
 
 Baseline encontrada:
 - tuning moderado da captura FFmpeg melhorou fortemente o buffer de entrada
@@ -199,6 +239,9 @@ Baseline encontrada:
 Leitura importante:
 - o grande atraso original vinha muito mais de buffer da origem/captura do que de render do frontend
 - HLS continua impondo um piso de latencia; a baseline atual melhora bastante, mas nao substitui uma revisao futura de protocolo
+
+Decisao de curto prazo:
+- manter HLS enquanto a confianca do produto sera sustentada por backend oficial, fechamento antecipado de aposta, overlay minimo e trilha de auditoria
 
 ## Fase 2 - Reducao de atraso com baixo risco
 
