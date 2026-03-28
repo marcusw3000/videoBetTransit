@@ -215,7 +215,7 @@ Entregavel esperado:
 - [x] Revisar `backend_client.py` para timeout, retry e logging mais claros.
 - [x] Tratar queda temporaria do backend sem travar o loop principal.
 - [x] Evitar explosao de threads se o backend estiver indisponivel.
-- [ ] Considerar fila interna com descarte controlado para eventos.
+- [x] Considerar fila interna com descarte controlado para eventos.
 
 Objetivo:
 - Fazer a engine degradar de forma segura em caso de falha externa.
@@ -455,7 +455,7 @@ Definicao de pronto:
 - [x] Testes Python
 - [x] Testes backend
 - [x] Observabilidade
-- [~] Resiliencia do `backend_client.py`
+- [x] Resiliencia do `backend_client.py`
 
 ### Fase 3 - Operacao
 - [ ] Melhorar `start.bat`

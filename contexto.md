@@ -90,6 +90,7 @@ Responsabilidades principais:
 - salvar snapshots opcionais
 - enviar `count-events` e `live-detections`
 - servir `/health` e `/video_feed` via Flask, publicados por `waitress`
+- enfileirar envios HTTP com workers fixos e descarte controlado quando o backend atrasar
 
 Configuracoes relevantes em `config.json`:
 - `stream_url`: URL do stream da camera
@@ -112,6 +113,8 @@ Observacao importante:
 - o feed MJPEG pode exigir `token` na query string
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
+- `count-events` usa backlog curto com descarte explicito quando a fila enche
+- `live-detections` prioriza o frame mais recente quando a fila satura
 
 ## Backend .NET
 
