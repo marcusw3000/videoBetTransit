@@ -4,6 +4,7 @@
   "tracker": "botsort_traffic.yaml",
   "backend_url": "http://localhost:5000/api/rounds/count-events",
   "api_key": "SUA_API_KEY",
+  "mjpeg_token": "SUA_MJPEG_TOKEN",
   "camera_id": "cam_001",
   "round_id": "rnd_001",
   "allowed_classes": {

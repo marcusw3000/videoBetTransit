@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using TrafficCounter.Api.Hubs;
 using TrafficCounter.Api.Models;
+using TrafficCounter.Api.Security;
 using TrafficCounter.Api.Services;
 
 namespace TrafficCounter.Api.Controllers;
@@ -38,6 +39,7 @@ public class RoundsController : ControllerBase
     }
 
     [HttpPost("settle")]
+    [RequireApiKey]
     public async Task<IActionResult> Settle()
     {
         var currentId = _roundService.GetCurrent().Id;
@@ -52,6 +54,7 @@ public class RoundsController : ControllerBase
     }
 
     [HttpPost("count-events")]
+    [RequireApiKey]
     public async Task<IActionResult> ReceiveCountEvent([FromBody] CountEvent evt)
     {
         var round = _roundService.SyncCount(evt);

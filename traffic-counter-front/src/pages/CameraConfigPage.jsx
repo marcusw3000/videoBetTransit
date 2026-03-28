@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
-import { API_BASE_URL, CAMERA_PREVIEW_URL } from '../config'
+import { API_BASE_URL, BACKEND_API_KEY, CAMERA_PREVIEW_URL } from '../config'
 
-const api = axios.create({ baseURL: API_BASE_URL })
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: BACKEND_API_KEY ? { 'X-API-Key': BACKEND_API_KEY } : {},
+})
 
 export default function CameraConfigPage() {
   const previewRef = useRef(null)

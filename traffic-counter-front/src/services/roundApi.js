@@ -1,8 +1,9 @@
 import axios from 'axios'
-import { API_BASE_URL } from '../config'
+import { API_BASE_URL, BACKEND_API_KEY } from '../config'
 
 const api = axios.create({
-  baseURL: API_BASE_URL
+  baseURL: API_BASE_URL,
+  headers: BACKEND_API_KEY ? { 'X-API-Key': BACKEND_API_KEY } : {},
 })
 
 const MAX_RETRIES = 10

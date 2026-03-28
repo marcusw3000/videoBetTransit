@@ -51,6 +51,7 @@ class BackendClient:
         try:
             resp = self._session.get(
                 f"{self.camera_config_url}/{camera_id}",
+                headers=self._default_headers,
                 timeout=3,
             )
             if resp.status_code == 200:

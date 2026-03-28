@@ -7,11 +7,14 @@ namespace TrafficCounter.Api.Tests;
 
 public class CameraConfigApiTests
 {
+    private const string ApiKey = "SUA_API_KEY";
+
     [Fact]
     public async Task SaveAndGetConfig_PersistsCameraConfiguration()
     {
         using var factory = new CustomWebApplicationFactory();
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
 
         var payload = new CameraConfigDto
         {
@@ -43,9 +46,21 @@ public class CameraConfigApiTests
     {
         using var factory = new CustomWebApplicationFactory();
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
 
         var response = await client.GetAsync("/api/camera-config/cam-missing");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SaveConfig_ReturnsUnauthorized_WhenApiKeyIsMissing()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/camera-config/cam-unauthorized", new CameraConfigDto());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

@@ -2,11 +2,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using TrafficCounter.Api.Hubs;
 using TrafficCounter.Api.Models;
+using TrafficCounter.Api.Security;
 
 namespace TrafficCounter.Api.Controllers;
 
 [ApiController]
 [Route("api/live-detections")]
+[RequireApiKey]
 public class LiveDetectionsController : ControllerBase
 {
     private readonly IHubContext<OverlayHub> _overlayHub;

@@ -6,6 +6,7 @@ namespace TrafficCounter.Api.Tests;
 
 public class RoundsApiTests
 {
+    private const string ApiKey = "SUA_API_KEY";
 
     [Fact]
     public async Task GetCurrent_ReturnsRunningRound()
@@ -26,6 +27,7 @@ public class RoundsApiTests
     {
         using var factory = new CustomWebApplicationFactory();
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
         var currentRound = await client.GetFromJsonAsync<Round>("/api/rounds/current");
         Assert.NotNull(currentRound);
 
@@ -79,6 +81,7 @@ public class RoundsApiTests
     {
         using var factory = new CustomWebApplicationFactory();
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
 
         var previousRound = await client.GetFromJsonAsync<Round>("/api/rounds/current");
         Assert.NotNull(previousRound);
@@ -113,5 +116,16 @@ public class RoundsApiTests
         var settledRound = Assert.Single(history, r => r.Id == previousRound.Id);
         Assert.Equal("settled", settledRound.Status);
         Assert.Equal(3, settledRound.FinalCount);
+    }
+
+    [Fact]
+    public async Task Settle_ReturnsUnauthorized_WhenApiKeyIsMissing()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/rounds/settle", content: null);
+
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

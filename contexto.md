@@ -14,11 +14,13 @@ Python app.py
 Backend .NET 8
   - persiste round atual, historico, count-events e camera-config em SQLite
   - recebe count-events da engine
+  - protege rotas sensiveis com `X-API-Key`
   - publica atualizacoes via SignalR
 
 Frontend React
   - consome REST e SignalR do backend
   - exibe o feed MJPEG anotado vindo do Python
+  - envia API key nas acoes administrativas
   - mostra contador, timer, faixas e historico
 ```
 
@@ -86,6 +88,8 @@ Configuracoes relevantes em `config.json`:
 - `stream_url`: URL do stream da camera
 - `model`: arquivo do modelo YOLO
 - `tracker`: arquivo do tracker
+- `api_key`: chave usada para falar com o backend protegido
+- `mjpeg_token`: token exigido pelo endpoint MJPEG
 - `roi`: regiao de interesse
 - `line`: linha de contagem
 - `count_direction`: `up`, `down` ou `any`
@@ -98,6 +102,7 @@ Observacao importante:
 - o browser nao desenha mais overlay separado sobre HLS
 - o frame anotado sai pronto do Python
 - isso evita o atraso visual entre video e boxes
+- o feed MJPEG pode exigir `token` na query string
 
 ## Backend .NET
 
@@ -118,6 +123,7 @@ Caracteristicas atuais:
 - persistencia local em SQLite via EF Core
 - migracao inicial versionada em `TrafficCounter.Api/Migrations`
 - rounds com encerramento automatico
+- rotas sensiveis protegidas por API key
 - CORS habilitado para desenvolvimento local
 
 ## Frontend React
@@ -137,6 +143,9 @@ Fluxo atual:
 Observacao:
 - `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
 - a tela de configuracao tambem usa preview MJPEG
+- `VITE_BACKEND_API_KEY` protege chamadas administrativas do frontend
+- `VITE_MJPEG_TOKEN` e anexado ao feed no browser
+- `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL`, `VITE_BACKEND_API_KEY`, `VITE_MJPEG_URL` e `VITE_MJPEG_TOKEN` devem ser definidos por ambiente
 - `hls.js` foi removido do fluxo principal
 
 ## Portas e Endpoints Locais
@@ -149,6 +158,7 @@ Observacao:
 ## Pontos de Atencao
 
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
+- Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
 - Se o frontend estiver em HTTPS e o MJPEG em HTTP, pode haver bloqueio por mixed content.
 - A `.venv` precisa estar atualizada com `requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.

@@ -278,10 +278,10 @@ Entregavel esperado:
 - Backend com persistencia.
 
 ### 13. Adicionar autenticacao e autorizacao
-- [ ] Proteger rotas administrativas.
-- [ ] Proteger alteracao de configuracoes da camera.
-- [ ] Proteger endpoint de settle manual.
-- [ ] Definir se o feed MJPEG deve ser publico ou protegido.
+- [x] Proteger rotas administrativas.
+- [x] Proteger alteracao de configuracoes da camera.
+- [x] Proteger endpoint de settle manual.
+- [x] Definir se o feed MJPEG deve ser publico ou protegido.
 - [ ] Adicionar politica de CORS e segredos por ambiente.
 
 Objetivo:
@@ -361,26 +361,26 @@ Entregavel esperado:
 ## Ordem recomendada de execucao
 
 ### Fase 1 - Limpeza e consolidacao
-- [ ] Remover HLS legado
-- [ ] Extrair funcao de anotacao
-- [ ] Corrigir encoding
-- [ ] Mover configuracoes para `.env`
+- [x] Remover HLS legado
+- [x] Extrair funcao de anotacao
+- [x] Corrigir encoding
+- [x] Mover configuracoes para `.env`
 
 ### Fase 2 - Confiabilidade
-- [ ] Testes Python
-- [ ] Testes backend
-- [ ] Observabilidade
-- [ ] Resiliencia do `backend_client.py`
+- [x] Testes Python
+- [x] Testes backend
+- [x] Observabilidade
+- [~] Resiliencia do `backend_client.py`
 
 ### Fase 3 - Operacao
 - [ ] Melhorar `start.bat`
-- [ ] Melhorar `/health`
-- [ ] Medir gargalos de MJPEG
+- [x] Melhorar `/health`
+- [ ] Medir gargalos de MJPEG em ambiente real
 
 ### Fase 4 - Producao
 - [ ] Servidor MJPEG apropriado
-- [ ] Persistencia
-- [ ] Seguranca
+- [x] Persistencia
+- [~] Seguranca
 - [ ] Estrategia de deploy unificada
 
 ### Fase 5 - Produto
@@ -410,6 +410,7 @@ Entregavel esperado:
 ### Fase 4 pronta quando
 - reinicio nao apaga dados importantes
 - acesso sensivel estiver protegido
+- segredos e CORS estiverem separados por ambiente
 - publicacao nao depender de ajustes manuais no codigo
 
 ### Fase 5 pronta quando

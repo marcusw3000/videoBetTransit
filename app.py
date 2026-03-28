@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 
 import cv2
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 from ultralytics import YOLO
 
 from backend_client import BackendClient
@@ -104,6 +104,7 @@ class RuntimeStats:
 
 runtime_stats = RuntimeStats()
 backend_client_ref: BackendClient | None = None
+mjpeg_token_ref: str = ""
 
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
@@ -145,8 +146,20 @@ def health():
     return jsonify(runtime_stats.snapshot(backend_health))
 
 
+def is_mjpeg_request_authorized() -> bool:
+    if not mjpeg_token_ref:
+        return True
+
+    header_token = request.headers.get("X-API-Key", "")
+    query_token = request.args.get("token", "")
+    return header_token == mjpeg_token_ref or query_token == mjpeg_token_ref
+
+
 @mjpeg_app.get("/video_feed")
 def video_feed():
+    if not is_mjpeg_request_authorized():
+        return jsonify({"message": "Invalid or missing MJPEG token."}), 401
+
     def generate():
         last_sent = None
         runtime_stats.add_mjpeg_client()
@@ -399,7 +412,7 @@ CONFIG_POLL_INTERVAL = 10
 
 
 def main():
-    global backend_client_ref
+    global backend_client_ref, mjpeg_token_ref
 
     cfg = load_config()
 
@@ -408,6 +421,7 @@ def main():
     model = YOLO(cfg["model"])
     backend = BackendClient(cfg["backend_url"], cfg["api_key"])
     backend_client_ref = backend
+    mjpeg_token_ref = str(cfg.get("mjpeg_token", "")).strip()
     stream = StreamCapture(cfg["stream_url"], stats=runtime_stats)
     run_mjpeg_server(
         host=cfg.get("mjpeg_host", "0.0.0.0"),

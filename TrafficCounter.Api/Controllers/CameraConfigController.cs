@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
 using TrafficCounter.Api.Models;
+using TrafficCounter.Api.Security;
 using TrafficCounter.Api.Services;
 
 namespace TrafficCounter.Api.Controllers;
 
 [ApiController]
 [Route("api/camera-config")]
+[RequireApiKey]
 public class CameraConfigController : ControllerBase
 {
     private readonly CameraConfigService _configService;
