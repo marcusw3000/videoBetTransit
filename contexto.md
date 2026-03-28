@@ -93,8 +93,13 @@ Responsabilidades principais:
 
 Configuracoes relevantes em `config.json`:
 - `stream_url`: URL do stream da camera
+- `ffmpeg_capture_options`: opcoes de captura do FFmpeg via OpenCV, usadas para tentar reduzir buffer
+- `stream_buffer_size`: tamanho do buffer da captura OpenCV
+- `stream_open_timeout_ms`: timeout de abertura da captura
+- `stream_read_timeout_ms`: timeout de leitura da captura
 - `model`: arquivo do modelo YOLO
 - `tracker`: arquivo do tracker
+- `imgsz`: tamanho da inferencia, usado para equilibrar custo da engine e qualidade de deteccao
 - `api_key`: chave usada para falar com o backend protegido
 - `mjpeg_token`: token exigido pelo endpoint MJPEG
 - `roi`: regiao de interesse
@@ -112,6 +117,10 @@ Observacao importante:
 - o feed MJPEG pode exigir `token` na query string
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
+- a baseline atual de latencia ficou boa com:
+  - `ffmpeg_capture_options`: `fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;32768`
+  - `stream_buffer_size`: `1`
+  - `imgsz`: `320`
 
 ## Backend .NET
 
@@ -163,6 +172,12 @@ Observacao:
 - o frontend nao possui mais tela de configuracao de ROI/linha
 - `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL` e `VITE_MJPEG_URL` devem ser definidos por ambiente
 - `hls.js` foi removido do fluxo principal
+
+Latencia:
+- o `/health` do Python expõe tambem latencia interna basica da pipeline
+- `lastPipelineMs` e `avgPipelineMs` representam o tempo entre a captura local do frame e a publicacao do frame anotado na memoria do MJPEG
+- esses numeros ajudam a separar atraso interno da engine do atraso percebido da origem do stream
+- a maior parte do atraso historico estava na captura/origem HLS; depois do tuning moderado e da reducao do `imgsz`, a stream anotada passou a ficar muito proxima da original
 
 ## Ambientes
 

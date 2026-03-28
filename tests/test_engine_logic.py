@@ -1,6 +1,12 @@
 import unittest
 
-from app import bbox_area, crossed_horizontal_segment, inside_roi, should_count_track
+from app import (
+    bbox_area,
+    crossed_horizontal_segment,
+    inside_roi,
+    resolve_round_sync,
+    should_count_track,
+)
 
 
 class InsideRoiTests(unittest.TestCase):
@@ -192,6 +198,37 @@ class ShouldCountTrackTests(unittest.TestCase):
                 already_counted=False,
             )
         )
+
+
+class ResolveRoundSyncTests(unittest.TestCase):
+    def test_keeps_current_round_when_backend_payload_is_missing(self):
+        round_id, total, changed = resolve_round_sync("rnd_1", None, 4)
+
+        self.assertEqual("rnd_1", round_id)
+        self.assertEqual(4, total)
+        self.assertFalse(changed)
+
+    def test_detects_round_change_and_resets_total_to_backend_count(self):
+        round_id, total, changed = resolve_round_sync(
+            "rnd_1",
+            {"id": "rnd_2", "currentCount": 0},
+            9,
+        )
+
+        self.assertEqual("rnd_2", round_id)
+        self.assertEqual(0, total)
+        self.assertTrue(changed)
+
+    def test_keeps_total_when_round_is_the_same(self):
+        round_id, total, changed = resolve_round_sync(
+            "rnd_2",
+            {"id": "rnd_2", "currentCount": 0},
+            6,
+        )
+
+        self.assertEqual("rnd_2", round_id)
+        self.assertEqual(6, total)
+        self.assertFalse(changed)
 
 
 if __name__ == "__main__":

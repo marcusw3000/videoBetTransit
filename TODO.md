@@ -2,6 +2,18 @@
 
 Checklist de evolucao do projeto, organizado por prioridade, impacto e area tecnica. A ideia e servir como guia pratico de implementacao nas proximas iteracoes.
 
+## Estado de referencia atual
+
+Ponto de restauracao:
+- commit atual de referencia: `9230acf` (`todo 82`)
+
+Observacao importante:
+- este arquivo continua registrando o backlog historico do projeto
+- depois do rollback, parte do que foi planejado ou experimentado acima do `9230acf` deixou de estar refletido no codigo atual
+- os proximos passos seguros ficam detalhados em [`RETOMADA.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\RETOMADA.md)
+- os planejamentos de expansao de produto e integracao regulada foram reorganizados em [`TODO2.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\TODO2.md), [`TODO3.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\TODO3.md) e [`SPRINTS.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\SPRINTS.md)
+- a baseline operacional atual de latencia ficou boa com tuning moderado do FFmpeg e `imgsz: 320`
+
 ## Como usar este arquivo
 
 - `[ ]` nao iniciado
@@ -385,11 +397,15 @@ Itens:
 - [ ] Revisar consumo de CPU do encode JPEG.
 - [ ] Avaliar reduzir resolucao ou `imgsz` dinamicamente por camera.
 - [ ] Medir gargalos de MJPEG em ambiente real com camera e navegador conectados.
+- [x] Instrumentar a engine para expor latencia interna basica da pipeline (`capture -> annotate -> encode`).
+- [x] Medir diferenca percebida entre stream original e stream anotado em ambiente real.
+- [x] Encontrar uma baseline operacional de baixa latencia sem quebrar a estabilidade.
 
 Definicao de pronto:
 - existe uma medicao comparativa antes/depois
 - a estrategia de qualidade JPEG e resolucao por camera fica explicita
 - o custo por frame deixa de ser caixa-preta
+- existe uma configuracao base conhecida que reduz fortemente o atraso sem quebrar a janela Python
 
 ### BT3 - Qualidade de deteccao
 

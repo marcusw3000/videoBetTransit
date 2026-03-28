@@ -31,6 +31,7 @@ class RuntimeStats:
         self._lock = threading.Lock()
         self._started_at = time.time()
         self._frames_processed = 0
+        self._last_capture_at = None
         self._last_frame_at = None
         self._fps_instant = 0.0
         self._fps_average = 0.0
@@ -38,11 +39,17 @@ class RuntimeStats:
         self._avg_inference_ms = 0.0
         self._last_jpeg_encode_ms = 0.0
         self._avg_jpeg_encode_ms = 0.0
+        self._last_pipeline_ms = 0.0
+        self._avg_pipeline_ms = 0.0
         self._mjpeg_clients = 0
         self._stream_connected = False
         self._stream_failures = 0
         self._last_stream_error_at = None
         self._total_count = 0
+
+    def record_capture(self, captured_at: float):
+        with self._lock:
+            self._last_capture_at = captured_at
 
     def record_processed_frame(self, total_count: int):
         now_ts = time.time()
@@ -70,6 +77,12 @@ class RuntimeStats:
             n = self._frames_processed or 1
             self._avg_jpeg_encode_ms += (duration_ms - self._avg_jpeg_encode_ms) / n
 
+    def record_pipeline_ms(self, duration_ms: float):
+        with self._lock:
+            self._last_pipeline_ms = duration_ms
+            n = self._frames_processed or 1
+            self._avg_pipeline_ms += (duration_ms - self._avg_pipeline_ms) / n
+
     def set_stream_status(self, connected: bool, failures: int):
         with self._lock:
             self._stream_connected = connected
@@ -96,9 +109,12 @@ class RuntimeStats:
                 "avgInferenceMs": round(self._avg_inference_ms, 2),
                 "lastJpegEncodeMs": round(self._last_jpeg_encode_ms, 2),
                 "avgJpegEncodeMs": round(self._avg_jpeg_encode_ms, 2),
+                "lastPipelineMs": round(self._last_pipeline_ms, 2),
+                "avgPipelineMs": round(self._avg_pipeline_ms, 2),
                 "mjpegClients": self._mjpeg_clients,
                 "streamConnected": self._stream_connected,
                 "streamFailures": self._stream_failures,
+                "lastCaptureAt": self._last_capture_at,
                 "lastFrameAt": self._last_frame_at,
                 "lastStreamErrorAt": self._last_stream_error_at,
                 "totalCount": self._total_count,
@@ -275,6 +291,38 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def resolve_round_sync(
+    current_round_id: str,
+    backend_round: dict | None,
+    current_total: int,
+) -> tuple[str, int, bool]:
+    if not backend_round:
+        return current_round_id, current_total, False
+
+    backend_round_id = str(backend_round.get("id", "")).strip()
+    if not backend_round_id:
+        return current_round_id, current_total, False
+
+    backend_total = int(backend_round.get("currentCount", 0) or 0)
+    if backend_round_id != current_round_id:
+        return backend_round_id, backend_total, True
+
+    return backend_round_id, current_total, False
+
+
+def normalize_ffmpeg_capture_options(options) -> str:
+    if isinstance(options, str):
+        return options.strip()
+
+    if isinstance(options, dict):
+        parts = []
+        for key, value in options.items():
+            parts.append(f"{key};{value}")
+        return "|".join(parts)
+
+    return ""
+
+
 def inside_roi(cx: int, cy: int, roi: dict) -> bool:
     return (
         roi["x"] <= cx <= roi["x"] + roi["w"]
@@ -353,16 +401,14 @@ def annotate_frame(
     line: dict,
     detections_list: list[dict],
     total: int,
+    *,
+    show_roi: bool = True,
+    show_labels: bool = True,
+    show_centers: bool = True,
+    show_total: bool = True,
 ):
     annotated = frame.copy()
 
-    cv2.rectangle(
-        annotated,
-        (roi["x"], roi["y"]),
-        (roi["x"] + roi["w"], roi["y"] + roi["h"]),
-        (255, 255, 0),
-        2,
-    )
     cv2.line(
         annotated,
         (line["x1"], line["y1"]),
@@ -370,6 +416,15 @@ def annotate_frame(
         (0, 0, 255),
         3,
     )
+
+    if show_roi:
+        cv2.rectangle(
+            annotated,
+            (roi["x"], roi["y"]),
+            (roi["x"] + roi["w"], roi["y"] + roi["h"]),
+            (255, 255, 0),
+            2,
+        )
 
     for det in detections_list:
         dx = det["bbox"]["x"]
@@ -381,29 +436,32 @@ def annotate_frame(
         color = (0, 255, 0) if det["counted"] else (0, 165, 255)
 
         cv2.rectangle(annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
+        if show_labels:
+            cv2.putText(
+                annotated,
+                f"#{tid} {vtype}",
+                (dx, dy - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                1,
+            )
+
+        if show_centers:
+            cx_d = det["center"]["x"]
+            cy_d = det["center"]["y"]
+            cv2.circle(annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
+
+    if show_total:
         cv2.putText(
             annotated,
-            f"#{tid} {vtype}",
-            (dx, dy - 5),
+            f"TOTAL: {total}",
+            (30, 50),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color,
-            1,
+            1.2,
+            (0, 255, 0),
+            3,
         )
-
-        cx_d = det["center"]["x"]
-        cy_d = det["center"]["y"]
-        cv2.circle(annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
-
-    cv2.putText(
-        annotated,
-        f"TOTAL: {total}",
-        (30, 50),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.2,
-        (0, 255, 0),
-        3,
-    )
 
     return annotated
 
@@ -697,9 +755,10 @@ class ConfigEditor:
 
 
 class EditorControlPanel:
-    def __init__(self, editor: ConfigEditor, on_save):
+    def __init__(self, editor: ConfigEditor, on_save, on_reset_stream):
         self.editor = editor
         self.on_save = on_save
+        self.on_reset_stream = on_reset_stream
         self.should_close = False
         self._root = tk.Tk()
         self._root.title("Controles de Configuracao")
@@ -725,21 +784,24 @@ class EditorControlPanel:
         ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
             row=2, column=1, sticky="ew", pady=(0, 6)
         )
-        ttk.Button(frame, text="Fechar", command=self.request_close).grid(
+        ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
             row=3, column=0, columnspan=2, sticky="ew"
+        )
+        ttk.Button(frame, text="Fechar", command=self.request_close).grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
 
         self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
         self._message_var = tk.StringVar(value=self.editor.message)
         ttk.Label(frame, textvariable=self._mode_var).grid(
-            row=4, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=5, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         ttk.Label(frame, textvariable=self._message_var, wraplength=260).grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=6, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
-        ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, Q").grid(
-            row=6, column=0, columnspan=2, sticky="w", pady=(10, 0)
+        ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, T, Q").grid(
+            row=7, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
 
     def refresh(self):
@@ -757,6 +819,9 @@ class EditorControlPanel:
     def cancel(self):
         self.editor.cancel()
 
+    def reset_stream(self):
+        self.on_reset_stream()
+
     def request_close(self):
         self.should_close = True
 
@@ -773,19 +838,51 @@ class EditorControlPanel:
 class StreamCapture:
     MAX_FAILURES = 30
 
-    def __init__(self, url: str, stats: RuntimeStats | None = None):
+    def __init__(
+        self,
+        url: str,
+        stats: RuntimeStats | None = None,
+        *,
+        ffmpeg_options=None,
+        buffer_size: int = 1,
+        open_timeout_ms: int = 5000,
+        read_timeout_ms: int = 5000,
+    ):
         self.url = url
         self.stats = stats
         self.cap: cv2.VideoCapture | None = None
         self._fail_count = 0
+        self.ffmpeg_options = normalize_ffmpeg_capture_options(ffmpeg_options)
+        self.buffer_size = max(1, int(buffer_size))
+        self.open_timeout_ms = max(0, int(open_timeout_ms))
+        self.read_timeout_ms = max(0, int(read_timeout_ms))
         self._connect()
 
     def _connect(self):
         if self.cap is not None:
             self.cap.release()
 
+        if self.ffmpeg_options:
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = self.ffmpeg_options
+
         logger.info("Conectando ao stream: %s", self.url)
+        if self.ffmpeg_options:
+            logger.info("FFmpeg capture options: %s", self.ffmpeg_options)
         self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
+        except Exception:
+            pass
+        try:
+            if self.open_timeout_ms > 0:
+                self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.open_timeout_ms)
+        except Exception:
+            pass
+        try:
+            if self.read_timeout_ms > 0:
+                self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.read_timeout_ms)
+        except Exception:
+            pass
         self._fail_count = 0
         if self.stats is not None:
             self.stats.set_stream_status(self.cap.isOpened(), self._fail_count)
@@ -811,6 +908,10 @@ class StreamCapture:
             self.stats.set_stream_status(True, self._fail_count)
         return True, frame
 
+    def reset(self):
+        logger.info("Reset manual do stream solicitado.")
+        self._connect()
+
     def release(self):
         if self.cap:
             self.cap.release()
@@ -821,7 +922,15 @@ class StreamCapture:
 # ---------------------------------------------------------------------------
 LIVE_SEND_INTERVAL = 0.2
 CONFIG_POLL_INTERVAL = 10
+ROUND_SYNC_INTERVAL = 1
 WINDOW_NAME = "Traffic Counter"
+
+
+def poll_window_key(delay_ms: int = 1) -> int:
+    if hasattr(cv2, "pollKey"):
+        key = cv2.pollKey()
+        return key if key != -1 else -1
+    return cv2.waitKey(delay_ms)
 
 
 def main():
@@ -836,7 +945,14 @@ def main():
     backend = BackendClient(cfg["backend_url"], cfg["api_key"])
     backend_client_ref = backend
     mjpeg_token_ref = str(cfg.get("mjpeg_token", "")).strip()
-    stream = StreamCapture(cfg["stream_url"], stats=runtime_stats)
+    stream = StreamCapture(
+        cfg["stream_url"],
+        stats=runtime_stats,
+        ffmpeg_options=cfg.get("ffmpeg_capture_options"),
+        buffer_size=int(cfg.get("stream_buffer_size", 1)),
+        open_timeout_ms=int(cfg.get("stream_open_timeout_ms", 5000)),
+        read_timeout_ms=int(cfg.get("stream_read_timeout_ms", 5000)),
+    )
     active_stream_ref = stream
     mjpeg_server = run_mjpeg_server(
         host=cfg.get("mjpeg_host", "0.0.0.0"),
@@ -855,6 +971,7 @@ def main():
     frame_count = 0
     last_live_send = 0.0
     last_config_poll = 0.0
+    last_round_sync = 0.0
 
     roi = cfg["roi"]
     line = cfg["line"]
@@ -862,8 +979,20 @@ def main():
     min_hits_to_count = int(cfg.get("min_hits_to_count", 4))
     max_track_history_age = int(cfg.get("max_track_history_age", 300))
     min_bbox_area = int(cfg.get("min_bbox_area", 100))
+    imgsz = int(cfg.get("imgsz", 416))
     editor = None
     control_panel = None
+    reset_stream_requested = False
+    current_round_id = str(cfg.get("round_id", "")).strip()
+
+    def reset_tracking_state():
+        nonlocal total
+
+        total = 0
+        last_positions.clear()
+        last_seen.clear()
+        track_hits.clear()
+        counted_ids.clear()
 
     def save_editor_state():
         nonlocal roi, line
@@ -891,24 +1020,57 @@ def main():
         else:
             editor.message = "Saved locally, but backend sync failed"
 
+    def request_stream_reset():
+        nonlocal reset_stream_requested
+
+        reset_stream_requested = True
+        if editor is not None:
+            editor.message = "Manual stream reset requested"
+
+    backend_round = backend.fetch_current_round()
+    current_round_id, total, round_changed = resolve_round_sync(
+        current_round_id,
+        backend_round,
+        total,
+    )
+    if round_changed:
+        reset_tracking_state()
+
     if cfg.get("show_window", True):
         editor = ConfigEditor(roi, line)
-        cv2.namedWindow(WINDOW_NAME)
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        try:
+            cv2.startWindowThread()
+        except Exception:
+            pass
         cv2.setMouseCallback(WINDOW_NAME, lambda event, x, y, flags, param: editor.handle_mouse(event, x, y, flags, param))
-        control_panel = EditorControlPanel(editor, save_editor_state)
+        control_panel = EditorControlPanel(editor, save_editor_state, request_stream_reset)
         active_control_panel_ref = control_panel
 
-    logger.info("Iniciando contagem... | tracker: %s | conf: %s", cfg["tracker"], cfg["conf"])
+    logger.info(
+        "Iniciando contagem... | tracker: %s | conf: %s | imgsz: %s",
+        cfg["tracker"],
+        cfg["conf"],
+        imgsz,
+    )
 
     fps_frame_count = 0
     fps_start_ts = time.time()
 
     while True:
+        if reset_stream_requested:
+            stream.reset()
+            reset_stream_requested = False
+            if editor is not None:
+                editor.message = "Stream resetado manualmente"
+
         ret, frame = stream.read()
         if not ret:
             if frame_count == 0:
                 logger.warning("Nenhum frame recebido ainda do stream...")
             continue
+        captured_at = time.time()
+        runtime_stats.record_capture(captured_at)
 
         frame_count += 1
 
@@ -918,6 +1080,27 @@ def main():
             logger.info("ROI: %s | Linha: %s | Direção: %s", roi, line, count_direction)
 
         now_ts = time.time()
+        if now_ts - last_round_sync >= ROUND_SYNC_INTERVAL:
+            last_round_sync = now_ts
+            backend_round = backend.fetch_current_round()
+            next_round_id, next_total, round_changed = resolve_round_sync(
+                current_round_id,
+                backend_round,
+                total,
+            )
+            if round_changed:
+                logger.info(
+                    "Mudanca de round detectada (%s -> %s). Resetando stream local.",
+                    current_round_id or "<none>",
+                    next_round_id,
+                )
+                current_round_id = next_round_id
+                reset_tracking_state()
+                total = next_total
+                request_stream_reset()
+            else:
+                current_round_id = next_round_id
+
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
             last_config_poll = now_ts
             admin_cfg = backend.fetch_camera_config(cfg["camera_id"])
@@ -952,7 +1135,7 @@ def main():
                 tracker=cfg["tracker"],
                 conf=cfg["conf"],
                 classes=list(cfg["allowed_classes"].values()),
-                imgsz=416,
+                imgsz=imgsz,
                 verbose=False,
             )
         except Exception as exc:
@@ -980,10 +1163,11 @@ def main():
             snapshot = runtime_stats.snapshot(backend.get_health_snapshot())
             logger.info("FPS médio: %.1f | Total contado: %d", fps_frame_count / elapsed if elapsed > 0 else 0, total)
             logger.info(
-                "FPS inst: %.1f | inferencia media: %.1f ms | JPEG medio: %.1f ms | MJPEG clientes: %d | live descartados: %d",
+                "FPS inst: %.1f | inferencia media: %.1f ms | JPEG medio: %.1f ms | pipeline media: %.1f ms | MJPEG clientes: %d | live descartados: %d",
                 snapshot["fpsInstant"],
                 snapshot["avgInferenceMs"],
                 snapshot["avgJpegEncodeMs"],
+                snapshot["avgPipelineMs"],
                 snapshot["mjpegClients"],
                 snapshot["backend"].get("liveDropped", 0),
             )
@@ -1072,7 +1256,7 @@ def main():
                         backend.send_count_event(
                             {
                                 "cameraId": cfg["camera_id"],
-                                "roundId": cfg["round_id"],
+                                "roundId": current_round_id,
                                 "trackId": str(track_id),
                                 "vehicleType": vehicle_name,
                                 "crossedAt": now(),
@@ -1114,7 +1298,7 @@ def main():
             backend.send_live_detections(
                 {
                     "cameraId": cfg["camera_id"],
-                    "roundId": cfg["round_id"],
+                    "roundId": current_round_id,
                     "frameId": frame_count,
                     "frameWidth": w,
                     "frameHeight": h,
@@ -1144,11 +1328,27 @@ def main():
                 track_hits.pop(tid, None)
                 counted_ids.discard(tid)
 
-        stream_annotated = annotate_frame(frame, roi, line, detections_list, total)
-        if editor is not None:
-            editor.draw_overlay(stream_annotated)
+        browser_stream = annotate_frame(
+            frame,
+            roi,
+            line,
+            detections_list,
+            total,
+            show_roi=False,
+            show_labels=False,
+            show_centers=False,
+            show_total=False,
+        )
+
+        operator_stream = browser_stream
+        if cfg.get("show_window", True):
+            operator_stream = annotate_frame(frame, roi, line, detections_list, total)
+            if editor is not None:
+                editor.draw_overlay(operator_stream)
+
         runtime_stats.record_processed_frame(total)
-        streamer.update(stream_annotated)
+        streamer.update(browser_stream)
+        runtime_stats.record_pipeline_ms((time.time() - captured_at) * 1000)
 
         if cfg.get("show_window", True):
             if control_panel is not None:
@@ -1156,8 +1356,11 @@ def main():
                 if control_panel.should_close:
                     break
 
-            cv2.imshow(WINDOW_NAME, stream_annotated)
-            key = cv2.waitKey(1) & 0xFF
+            cv2.imshow(WINDOW_NAME, operator_stream)
+            key = poll_window_key(1)
+            if key == -1:
+                continue
+            key &= 0xFF
             if key == ord("r") and editor is not None:
                 editor.begin_roi_mode()
             elif key == ord("l") and editor is not None:
@@ -1168,6 +1371,8 @@ def main():
                 editor.cancel()
                 roi = dict(editor.roi)
                 line = dict(editor.line)
+            elif key == ord("t"):
+                request_stream_reset()
             elif key == 27 and editor is not None:
                 editor.clear_mode()
             elif key == ord("q"):

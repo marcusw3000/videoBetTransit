@@ -1,5 +1,9 @@
 {
   "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
+  "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;32768",
+  "stream_buffer_size": 1,
+  "stream_open_timeout_ms": 5000,
+  "stream_read_timeout_ms": 5000,
   "model": "yolov8s.pt",
   "tracker": "botsort_traffic.yaml",
   "backend_url": "http://localhost:5000/api/rounds/count-events",
@@ -14,17 +18,18 @@
     "truck": 7
   },
   "conf": 0.2,
+  "imgsz": 320,
   "line": {
-    "x1": 600,
-    "y1": 305,
-    "x2": 338,
-    "y2": 377
+    "x1": 300,
+    "y1": 346,
+    "x2": 601,
+    "y2": 288
   },
   "roi": {
-    "x": 221,
-    "y": 124,
-    "w": 482,
-    "h": 355
+    "x": 220,
+    "y": 86,
+    "w": 476,
+    "h": 385
   },
   "count_direction": "any",
   "show_window": true,

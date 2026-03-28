@@ -13,6 +13,7 @@ class BackendClient:
     def __init__(self, base_url: str, api_key: str):
         self.base_url = base_url.rsplit("/", 2)[0]
         self.count_events_url = base_url
+        self.current_round_url = f"{self.base_url}/rounds/current"
         self.live_detections_url = f"{self.base_url}/live-detections"
         self.camera_config_url = f"{self.base_url}/camera-config"
         self.api_key = api_key
@@ -73,6 +74,34 @@ class BackendClient:
         except Exception as exc:
             self._mark_error(f"unexpected fetch_camera_config error: {exc}")
             logger.warning("[BACKEND] Erro ao buscar configuracao da camera %s: %s", camera_id, exc)
+            return None
+
+    def fetch_current_round(self) -> dict | None:
+        try:
+            resp = self._session.get(
+                self.current_round_url,
+                headers=self._default_headers,
+                timeout=3,
+            )
+            if resp.status_code == 200:
+                self._mark_success()
+                return resp.json()
+
+            self._mark_error(
+                f"current round HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+            return None
+        except requests.Timeout:
+            self._mark_error("timeout fetching current round")
+            logger.warning("[BACKEND] Timeout ao buscar round atual")
+            return None
+        except requests.ConnectionError:
+            self._mark_error("connection error fetching current round")
+            logger.warning("[BACKEND] Sem conexao ao buscar round atual")
+            return None
+        except Exception as exc:
+            self._mark_error(f"unexpected fetch_current_round error: {exc}")
+            logger.warning("[BACKEND] Erro ao buscar round atual: %s", exc)
             return None
 
     def save_camera_config(
