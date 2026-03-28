@@ -15,6 +15,7 @@ builder.Services.AddDbContextFactory<TrafficCounterDbContext>(options =>
 
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<RoundService>();
 builder.Services.AddSingleton<CameraConfigService>();
 builder.Services.AddHostedService<RoundWorker>();

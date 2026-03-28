@@ -253,9 +253,9 @@ Entregavel esperado:
 
 ### 11. Colocar frontend, backend e MJPEG sob a mesma estrategia de publicacao
 - [ ] Definir topologia final de deploy.
-- [ ] Evitar mixed content entre frontend HTTPS e MJPEG HTTP.
-- [ ] Considerar reverse proxy unico para React, API e MJPEG.
-- [ ] Documentar isso no [`contexto.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\contexto.md).
+- [x] Evitar mixed content entre frontend HTTPS e MJPEG HTTP.
+- [x] Considerar reverse proxy unico para React, API e MJPEG.
+- [x] Documentar isso no [`contexto.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\contexto.md).
 
 Objetivo:
 - Reduzir problemas de navegador e simplificar acesso.

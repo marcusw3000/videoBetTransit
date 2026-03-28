@@ -15,6 +15,7 @@ Backend .NET 8
   - persiste round atual, historico, count-events e camera-config em SQLite
   - recebe count-events da engine
   - protege rotas sensiveis com `X-API-Key`
+  - pode fazer proxy do MJPEG e do health do Python
   - publica atualizacoes via SignalR
 
 Frontend React
@@ -29,7 +30,7 @@ Fluxo resumido:
 3. Quando um veiculo cruza a linha, a engine envia `POST /api/rounds/count-events` para o backend.
 4. O backend atualiza o round e faz broadcast via SignalR.
 5. O frontend atualiza contador, timer, historico e lista de deteccoes.
-6. O video mostrado no browser vem do endpoint MJPEG `http://127.0.0.1:8090/video_feed`, ja com boxes desenhadas no Python.
+6. O video mostrado no browser pode vir do proxy `http://localhost:5000/proxy/video-feed`, que encaminha para o MJPEG Python ja anotado.
 
 ## Como Rodar
 
@@ -117,6 +118,8 @@ Principais rotas:
 - `POST /api/rounds/count-events`
 - `GET /api/camera-config/{cameraId}`
 - `POST /api/camera-config/{cameraId}`
+- `GET /proxy/video-feed`
+- `GET /proxy/health`
 
 Eventos SignalR:
 - `count_updated`
@@ -128,6 +131,7 @@ Caracteristicas atuais:
 - rounds com encerramento automatico
 - rotas sensiveis protegidas por API key
 - CORS configurado por ambiente via `Cors:AllowedOrigins`
+- proxy opcional do MJPEG para unificar acesso pelo backend
 
 ## Frontend React
 
@@ -145,9 +149,9 @@ Fluxo atual:
 
 Observacao:
 - `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
-- `VITE_MJPEG_TOKEN` e anexado ao feed no browser
+- por padrao, `VITE_MJPEG_URL` aponta para o proxy do backend
 - o frontend nao possui mais tela de configuracao de ROI/linha
-- `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL`, `VITE_MJPEG_URL` e `VITE_MJPEG_TOKEN` devem ser definidos por ambiente
+- `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL` e `VITE_MJPEG_URL` devem ser definidos por ambiente
 - `hls.js` foi removido do fluxo principal
 
 ## Ambientes
@@ -165,11 +169,14 @@ Frontend React:
 Observacao:
 - em producao, `Cors:AllowedOrigins` deve ser definido explicitamente
 - as chaves do backend e do MJPEG devem ser diferentes e fortes
+- o token do MJPEG pode ficar restrito ao backend quando o proxy `/proxy/video-feed` e usado
 
 ## Portas e Endpoints Locais
 
 - Backend .NET: `http://localhost:5000`
 - Frontend Vite: `http://localhost:5173`
+- Proxy MJPEG .NET: `http://localhost:5000/proxy/video-feed`
+- Proxy Health .NET: `http://localhost:5000/proxy/health`
 - MJPEG Python: `http://127.0.0.1:8090/video_feed`
 - Health Python: `http://127.0.0.1:8090/health`
 
@@ -177,6 +184,6 @@ Observacao:
 
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
 - Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
-- Se o frontend estiver em HTTPS e o MJPEG em HTTP, pode haver bloqueio por mixed content.
+- O uso do proxy `/proxy/video-feed` reduz o problema de mixed content e evita expor o token do MJPEG no browser por padrao.
 - A `.venv` precisa estar atualizada com `requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.

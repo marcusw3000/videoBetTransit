@@ -9,5 +9,10 @@
   },
   "Security": {
     "BackendApiKey": "TROQUE_POR_UMA_CHAVE_FORTE"
+  },
+  "MjpegProxy": {
+    "UpstreamVideoFeedUrl": "http://python-engine-interna:8090/video_feed",
+    "UpstreamHealthUrl": "http://python-engine-interna:8090/health",
+    "UpstreamToken": "TROQUE_POR_UM_TOKEN_FORTE"
   }
 }
