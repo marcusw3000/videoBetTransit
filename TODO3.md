@@ -10,6 +10,8 @@ Objetivo deste arquivo:
 Observacao:
 - esta e uma definicao `v1` para execucao
 - odds finais, margem, limites financeiros e certificados ainda dependem de validacao de math/compliance
+- a primeira refletida no codigo ja entrou: rounds de `60s` e cards `Under / Range / Over / Exact` no frontend
+- backend e frontend ja refletem `bet_close_at`, estados `open / closing / settling / settled` e resultado por mercado no settlement
 
 ---
 
@@ -371,6 +373,68 @@ Obrigatorio mostrar:
 - ultimo resultado validado
 - politica simples de `void/cancelamento`
 
+### 9.7 Performance da experiencia
+
+Diretriz nova:
+- a experiencia principal do jogador deve priorizar leveza, clareza e estabilidade antes de observabilidade detalhada
+
+Regra de produto:
+- a `player view` nao deve carregar tudo que a `operator view` mostra
+- o cliente final recebe uma interface mais enxuta, com foco em video, timer, status, mercados e ultimo resultado
+
+Elementos que devem ficar fora da `player view` padrao:
+- lista detalhada de deteccoes ao vivo
+- metricas operacionais
+- alertas tecnicos
+- historico muito profundo na mesma tela
+- qualquer painel com cara de monitoramento interno
+
+Elementos que devem permanecer na `player view`:
+- stream com `mark line` e boxes
+- status do round
+- timer
+- quatro mercados
+- payout
+- ultimo resultado
+- historico comercial curto
+
+Metas recomendadas para a `v1`:
+- tempo de abertura percebido da tela principal: `<= 2s` em ambiente normal
+- sem travamento perceptivel ao trocar entre `open`, `closing` e `settled`
+- mobile deve operar em modo visual mais leve por padrao
+- abas em segundo plano devem reduzir consumo de rede e processamento
+
+Plano de performance priorizado:
+
+1. Separar `player view` de `operator view`
+- `player view` fica minimalista
+- `operator view` concentra deteccoes, health, alertas e diagnostico
+
+2. Reduzir atualizacoes nao essenciais na tela do jogador
+- timer e status seguem em tempo real
+- historico e dados secundarios atualizam em cadencia menor
+- eventos tecnicos nao devem disparar rerender desnecessario da tela principal
+
+3. Criar perfis de stream para entrega
+- `high`
+- `balanced`
+- `lite`
+
+Recomendacao inicial:
+- desktop: `balanced`
+- mobile: `lite`
+
+4. Definir limites de densidade visual
+- historico curto na home
+- cards sem animacoes excessivas
+- uma unica area principal de video
+- sem blocos operacionais pesados na experiencia do jogador
+
+5. Adotar modo de economia em background
+- reduzir polling quando a aba nao esta visivel
+- reduzir atualizacoes de paineis secundarios
+- evitar custo desnecessario de render com a pagina em segundo plano
+
 ---
 
 ## 10. Auditoria, disputa e evidencias
@@ -442,6 +506,16 @@ Regra:
 - [x] Definir politica base de disputa e anulacao.
 - [ ] Definir trilha de auditoria visivel ao operador em nivel de produto/backoffice.
 
+### BN6 - Performance da experiencia
+- [x] Definir a diretriz de separar `player view` e `operator view`.
+- [x] Definir quais blocos nao devem ficar na tela principal do jogador.
+- [x] Definir perfis de stream `high`, `balanced` e `lite`.
+- [ ] Implementar uma `player view` realmente enxuta.
+- [ ] Mover observabilidade detalhada para `operator view`.
+- [ ] Reduzir atualizacoes e rerenders secundarios na tela principal.
+- [ ] Aplicar politica de economia quando a aba estiver em background.
+- [ ] Validar experiencia em mobile com perfil `lite`.
+
 ---
 
 ## 13. Ordem de execucao recomendada
@@ -450,8 +524,9 @@ Regra:
 2. implementar os quatro mercados com settlement fechado
 3. implementar `void` e trilha de motivo
 4. parametrizar perfis de camera
-5. implementar UI `v1` de web e mobile
-6. validar odds e limites com dados reais
+5. separar `player view` e `operator view` para aliviar o navegador
+6. implementar UI `v1` de web e mobile
+7. validar odds e limites com dados reais
 
 ---
 
@@ -461,6 +536,7 @@ Regra:
 - os quatro mercados funcionam sem ambiguidade
 - `void` e settlement manual estao controlados
 - o front mostra apenas `mark line` e boxes no stream do cliente
+- a `player view` esta enxuta e nao carrega blocos operacionais desnecessarios
 - perfil por camera existe
 - resultado e auditavel
 - odds e limites comerciais ja passaram por validacao de operador/math

@@ -16,12 +16,13 @@ Backend .NET 8
   - recebe count-events da engine
   - protege rotas sensiveis com `X-API-Key`
   - pode fazer proxy do MJPEG e do health do Python
+  - controla estados comerciais do round e settlement dos mercados
   - publica atualizacoes via SignalR
 
 Frontend React
   - consome REST e SignalR do backend
   - exibe o feed MJPEG anotado vindo do Python
-  - mostra contador, timer, faixas, historico filtravel, painel operacional e alertas de monitoramento
+  - mostra contador, timer, mercados `Under / Range / Over / Exact`, historico filtravel, painel operacional e alertas de monitoramento
 ```
 
 Fluxo resumido:
@@ -145,6 +146,11 @@ Caracteristicas atuais:
 - persistencia local em SQLite via EF Core
 - migracao inicial versionada em `TrafficCounter.Api/Migrations`
 - rounds com encerramento automatico
+- rounds `v1` com janela de `60s`
+- rounds `v1` com `bet_close_at` a `10s` do fim
+- estados comerciais `open`, `closing`, `settling`, `settled` e base pronta para `void`
+- `RoundRange` passou a carregar `marketType` e `targetValue` para os mercados comerciais
+- o settlement marca `isWinner` por mercado para historico e UI comercial
 - rotas sensiveis protegidas por API key
 - CORS configurado por ambiente via `Cors:AllowedOrigins`
 - proxy opcional do MJPEG para unificar acesso pelo backend
@@ -168,6 +174,9 @@ Observacao:
 - `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
 - `OperationsCard.jsx` mostra saude operacional usando o health proxied do backend
 - `AlertsPanel.jsx` mostra alertas para stream indisponivel, backend com falha, frames parados e contagem zerada suspeita
+- a tela principal ja reflete a `v1` de negocio com quatro cards de mercado: `Under`, `Range`, `Over` e `Exact`
+- a UI usa `betCloseAt` para mostrar quando as apostas fecham e troca o estado visual do round para `closing`
+- o historico comercial agora pode mostrar mercados vencedores com base em `isWinner`
 - o historico usa `GET /api/rounds/history` e `GET /api/rounds/{roundId}/count-events` para filtros, tendencia e exportacao CSV
 - por padrao, `VITE_MJPEG_URL` aponta para o proxy do backend
 - por padrao, `VITE_MJPEG_HEALTH_URL` aponta para `http://localhost:5000/proxy/health`

@@ -6,6 +6,12 @@ namespace TrafficCounter.Api.Services;
 
 public class RoundService
 {
+    public const string StatusOpen = "open";
+    public const string StatusClosing = "closing";
+    public const string StatusSettling = "settling";
+    public const string StatusSettled = "settled";
+    public const string StatusVoid = "void";
+
     private readonly IDbContextFactory<TrafficCounterDbContext> _dbContextFactory;
     private readonly object _lock = new();
 
@@ -20,7 +26,21 @@ public class RoundService
         lock (_lock)
         {
             using var db = _dbContextFactory.CreateDbContext();
-            return CloneRound(GetOrCreateCurrentTracked(db));
+            var current = GetOrCreateCurrentTracked(db);
+            var now = DateTime.UtcNow;
+
+            if (ApplyLifecycleState(current, now))
+            {
+                db.SaveChanges();
+            }
+
+            if (current.Status == StatusSettling && now >= current.EndsAt)
+            {
+                current = FinalizeRound(db, current);
+                db.SaveChanges();
+            }
+
+            return CloneRound(current);
         }
     }
 
@@ -30,7 +50,7 @@ public class RoundService
         return db.Rounds
             .AsNoTracking()
             .Include(r => r.Ranges)
-            .Where(r => r.Status == "settled")
+            .Where(r => r.Status == StatusSettled || r.Status == StatusVoid)
             .OrderByDescending(r => r.CreatedAt)
             .Take(20)
             .ToList();
@@ -45,14 +65,10 @@ public class RoundService
                 .Include(r => r.Ranges)
                 .SingleOrDefault(r => r.Id == currentId);
 
-            if (current is null || current.Status == "settled")
+            if (current is null || current.Status == StatusSettled || current.Status == StatusVoid)
                 return null;
 
-            current.Status = "settled";
-            current.FinalCount = current.CurrentCount;
-
-            var newRound = CreateNewRound();
-            db.Rounds.Add(newRound);
+            var newRound = FinalizeRound(db, current);
             db.SaveChanges();
 
             return CloneRound(newRound);
@@ -64,7 +80,19 @@ public class RoundService
         lock (_lock)
         {
             using var db = _dbContextFactory.CreateDbContext();
+            var now = DateTime.UtcNow;
             var current = GetOrCreateCurrentTracked(db);
+
+            if (ApplyLifecycleState(current, now))
+            {
+                db.SaveChanges();
+            }
+
+            if (current.Status == StatusSettling && now >= current.EndsAt)
+            {
+                current = FinalizeRound(db, current);
+                db.SaveChanges();
+            }
 
             var alreadyRecorded = db.CountEvents.Any(x =>
                 x.RoundId == current.Id &&
@@ -95,6 +123,32 @@ public class RoundService
             .ToList();
     }
 
+    public RoundTickResult Tick()
+    {
+        lock (_lock)
+        {
+            using var db = _dbContextFactory.CreateDbContext();
+            var current = GetOrCreateCurrentTracked(db);
+            var now = DateTime.UtcNow;
+            Round? updatedRound = null;
+
+            if (ApplyLifecycleState(current, now))
+            {
+                db.SaveChanges();
+                updatedRound = CloneRound(current);
+            }
+
+            if (current.Status == StatusSettling && now >= current.EndsAt)
+            {
+                var newRound = FinalizeRound(db, current);
+                db.SaveChanges();
+                return new RoundTickResult(updatedRound, CloneRound(newRound));
+            }
+
+            return new RoundTickResult(updatedRound, null);
+        }
+    }
+
     private void EnsureCurrentRoundExists()
     {
         lock (_lock)
@@ -103,7 +157,11 @@ public class RoundService
             var existing = db.Rounds
                 .Include(r => r.Ranges)
                 .OrderByDescending(r => r.CreatedAt)
-                .FirstOrDefault(r => r.Status == "running");
+                .FirstOrDefault(r =>
+                    r.Status == StatusOpen ||
+                    r.Status == StatusClosing ||
+                    r.Status == StatusSettling
+                );
 
             if (existing is not null)
                 return;
@@ -118,7 +176,11 @@ public class RoundService
         var round = db.Rounds
             .Include(r => r.Ranges)
             .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefault(r => r.Status == "running");
+            .FirstOrDefault(r =>
+                r.Status == StatusOpen ||
+                r.Status == StatusClosing ||
+                r.Status == StatusSettling
+            );
 
         if (round is null)
         {
@@ -133,21 +195,71 @@ public class RoundService
     private static Round CreateNewRound()
     {
         var id = $"rnd_{Guid.NewGuid().ToString()[..8]}";
+        const int targetValue = 20;
+        var createdAt = DateTime.UtcNow;
+        var betCloseAt = createdAt.AddSeconds(50);
+        var endsAt = createdAt.AddSeconds(60);
 
         return new Round
         {
             Id = id,
-            Status = "running",
+            Status = StatusOpen,
             CurrentCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            EndsAt = DateTime.UtcNow.AddMinutes(5),
+            CreatedAt = createdAt,
+            BetCloseAt = betCloseAt,
+            EndsAt = endsAt,
             Ranges = new List<RoundRange>
             {
-                new() { Id = $"{id}_r1", RoundId = id, Label = "0-10", Min = 0, Max = 10, Odds = 3.5 },
-                new() { Id = $"{id}_r2", RoundId = id, Label = "11-20", Min = 11, Max = 20, Odds = 2.2 },
-                new() { Id = $"{id}_r3", RoundId = id, Label = "21-35", Min = 21, Max = 35, Odds = 1.8 },
-                new() { Id = $"{id}_r4", RoundId = id, Label = "36+", Min = 36, Max = 999, Odds = 4.0 },
+                new() { Id = $"{id}_m1", RoundId = id, MarketType = "under", Label = "Under", Min = 0, Max = targetValue - 1, TargetValue = targetValue, Odds = 3.0, IsWinner = null },
+                new() { Id = $"{id}_m2", RoundId = id, MarketType = "range", Label = "11-20", Min = 11, Max = 20, TargetValue = null, Odds = 2.25, IsWinner = null },
+                new() { Id = $"{id}_m3", RoundId = id, MarketType = "over", Label = "Over", Min = targetValue + 1, Max = 999, TargetValue = targetValue, Odds = 3.6, IsWinner = null },
+                new() { Id = $"{id}_m4", RoundId = id, MarketType = "exact", Label = "20", Min = targetValue, Max = targetValue, TargetValue = targetValue, Odds = 18.0, IsWinner = null },
             }
+        };
+    }
+
+    private static bool ApplyLifecycleState(Round round, DateTime now)
+    {
+        if (round.Status == StatusSettled || round.Status == StatusVoid)
+            return false;
+
+        var nextStatus = now >= round.EndsAt
+            ? StatusSettling
+            : now >= round.BetCloseAt
+                ? StatusClosing
+                : StatusOpen;
+
+        if (round.Status == nextStatus)
+            return false;
+
+        round.Status = nextStatus;
+        return true;
+    }
+
+    private static Round FinalizeRound(TrafficCounterDbContext db, Round current)
+    {
+        current.Status = StatusSettled;
+        current.FinalCount = current.CurrentCount;
+
+        foreach (var market in current.Ranges)
+        {
+            market.IsWinner = IsWinningMarket(market, current.CurrentCount);
+        }
+
+        var newRound = CreateNewRound();
+        db.Rounds.Add(newRound);
+        return newRound;
+    }
+
+    private static bool IsWinningMarket(RoundRange market, int finalCount)
+    {
+        return market.MarketType switch
+        {
+            "under" => market.TargetValue.HasValue && finalCount < market.TargetValue.Value,
+            "range" => finalCount >= market.Min && finalCount <= market.Max,
+            "over" => market.TargetValue.HasValue && finalCount > market.TargetValue.Value,
+            "exact" => market.TargetValue.HasValue && finalCount == market.TargetValue.Value,
+            _ => false,
         };
     }
 
@@ -159,6 +271,7 @@ public class RoundService
             Status = round.Status,
             CurrentCount = round.CurrentCount,
             CreatedAt = round.CreatedAt,
+            BetCloseAt = round.BetCloseAt,
             EndsAt = round.EndsAt,
             FinalCount = round.FinalCount,
             Ranges = round.Ranges
@@ -166,12 +279,17 @@ public class RoundService
                 {
                     Id = r.Id,
                     RoundId = r.RoundId,
+                    MarketType = r.MarketType,
                     Label = r.Label,
                     Min = r.Min,
                     Max = r.Max,
+                    TargetValue = r.TargetValue,
                     Odds = r.Odds,
+                    IsWinner = r.IsWinner,
                 })
                 .ToList(),
         };
     }
 }
+
+public sealed record RoundTickResult(Round? UpdatedRound, Round? NewCurrentRound);

@@ -18,21 +18,18 @@ public class RoundWorker : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var current = _roundService.GetCurrent();
+            var tick = _roundService.Tick();
 
-            // Verifica se o round está rodando e o tempo já acabou
-            if (current != null && current.Status == "running" && DateTime.UtcNow >= current.EndsAt)
+            if (tick.UpdatedRound is not null)
             {
-                var newRound = _roundService.Settle(current.Id);
-                
-                // Transmite para todos os clientes conectados que o round fechou e um novo começou
-                if (newRound != null)
-                {
-                    await _hubContext.Clients.All.SendAsync("round_settled", newRound, cancellationToken: stoppingToken);
-                }
+                await _hubContext.Clients.All.SendAsync("count_updated", tick.UpdatedRound, cancellationToken: stoppingToken);
             }
 
-            // Checa a cada segundo
+            if (tick.NewCurrentRound is not null)
+            {
+                await _hubContext.Clients.All.SendAsync("round_settled", tick.NewCurrentRound, cancellationToken: stoppingToken);
+            }
+
             await Task.Delay(1000, stoppingToken);
         }
     }

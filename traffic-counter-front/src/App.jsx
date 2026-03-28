@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import CounterCard from './components/CounterCard'
 import TimerCard from './components/TimerCard'
-import RangeCard from './components/RangeCard'
+import MarketCard from './components/MarketCard'
 import HistoryCard from './components/HistoryCard'
 import VideoPlayer from './components/VideoPlayer'
 import DetectionsList from './components/DetectionsList'
@@ -11,7 +11,7 @@ import { getCurrentRound, getRoundCountEvents, getRoundHistory, settleRound } fr
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { startOverlayConnection, stopOverlayConnection } from './services/overlaySignalr'
 import { getOperationsHealth } from './services/operationsApi'
-import { getTimeLeftInSeconds } from './utils/time'
+import { getRoundPhase, getTimeLeftInSeconds } from './utils/time'
 import { MJPEG_URL } from './config'
 
 const MAX_HISTORY_POINTS = 30
@@ -96,6 +96,23 @@ function downloadCsv(filename, content) {
   URL.revokeObjectURL(url)
 }
 
+function isMarketActive(market, currentCount) {
+  if (currentCount === undefined || currentCount === null) return false
+
+  switch ((market.marketType || '').toLowerCase()) {
+    case 'under':
+      return market.targetValue != null && currentCount < market.targetValue
+    case 'range':
+      return currentCount >= market.min && currentCount <= market.max
+    case 'over':
+      return market.targetValue != null && currentCount > market.targetValue
+    case 'exact':
+      return market.targetValue != null && currentCount === market.targetValue
+    default:
+      return false
+  }
+}
+
 function MarketPage() {
   const [round, setRound] = useState(null)
   const [history, setHistory] = useState([])
@@ -115,6 +132,8 @@ function MarketPage() {
   const [historyRoundQuery, setHistoryRoundQuery] = useState('')
 
   const liveStreamUrl = MJPEG_URL
+  const roundPhase = getRoundPhase(round)
+  const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
 
   function showToast(message) {
     const id = Date.now()
@@ -273,12 +292,11 @@ function MarketPage() {
   }, [])
 
   const statusClass = useMemo(() => {
-    const value = (round?.status || '').toLowerCase()
-
-    if (value === 'running') return 'badge badge-live'
-    if (value === 'settled') return 'badge badge-settled'
+    if (roundPhase === 'open') return 'badge badge-live'
+    if (roundPhase === 'closing') return 'badge badge-closing'
+    if (roundPhase === 'settled') return 'badge badge-settled'
     return 'badge'
-  }, [round])
+  }, [roundPhase])
 
   const alerts = useMemo(() => {
     const next = []
@@ -393,7 +411,7 @@ function MarketPage() {
         <header className="hero">
           <div>
             <h1>Rodovia Market</h1>
-            <div className={statusClass}>Status: {round?.status || 'loading'}</div>
+            <div className={statusClass}>Status: {roundPhase}</div>
           </div>
 
           <div className="hero-actions">
@@ -429,7 +447,11 @@ function MarketPage() {
 
           <div className="stats-column">
             <CounterCard value={round?.currentCount} history={countHistory} />
-            <TimerCard seconds={timeLeftSeconds} />
+            <TimerCard
+              seconds={roundPhase === 'open' ? betCloseSeconds : timeLeftSeconds}
+              label={roundPhase === 'open' ? 'Apostas Abertas Ate' : 'Tempo Restante'}
+              tone={roundPhase === 'closing' ? 'warning' : 'default'}
+            />
           </div>
         </section>
 
@@ -437,18 +459,15 @@ function MarketPage() {
           <DetectionsList detections={detectionFrame?.detections || []} />
         </section>
 
-        <section className="ranges-section">
-          <h2>Faixas</h2>
-          <div className="ranges-grid">
+        <section className="markets-section">
+          <h2>Mercados</h2>
+          <div className="markets-grid">
             {(round?.ranges || []).map((range) => (
-              <RangeCard
+              <MarketCard
                 key={range.id}
-                range={range}
-                isActive={
-                  round?.currentCount !== undefined &&
-                  round.currentCount >= range.min &&
-                  round.currentCount <= range.max
-                }
+                market={range}
+                isActive={isMarketActive(range, round?.currentCount)}
+                roundStatus={roundPhase}
               />
             ))}
           </div>

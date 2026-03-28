@@ -30,6 +30,7 @@ public class TrafficCounterDbContext : DbContext
         modelBuilder.Entity<RoundRange>(entity =>
         {
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.MarketType).HasMaxLength(24);
             entity.Property(x => x.Label).HasMaxLength(64);
         });
 
