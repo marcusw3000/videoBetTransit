@@ -413,7 +413,7 @@ Itens:
 - [x] Adicionar thresholds de area por classe (`car`, `motorcycle`, `bus`, `truck`).
 - [x] Adicionar zona morta perto da linha para reduzir dupla contagem por oscilacao do bbox.
 - [ ] Avaliar filtros dependentes da posicao vertical/perspectiva da camera.
-- [~] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia.
+- [~] Salvar e revisar casos problematicos de deteccao para calibracao guiada por evidencia. Ferramenta inicial criada em `review_calibration_cases.py`
 
 Definicao de pronto:
 - existe baseline de erro por camera

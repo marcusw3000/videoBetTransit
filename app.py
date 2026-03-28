@@ -1186,6 +1186,7 @@ def main():
                         },
                         "center": {"x": cx, "y": cy},
                         "confidence": round(conf, 2),
+                        "hits": track_hits.get(track_id, 0),
                         "insideRoi": is_inside,
                         "crossedLine": did_cross,
                         "counted": is_counted,

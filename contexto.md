@@ -76,6 +76,7 @@ Arquivos importantes:
 - `config.json`: stream, ROI, linha de contagem, modelo, MJPEG host e porta.
 - `start.bat`: inicializacao automatica do backend, frontend e engine.
 - `validate.bat`: validacao unica com sintaxe Python, testes Python, testes .NET e build do frontend.
+- `review_calibration_cases.py`: resumo local dos casos de calibracao salvos em `calibration_review/cases.jsonl`.
 - `traffic-counter-front/src/App.jsx`: orquestra tela principal.
 - `traffic-counter-front/src/components/VideoPlayer.jsx`: exibe o feed MJPEG anotado.
 
@@ -121,6 +122,7 @@ Observacao importante:
 - `live-detections` prioriza o frame mais recente quando a fila satura
 - a calibracao de deteccao agora aceita thresholds por classe e zona morta perto da linha
 - pressionar `E` na janela OpenCV salva um caso manual de calibracao com imagem anotada e manifesto `jsonl`
+- `review_calibration_cases.py` resume por classe os valores de confianca, area e hits para apoiar o ajuste dos thresholds
 
 ## Backend .NET
 
