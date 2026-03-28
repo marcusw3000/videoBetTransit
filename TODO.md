@@ -252,7 +252,7 @@ Entregavel esperado:
 - Feed MJPEG servido por runtime mais estavel.
 
 ### 11. Colocar frontend, backend e MJPEG sob a mesma estrategia de publicacao
-- [ ] Definir topologia final de deploy.
+- [x] Definir topologia final de deploy.
 - [x] Evitar mixed content entre frontend HTTPS e MJPEG HTTP.
 - [x] Considerar reverse proxy unico para React, API e MJPEG.
 - [x] Documentar isso no [`contexto.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\contexto.md).
@@ -427,7 +427,7 @@ Objetivo:
 Itens:
 - [ ] Avaliar mover snapshots para armazenamento externo.
 - [ ] Definir politica de retencao para snapshots e exportacoes.
-- [ ] Definir topologia final de deploy para frontend, backend e MJPEG.
+- [x] Definir topologia final de deploy para frontend, backend e MJPEG.
 
 Definicao de pronto:
 - snapshots deixam de depender apenas do disco local
@@ -466,7 +466,7 @@ Definicao de pronto:
 - [x] Servidor MJPEG apropriado
 - [x] Persistencia
 - [x] Seguranca
-- [ ] Estrategia de deploy unificada
+- [x] Estrategia de deploy unificada
 
 ### Fase 5 - Produto
 - [x] Dashboard operacional

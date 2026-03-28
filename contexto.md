@@ -184,6 +184,37 @@ Observacao:
 - as chaves do backend e do MJPEG devem ser diferentes e fortes
 - o token do MJPEG pode ficar restrito ao backend quando o proxy `/proxy/video-feed` e usado
 
+## Topologia de Deploy Recomendada
+
+Topologia alvo:
+- `Edge publica`: dominio HTTPS unico, com WAF/reverse proxy
+- `Frontend React`: servido como build estatico atras da mesma borda publica
+- `Backend .NET`: exposto apenas pela borda publica, servindo API, SignalR e proxy do MJPEG
+- `Engine Python`: acessivel apenas na rede interna, sem exposicao publica direta
+- `Banco`: acessivel apenas pela API .NET
+- `Storage de snapshots`: preferencialmente externo ao disco local em producao
+
+Fluxo recomendado:
+1. o navegador acessa apenas o dominio HTTPS publico
+2. o frontend fala apenas com o backend .NET no mesmo host logico
+3. o MJPEG no navegador entra apenas por `GET /proxy/video-feed`
+4. o backend .NET busca `http://python-engine-interna:8090/video_feed` internamente
+5. a engine Python envia `count-events` e `live-detections` apenas para a API interna/publicada do backend
+
+Regras praticas:
+- nao expor `8090` publicamente em producao
+- nao apontar o frontend para a engine Python diretamente em producao
+- concentrar TLS, CORS e rate limiting na borda publica
+- manter a engine Python em rede privada e com firewall restritivo
+- deixar SignalR, API REST e proxy MJPEG sob o mesmo dominio da aplicacao
+
+Exemplo de distribuicao:
+- `https://jogo.exemplo.com/` -> frontend React
+- `https://jogo.exemplo.com/api/*` -> backend .NET
+- `https://jogo.exemplo.com/hubs/*` -> SignalR .NET
+- `https://jogo.exemplo.com/proxy/video-feed` -> proxy MJPEG .NET
+- `http://python-engine-interna:8090/*` -> engine Python, somente rede privada
+
 ## Portas e Endpoints Locais
 
 - Backend .NET: `http://localhost:5000`
