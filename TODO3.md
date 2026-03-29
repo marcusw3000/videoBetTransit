@@ -108,7 +108,7 @@ Checklist de implementacao:
 - [x] Definir `Exact`
 - [x] Definir portfolio inicial `v1`
 - [ ] Definir nomenclatura comercial final
-- [ ] Expor claramente no front a descricao comercial de cada mercado
+- [x] Expor claramente no front a descricao comercial de cada mercado
 - [ ] Validar se a mesma composicao de mercados serve para todas as cameras
 
 Entregavel:

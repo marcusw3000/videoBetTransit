@@ -1,0 +1,27 @@
+logLevel: info
+logDestinations: [stdout]
+
+hls: true
+hlsAddress: :8888
+hlsAllowOrigins: ['*']
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: [127.0.0.1, localhost]
+
+pathDefaults:
+  sourceOnDemand: true
+  sourceOnDemandStartTimeout: 15s
+  sourceOnDemandCloseAfter: 15s
+
+paths:
+  rodovia-live:
+    source: https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8

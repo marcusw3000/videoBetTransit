@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import CounterCard from './components/CounterCard'
 import TimerCard from './components/TimerCard'
 import HistoryCard from './components/HistoryCard'
+import MarketCard from './components/MarketCard'
 import VideoPlayer from './components/VideoPlayer'
 import { getCurrentRound, getRoundHistory, settleRound } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getRoundPhase, getTimeLeftInSeconds } from './utils/time'
-import { MJPEG_URL } from './config'
+import { WEBRTC_URL, HLS_URL, MJPEG_URL } from './config'
 
 const MAX_HISTORY_POINTS = 30
 const RECENT_HISTORY_LIMIT = 6
@@ -53,10 +54,13 @@ function MarketPage() {
   const [countHistory, setCountHistory] = useState([])
   const [toast, setToast] = useState(null)
 
-  const liveStreamUrl = MJPEG_URL
+  const liveWebRtcUrl = WEBRTC_URL
+  const liveStreamUrl = HLS_URL
+  const liveFallbackUrl = MJPEG_URL
   const roundPhase = getRoundPhase(round)
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
+  const markets = round?.ranges || []
 
   function showToast(message) {
     const id = Date.now()
@@ -179,7 +183,9 @@ function MarketPage() {
         <section className="top-grid">
           <div className="video-column">
             <VideoPlayer
+              webrtcSrc={liveWebRtcUrl}
               src={liveStreamUrl}
+              fallbackSrc={liveFallbackUrl}
               title="Rodovia Norte - Faixa A"
               resetKey={round?.id}
             />
@@ -192,6 +198,24 @@ function MarketPage() {
               label={roundPhase === 'open' ? 'Apostas Abertas Ate' : roundPhase === 'closing' ? 'Rodada em Fechamento' : 'Tempo Restante'}
               tone={roundPhase === 'closing' || roundPhase === 'settling' ? 'warning' : 'default'}
             />
+          </div>
+        </section>
+
+        <section className="markets-section">
+          <h2>Mercados da Rodada</h2>
+          <div className="markets-grid">
+            {markets.length === 0 && (
+              <div className="empty-state">Mercados indisponiveis para esta rodada.</div>
+            )}
+
+            {markets.map((market) => (
+              <MarketCard
+                key={market.id}
+                market={market}
+                isActive={roundPhase === 'open'}
+                roundStatus={roundPhase}
+              />
+            ))}
           </div>
         </section>
 

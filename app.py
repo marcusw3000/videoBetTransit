@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import queue
 import threading
 import time
 import atexit
@@ -128,6 +129,7 @@ mjpeg_token_ref: str = ""
 active_stream_ref = None
 active_mjpeg_server_ref = None
 active_control_panel_ref = None
+active_snapshot_writer_ref = None
 
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
@@ -138,6 +140,9 @@ class AnnotatedFrameStreamer:
         self.stats = stats
         self._lock = threading.Lock()
         self._latest_jpeg: bytes | None = None
+
+    def set_jpeg_quality(self, jpeg_quality: int):
+        self.jpeg_quality = max(30, min(95, int(jpeg_quality)))
 
     def update(self, frame):
         encode_start = time.perf_counter()
@@ -254,8 +259,53 @@ def run_mjpeg_server(host: str = "0.0.0.0", port: int = 8090) -> MjpegServer:
     return server
 
 
+class AsyncSnapshotWriter:
+    def __init__(self, *, queue_size: int = 32, jpeg_quality: int = 85):
+        self.jpeg_quality = max(30, min(95, int(jpeg_quality)))
+        self._queue: queue.Queue = queue.Queue(maxsize=max(1, int(queue_size)))
+        self._stop_event = threading.Event()
+        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker.start()
+
+    def enqueue(self, path: str, frame):
+        try:
+            self._queue.put_nowait((path, frame.copy()))
+            return True
+        except queue.Full:
+            logger.warning("Fila de snapshots cheia; snapshot descartado: %s", path)
+            return False
+
+    def _worker_loop(self):
+        while not self._stop_event.is_set() or not self._queue.empty():
+            try:
+                path, frame = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
+            try:
+                ok, encoded = cv2.imencode(
+                    ".jpg",
+                    frame,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
+                )
+                if ok:
+                    with open(path, "wb") as f:
+                        f.write(encoded.tobytes())
+                else:
+                    logger.warning("Falha ao codificar snapshot %s", path)
+            except Exception as exc:
+                logger.warning("Falha ao salvar snapshot %s: %s", path, exc)
+            finally:
+                self._queue.task_done()
+
+    def stop(self):
+        self._stop_event.set()
+        if self._worker.is_alive():
+            self._worker.join(timeout=2.0)
+
+
 def cleanup_runtime():
-    global active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref
+    global active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref, active_snapshot_writer_ref
 
     if active_stream_ref is not None:
         active_stream_ref.release()
@@ -268,6 +318,10 @@ def cleanup_runtime():
     if active_control_panel_ref is not None:
         active_control_panel_ref.close()
         active_control_panel_ref = None
+
+    if active_snapshot_writer_ref is not None:
+        active_snapshot_writer_ref.stop()
+        active_snapshot_writer_ref = None
 
     cv2.destroyAllWindows()
 
@@ -321,6 +375,25 @@ def normalize_ffmpeg_capture_options(options) -> str:
         return "|".join(parts)
 
     return ""
+
+
+def resize_frame_max_width(frame, max_width: int):
+    max_width = int(max_width)
+    if max_width <= 0:
+        return frame
+
+    height, width = frame.shape[:2]
+    if width <= max_width:
+        return frame
+
+    scale = max_width / float(width)
+    target_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    return cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
+
+
+def should_process_frame(frame_count: int, stride: int) -> bool:
+    stride = max(1, int(stride))
+    return frame_count == 1 or frame_count % stride == 0
 
 
 def inside_roi(cx: int, cy: int, roi: dict) -> bool:
@@ -847,6 +920,7 @@ class StreamCapture:
         buffer_size: int = 1,
         open_timeout_ms: int = 5000,
         read_timeout_ms: int = 5000,
+        target_fps: float = 0.0,
     ):
         self.url = url
         self.stats = stats
@@ -856,6 +930,10 @@ class StreamCapture:
         self.buffer_size = max(1, int(buffer_size))
         self.open_timeout_ms = max(0, int(open_timeout_ms))
         self.read_timeout_ms = max(0, int(read_timeout_ms))
+        self.target_fps = max(0.0, float(target_fps))
+        self._effective_fps = 0.0
+        self._frame_interval_s = 0.0
+        self._next_frame_due = 0.0
         self._connect()
 
     def _connect(self):
@@ -886,11 +964,39 @@ class StreamCapture:
         self._fail_count = 0
         if self.stats is not None:
             self.stats.set_stream_status(self.cap.isOpened(), self._fail_count)
+        reported_fps = 0.0
+        try:
+            reported_fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        except Exception:
+            reported_fps = 0.0
+
+        if self.target_fps > 0:
+            self._effective_fps = self.target_fps
+        elif 1.0 <= reported_fps <= 120.0:
+            self._effective_fps = reported_fps
+        else:
+            self._effective_fps = 15.0
+
+        self._frame_interval_s = 1.0 / self._effective_fps
+        self._next_frame_due = time.perf_counter()
+        logger.info(
+            "Pacing do stream: fps configurado=%.2f | fps detectado=%.2f | fps efetivo=%.2f",
+            self.target_fps,
+            reported_fps,
+            self._effective_fps,
+        )
 
         if not self.cap.isOpened():
             logger.warning("Falha ao abrir stream na conexão inicial.")
 
     def read(self):
+        if self._frame_interval_s > 0:
+            now_ts = time.perf_counter()
+            if self._next_frame_due > now_ts:
+                time.sleep(self._next_frame_due - now_ts)
+                now_ts = time.perf_counter()
+            self._next_frame_due = max(self._next_frame_due + self._frame_interval_s, now_ts)
+
         ret, frame = self.cap.read()
         if not ret:
             self._fail_count += 1
@@ -934,10 +1040,11 @@ def poll_window_key(delay_ms: int = 1) -> int:
 
 
 def main():
-    global backend_client_ref, mjpeg_token_ref, active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref
+    global backend_client_ref, mjpeg_token_ref, active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref, active_snapshot_writer_ref
 
     config_path = "config.json"
     cfg = load_config(config_path)
+    streamer.set_jpeg_quality(int(cfg.get("mjpeg_jpeg_quality", 70)))
 
     os.makedirs(cfg["snapshot_dir"], exist_ok=True)
 
@@ -945,6 +1052,11 @@ def main():
     backend = BackendClient(cfg["backend_url"], cfg["api_key"])
     backend_client_ref = backend
     mjpeg_token_ref = str(cfg.get("mjpeg_token", "")).strip()
+    snapshot_writer = AsyncSnapshotWriter(
+        queue_size=int(cfg.get("snapshot_queue_size", 32)),
+        jpeg_quality=int(cfg.get("snapshot_jpeg_quality", 85)),
+    )
+    active_snapshot_writer_ref = snapshot_writer
     stream = StreamCapture(
         cfg["stream_url"],
         stats=runtime_stats,
@@ -952,6 +1064,7 @@ def main():
         buffer_size=int(cfg.get("stream_buffer_size", 1)),
         open_timeout_ms=int(cfg.get("stream_open_timeout_ms", 5000)),
         read_timeout_ms=int(cfg.get("stream_read_timeout_ms", 5000)),
+        target_fps=float(cfg.get("stream_target_fps", 15)),
     )
     active_stream_ref = stream
     mjpeg_server = run_mjpeg_server(
@@ -972,6 +1085,8 @@ def main():
     last_live_send = 0.0
     last_config_poll = 0.0
     last_round_sync = 0.0
+    last_stream_resync = time.time()
+    last_track_results = None
 
     roi = cfg["roi"]
     line = cfg["line"]
@@ -980,10 +1095,35 @@ def main():
     max_track_history_age = int(cfg.get("max_track_history_age", 300))
     min_bbox_area = int(cfg.get("min_bbox_area", 100))
     imgsz = int(cfg.get("imgsz", 416))
+    inference_frame_stride = int(cfg.get("inference_frame_stride", 1))
+    browser_stream_max_width = int(cfg.get("browser_stream_max_width", 960))
+    operator_preview_max_width = int(cfg.get("operator_preview_max_width", 1280))
+    operator_preview_fps_limit = float(cfg.get("operator_preview_fps_limit", 12))
+    auto_resync_interval_seconds = float(cfg.get("stream_auto_resync_interval_seconds", 0))
     editor = None
     control_panel = None
     reset_stream_requested = False
     current_round_id = str(cfg.get("round_id", "")).strip()
+    last_visual_detections: list[dict] = []
+    last_operator_preview = None
+    last_operator_preview_at = 0.0
+
+    original_model_track = model.track
+
+    def track_with_stride(*args, **kwargs):
+        nonlocal last_track_results
+
+        if (
+            inference_frame_stride > 1
+            and not should_process_frame(frame_count, inference_frame_stride)
+            and last_track_results is not None
+        ):
+            return last_track_results
+
+        last_track_results = original_model_track(*args, **kwargs)
+        return last_track_results
+
+    model.track = track_with_stride
 
     def reset_tracking_state():
         nonlocal total
@@ -1047,11 +1187,21 @@ def main():
         control_panel = EditorControlPanel(editor, save_editor_state, request_stream_reset)
         active_control_panel_ref = control_panel
 
+    try:
+        model.fuse()
+    except Exception:
+        pass
+
     logger.info(
-        "Iniciando contagem... | tracker: %s | conf: %s | imgsz: %s",
+        "Iniciando contagem... | tracker: %s | conf: %s | imgsz: %s | stride: %s | jpeg: %s | browserMaxWidth: %s | operatorMaxWidth: %s | operatorFps: %s",
         cfg["tracker"],
         cfg["conf"],
         imgsz,
+        inference_frame_stride,
+        streamer.jpeg_quality,
+        browser_stream_max_width,
+        operator_preview_max_width,
+        operator_preview_fps_limit,
     )
 
     fps_frame_count = 0
@@ -1061,6 +1211,7 @@ def main():
         if reset_stream_requested:
             stream.reset()
             reset_stream_requested = False
+            last_stream_resync = time.time()
             if editor is not None:
                 editor.message = "Stream resetado manualmente"
 
@@ -1101,6 +1252,17 @@ def main():
             else:
                 current_round_id = next_round_id
 
+        if (
+            auto_resync_interval_seconds > 0
+            and (now_ts - last_stream_resync) >= auto_resync_interval_seconds
+        ):
+            logger.info(
+                "Auto-resync do stream apos %.1fs para manter a live mais proxima do ao vivo.",
+                auto_resync_interval_seconds,
+            )
+            request_stream_reset()
+            last_stream_resync = now_ts
+
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
             last_config_poll = now_ts
             admin_cfg = backend.fetch_camera_config(cfg["camera_id"])
@@ -1127,6 +1289,7 @@ def main():
                 if editor is not None:
                     editor.sync_external_values(roi, line)
 
+        inference_is_fresh = should_process_frame(frame_count, inference_frame_stride)
         inference_start = time.perf_counter()
         try:
             results = model.track(
@@ -1147,6 +1310,7 @@ def main():
         h, w = frame.shape[:2]
         line_y = line["y1"]
         detections_list = []
+        boxes = None
 
         if editor is not None:
             editor.set_frame_size(w, h)
@@ -1202,13 +1366,14 @@ def main():
                 vehicle_name = class_names.get(cls_id, str(cls_id))
                 cx, cy = anchor_point(x1, y1, x2, y2)
 
-                track_hits[track_id] = track_hits.get(track_id, 0) + 1
+                if inference_is_fresh:
+                    track_hits[track_id] = track_hits.get(track_id, 0) + 1
 
                 is_inside = inside_roi(cx, cy, roi)
                 is_counted = track_id in counted_ids
                 did_cross = False
 
-                if is_inside:
+                if is_inside and inference_is_fresh:
                     last_seen[track_id] = frame_count
 
                     prev = last_positions.get(track_id)
@@ -1244,7 +1409,8 @@ def main():
                                     filename,
                                 )
                                 try:
-                                    cv2.imwrite(path, crop)
+                                    if not snapshot_writer.enqueue(path, crop):
+                                        path = ""
                                 except Exception as exc:
                                     logger.warning("Falha ao salvar snapshot %s: %s", path, exc)
                                     path = ""
@@ -1291,6 +1457,11 @@ def main():
                         "counted": is_counted,
                     }
                 )
+
+        if inference_is_fresh:
+            last_visual_detections = list(detections_list)
+        else:
+            detections_list = list(last_visual_detections)
 
         now_ts = time.time()
         if now_ts - last_live_send >= LIVE_SEND_INTERVAL:
@@ -1339,12 +1510,20 @@ def main():
             show_centers=False,
             show_total=False,
         )
+        browser_stream = resize_frame_max_width(browser_stream, browser_stream_max_width)
 
         operator_stream = browser_stream
         if cfg.get("show_window", True):
-            operator_stream = annotate_frame(frame, roi, line, detections_list, total)
-            if editor is not None:
-                editor.draw_overlay(operator_stream)
+            preview_interval = 1.0 / max(1.0, operator_preview_fps_limit)
+            if last_operator_preview is None or (time.time() - last_operator_preview_at) >= preview_interval:
+                operator_stream = annotate_frame(frame, roi, line, detections_list, total)
+                operator_stream = resize_frame_max_width(operator_stream, operator_preview_max_width)
+                if editor is not None:
+                    editor.draw_overlay(operator_stream)
+                last_operator_preview = operator_stream
+                last_operator_preview_at = time.time()
+            else:
+                operator_stream = last_operator_preview
 
         runtime_stats.record_processed_frame(total)
         streamer.update(browser_stream)
