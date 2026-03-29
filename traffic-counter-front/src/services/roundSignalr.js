@@ -1,5 +1,6 @@
 import * as signalR from '@microsoft/signalr'
 import { SIGNALR_BASE_URL } from '../config'
+import { normalizeRoundContract } from '../utils/roundContract'
 
 let connection = null
 let connectionPromise = null
@@ -31,11 +32,11 @@ export async function startRoundConnection({ onCountUpdated, onRoundSettled }) {
     .build()
 
   conn.on('count_updated', (data) => {
-    onCountUpdated?.(data)
+    onCountUpdated?.(normalizeRoundContract(data))
   })
 
   conn.on('round_settled', (data) => {
-    onRoundSettled?.(data)
+    onRoundSettled?.(normalizeRoundContract(data))
   })
 
   connectionPromise = connectWithRetry(conn, 0)

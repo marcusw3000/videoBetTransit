@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using TrafficCounter.Api.Contracts;
 using TrafficCounter.Api.Hubs;
 
 namespace TrafficCounter.Api.Services;
@@ -22,12 +23,12 @@ public class RoundWorker : BackgroundService
 
             if (tick.UpdatedRound is not null)
             {
-                await _hubContext.Clients.All.SendAsync("count_updated", tick.UpdatedRound, cancellationToken: stoppingToken);
+                await _hubContext.Clients.All.SendAsync("count_updated", tick.UpdatedRound.ToContract(), cancellationToken: stoppingToken);
             }
 
             if (tick.NewCurrentRound is not null)
             {
-                await _hubContext.Clients.All.SendAsync("round_settled", tick.NewCurrentRound, cancellationToken: stoppingToken);
+                await _hubContext.Clients.All.SendAsync("round_settled", tick.NewCurrentRound.ToContract(), cancellationToken: stoppingToken);
             }
 
             await Task.Delay(1000, stoppingToken);

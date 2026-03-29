@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using TrafficCounter.Api.Contracts;
 using TrafficCounter.Api.Models;
 using TrafficCounter.Api.Services;
 using Xunit;
@@ -15,19 +16,20 @@ public class RoundsApiTests
         using var factory = new CustomWebApplicationFactory();
         using var client = factory.CreateClient();
 
-        var round = await client.GetFromJsonAsync<Round>("/api/rounds/current");
+        var round = await client.GetFromJsonAsync<RoundContractDto>("/api/rounds/current");
 
         Assert.NotNull(round);
         Assert.Equal(RoundService.StatusOpen, round.Status);
         Assert.Equal(RoundService.TurboDisplayName, round.DisplayName);
-        Assert.False(string.IsNullOrWhiteSpace(round.Id));
+        Assert.False(string.IsNullOrWhiteSpace(round.RoundId));
         Assert.InRange((round.BetCloseAt - round.CreatedAt).TotalSeconds, 89, 91);
         Assert.InRange((round.EndsAt - round.CreatedAt).TotalSeconds, 119, 121);
-        Assert.Equal(4, round.Ranges.Count);
-        Assert.Contains(round.Ranges, market => market.MarketType == "under" && market.TargetValue == 20);
-        Assert.Contains(round.Ranges, market => market.MarketType == "range");
-        Assert.Contains(round.Ranges, market => market.MarketType == "over" && market.TargetValue == 20);
-        Assert.Contains(round.Ranges, market => market.MarketType == "exact" && market.TargetValue == 20);
+        Assert.False(round.IsSuspended);
+        Assert.Equal(4, round.Markets.Count);
+        Assert.Contains(round.Markets, market => market.MarketType == "under" && market.TargetValue == 20);
+        Assert.Contains(round.Markets, market => market.MarketType == "range");
+        Assert.Contains(round.Markets, market => market.MarketType == "over" && market.TargetValue == 20);
+        Assert.Contains(round.Markets, market => market.MarketType == "exact" && market.TargetValue == 20);
     }
 
     [Fact]
@@ -36,7 +38,8 @@ public class RoundsApiTests
         using var factory = new CustomWebApplicationFactory();
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
-        var currentRound = await client.GetFromJsonAsync<Round>("/api/rounds/current");
+
+        var currentRound = await client.GetFromJsonAsync<RoundContractDto>("/api/rounds/current");
         Assert.NotNull(currentRound);
 
         var firstResponse = await client.PostAsJsonAsync(
@@ -44,7 +47,7 @@ public class RoundsApiTests
             new CountEvent
             {
                 CameraId = "cam-1",
-                RoundId = currentRound.Id,
+                RoundId = currentRound.RoundId,
                 TrackId = "trk-1",
                 VehicleType = "car",
                 CrossedAt = DateTime.UtcNow.ToString("O"),
@@ -54,14 +57,14 @@ public class RoundsApiTests
         );
         firstResponse.EnsureSuccessStatusCode();
 
-        var currentAfterIncrease = await client.GetFromJsonAsync<Round>("/api/rounds/current");
+        var currentAfterIncrease = await client.GetFromJsonAsync<RoundContractDto>("/api/rounds/current");
 
         var secondResponse = await client.PostAsJsonAsync(
             "/api/rounds/count-events",
             new CountEvent
             {
                 CameraId = "cam-1",
-                RoundId = currentRound.Id,
+                RoundId = currentRound.RoundId,
                 TrackId = "trk-2",
                 VehicleType = "car",
                 CrossedAt = DateTime.UtcNow.ToString("O"),
@@ -71,17 +74,17 @@ public class RoundsApiTests
         );
         secondResponse.EnsureSuccessStatusCode();
 
-        var currentAfterDecreaseAttempt = await client.GetFromJsonAsync<Round>("/api/rounds/current");
+        var currentAfterDecreaseAttempt = await client.GetFromJsonAsync<RoundContractDto>("/api/rounds/current");
 
         Assert.NotNull(currentAfterIncrease);
         Assert.NotNull(currentAfterDecreaseAttempt);
         Assert.Equal(7, currentAfterIncrease.CurrentCount);
         Assert.Equal(7, currentAfterDecreaseAttempt.CurrentCount);
 
-        var events = await client.GetFromJsonAsync<List<CountEvent>>($"/api/rounds/{currentRound.Id}/count-events");
+        var events = await client.GetFromJsonAsync<List<CountEvent>>($"/api/rounds/{currentRound.RoundId}/count-events");
         Assert.NotNull(events);
         Assert.Equal(2, events.Count);
-        Assert.All(events, evt => Assert.Equal(currentRound.Id, evt.RoundId));
+        Assert.All(events, evt => Assert.Equal(currentRound.RoundId, evt.RoundId));
     }
 
     [Fact]
@@ -91,7 +94,7 @@ public class RoundsApiTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
 
-        var previousRound = await client.GetFromJsonAsync<Round>("/api/rounds/current");
+        var previousRound = await client.GetFromJsonAsync<RoundContractDto>("/api/rounds/current");
         Assert.NotNull(previousRound);
 
         var countResponse = await client.PostAsJsonAsync(
@@ -99,7 +102,7 @@ public class RoundsApiTests
             new CountEvent
             {
                 CameraId = "cam-1",
-                RoundId = previousRound.Id,
+                RoundId = previousRound.RoundId,
                 TrackId = "trk-1",
                 VehicleType = "car",
                 CrossedAt = DateTime.UtcNow.ToString("O"),
@@ -112,23 +115,25 @@ public class RoundsApiTests
         var settleResponse = await client.PostAsync("/api/rounds/settle", content: null);
         settleResponse.EnsureSuccessStatusCode();
 
-        var newCurrentRound = await settleResponse.Content.ReadFromJsonAsync<Round>();
-        var history = await client.GetFromJsonAsync<List<Round>>("/api/rounds/history");
+        var newCurrentRound = await settleResponse.Content.ReadFromJsonAsync<RoundContractDto>();
+        var history = await client.GetFromJsonAsync<List<RoundContractDto>>("/api/rounds/history");
 
         Assert.NotNull(newCurrentRound);
-        Assert.NotEqual(previousRound.Id, newCurrentRound.Id);
+        Assert.NotEqual(previousRound.RoundId, newCurrentRound.RoundId);
         Assert.Equal(RoundService.StatusOpen, newCurrentRound.Status);
         Assert.Equal(0, newCurrentRound.CurrentCount);
+        Assert.False(newCurrentRound.IsSuspended);
 
         Assert.NotNull(history);
-        var settledRound = Assert.Single(history, r => r.Id == previousRound.Id);
+        var settledRound = Assert.Single(history, r => r.RoundId == previousRound.RoundId);
         Assert.Equal(RoundService.StatusSettled, settledRound.Status);
+        Assert.True(settledRound.IsSuspended);
         Assert.Equal(3, settledRound.FinalCount);
         Assert.NotNull(settledRound.SettledAt);
-        Assert.Contains(settledRound.Ranges, market => market.MarketType == "under" && market.IsWinner == true);
-        Assert.Contains(settledRound.Ranges, market => market.MarketType == "range" && market.IsWinner == false);
-        Assert.Contains(settledRound.Ranges, market => market.MarketType == "over" && market.IsWinner == false);
-        Assert.Contains(settledRound.Ranges, market => market.MarketType == "exact" && market.IsWinner == false);
+        Assert.Contains(settledRound.Markets, market => market.MarketType == "under" && market.IsWinner == true);
+        Assert.Contains(settledRound.Markets, market => market.MarketType == "range" && market.IsWinner == false);
+        Assert.Contains(settledRound.Markets, market => market.MarketType == "over" && market.IsWinner == false);
+        Assert.Contains(settledRound.Markets, market => market.MarketType == "exact" && market.IsWinner == false);
     }
 
     [Fact]
@@ -138,7 +143,7 @@ public class RoundsApiTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
 
-        var previousRound = await client.GetFromJsonAsync<Round>("/api/rounds/current");
+        var previousRound = await client.GetFromJsonAsync<RoundContractDto>("/api/rounds/current");
         Assert.NotNull(previousRound);
 
         var voidResponse = await client.PostAsJsonAsync("/api/rounds/void", new
@@ -147,16 +152,18 @@ public class RoundsApiTests
         });
         voidResponse.EnsureSuccessStatusCode();
 
-        var newCurrentRound = await voidResponse.Content.ReadFromJsonAsync<Round>();
-        var history = await client.GetFromJsonAsync<List<Round>>("/api/rounds/history");
+        var newCurrentRound = await voidResponse.Content.ReadFromJsonAsync<RoundContractDto>();
+        var history = await client.GetFromJsonAsync<List<RoundContractDto>>("/api/rounds/history");
 
         Assert.NotNull(newCurrentRound);
-        Assert.NotEqual(previousRound.Id, newCurrentRound.Id);
+        Assert.NotEqual(previousRound.RoundId, newCurrentRound.RoundId);
         Assert.Equal(RoundService.StatusOpen, newCurrentRound.Status);
+        Assert.False(newCurrentRound.IsSuspended);
 
         Assert.NotNull(history);
-        var voidedRound = Assert.Single(history, r => r.Id == previousRound.Id);
+        var voidedRound = Assert.Single(history, r => r.RoundId == previousRound.RoundId);
         Assert.Equal(RoundService.StatusVoid, voidedRound.Status);
+        Assert.True(voidedRound.IsSuspended);
         Assert.Equal("Stream indisponivel", voidedRound.VoidReason);
         Assert.NotNull(voidedRound.VoidedAt);
         Assert.Null(voidedRound.FinalCount);

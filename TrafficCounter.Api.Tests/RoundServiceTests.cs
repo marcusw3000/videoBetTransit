@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TrafficCounter.Api.Contracts;
 using TrafficCounter.Api.Data;
 using TrafficCounter.Api.Services;
 using Xunit;
@@ -157,6 +158,23 @@ public class RoundServiceTests
         Assert.NotNull(voided.VoidedAt);
         Assert.Null(voided.SettledAt);
         Assert.All(voided.Ranges, market => Assert.Null(market.IsWinner));
+    }
+
+    [Fact]
+    public void ToContract_ExposesStableCommercialFields()
+    {
+        var service = new RoundService(CreateFactory());
+        var round = service.GetCurrent();
+
+        var contract = round.ToContract();
+
+        Assert.Equal(round.Id, contract.RoundId);
+        Assert.Equal(round.Status, contract.Status);
+        Assert.Equal(round.BetCloseAt, contract.BetCloseAt);
+        Assert.Equal(round.EndsAt, contract.EndsAt);
+        Assert.False(contract.IsSuspended);
+        Assert.Equal(round.Ranges.Count, contract.Markets.Count);
+        Assert.All(contract.Markets, market => Assert.False(string.IsNullOrWhiteSpace(market.MarketId)));
     }
 
     private static IDbContextFactory<TrafficCounterDbContext> CreateFactory()

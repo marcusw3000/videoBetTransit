@@ -1,9 +1,9 @@
 import axios from 'axios'
-import { API_BASE_URL, BACKEND_API_KEY } from '../config'
+import { API_BASE_URL } from '../config'
+import { normalizeRoundContract } from '../utils/roundContract'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: BACKEND_API_KEY ? { 'X-API-Key': BACKEND_API_KEY } : {},
 })
 
 const MAX_RETRIES = 10
@@ -24,20 +24,15 @@ async function withRetry(fn, attempt = 0) {
 
 export async function getCurrentRound() {
   const { data } = await withRetry(() => api.get('/rounds/current'))
-  return data
+  return normalizeRoundContract(data)
 }
 
 export async function getRoundHistory() {
   const { data } = await withRetry(() => api.get('/rounds/history'))
-  return data
+  return Array.isArray(data) ? data.map(normalizeRoundContract).filter(Boolean) : []
 }
 
 export async function getRoundCountEvents(roundId) {
   const { data } = await withRetry(() => api.get(`/rounds/${roundId}/count-events`))
-  return data
-}
-
-export async function settleRound() {
-  const { data } = await api.post('/rounds/settle', {})
   return data
 }

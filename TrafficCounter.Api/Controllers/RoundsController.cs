@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using TrafficCounter.Api.Contracts;
 using TrafficCounter.Api.Hubs;
 using TrafficCounter.Api.Models;
 using TrafficCounter.Api.Security;
@@ -23,13 +24,13 @@ public class RoundsController : ControllerBase
     [HttpGet("current")]
     public IActionResult GetCurrent()
     {
-        return Ok(_roundService.GetCurrent());
+        return Ok(_roundService.GetCurrent().ToContract());
     }
 
     [HttpGet("history")]
     public IActionResult GetHistory()
     {
-        return Ok(_roundService.GetHistory());
+        return Ok(_roundService.GetHistory().Select(round => round.ToContract()));
     }
 
     [HttpGet("{roundId}/count-events")]
@@ -52,10 +53,10 @@ public class RoundsController : ControllerBase
 
         if (newRound != null)
         {
-            await _hubContext.Clients.All.SendAsync("round_settled", newRound);
+            await _hubContext.Clients.All.SendAsync("round_settled", newRound.ToContract());
         }
 
-        return Ok(_roundService.GetCurrent());
+        return Ok(_roundService.GetCurrent().ToContract());
     }
 
     [HttpPost("void")]
@@ -67,10 +68,10 @@ public class RoundsController : ControllerBase
 
         if (newRound != null)
         {
-            await _hubContext.Clients.All.SendAsync("round_settled", newRound);
+            await _hubContext.Clients.All.SendAsync("round_settled", newRound.ToContract());
         }
 
-        return Ok(_roundService.GetCurrent());
+        return Ok(_roundService.GetCurrent().ToContract());
     }
 
     [HttpPost("count-events")]
@@ -79,7 +80,7 @@ public class RoundsController : ControllerBase
     {
         var round = _roundService.SyncCount(evt);
 
-        await _hubContext.Clients.All.SendAsync("count_updated", round);
+        await _hubContext.Clients.All.SendAsync("count_updated", round.ToContract());
 
         return Ok(new { received = true, currentCount = round.CurrentCount });
     }

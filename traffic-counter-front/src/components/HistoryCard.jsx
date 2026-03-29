@@ -1,21 +1,31 @@
 function getWinningMarkets(item) {
-  if (!item.ranges?.length) return []
+  if (!item.markets?.length) return []
 
-  const explicitWinners = item.ranges.filter((range) => range.isWinner)
+  const explicitWinners = item.markets.filter((range) => range.isWinner)
   if (explicitWinners.length) return explicitWinners
 
   if (item.finalCount == null) return []
-  return item.ranges.filter((range) => item.finalCount >= range.min && item.finalCount <= range.max)
+  return item.markets.filter((range) => item.finalCount >= range.min && item.finalCount <= range.max)
 }
 
-function formatDate(iso) {
+function formatDate(iso, locale = 'pt-BR', timezone = 'America/Sao_Paulo') {
   if (!iso) return '--'
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  try {
+    return new Date(iso).toLocaleString(locale, {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: timezone,
+    })
+  } catch {
+    return new Date(iso).toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
 }
 
 function getHistoryStatusLabel(item) {
@@ -29,7 +39,12 @@ function getHistoryStatusLabel(item) {
   }
 }
 
-export default function HistoryCard({ item, summary }) {
+export default function HistoryCard({
+  item,
+  summary,
+  locale = 'pt-BR',
+  timezone = 'America/Sao_Paulo',
+}) {
   const winners = getWinningMarkets(item)
   const cameraLabel = summary?.cameraIds?.length ? summary.cameraIds.join(', ') : 'Sem camera'
   const eventsCount = summary?.eventsCount ?? 0
@@ -56,7 +71,7 @@ export default function HistoryCard({ item, summary }) {
           <span className="history-winner">{winners.map((winner) => `${winner.marketType === 'exact' ? `Exact ${winner.targetValue}` : winner.label} - ${winner.odds}x`).join(' | ')}</span>
         ) : '--'}
       </div>
-      <div className="history-date">{formatDate(item.settledAt || item.voidedAt || item.endsAt)}</div>
+      <div className="history-date">{formatDate(item.settledAt || item.voidedAt || item.endsAt, locale, timezone)}</div>
     </div>
   )
 }
