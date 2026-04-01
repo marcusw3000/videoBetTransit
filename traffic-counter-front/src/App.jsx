@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import CounterCard from './components/CounterCard'
 import TimerCard from './components/TimerCard'
 import HistoryCard from './components/HistoryCard'
 import MarketCard from './components/MarketCard'
@@ -276,12 +275,12 @@ function MarketPage() {
               src={liveStreamUrl}
               fallbackSrc={liveFallbackUrl}
               title={videoTitle}
+              countValue={round?.currentCount}
               resetKey={round?.roundId}
             />
           </div>
 
           <div className="stats-column">
-            <CounterCard value={round?.currentCount} history={countHistory} />
             <TimerCard
               seconds={roundPhase === 'open' ? betCloseSeconds : timeLeftSeconds}
               label={roundPhase === 'open' ? 'Janela de Aposta' : roundPhase === 'closing' ? 'Mercado Fechado' : 'Resultado Oficial em Breve'}
@@ -297,7 +296,7 @@ function MarketPage() {
                 <span className="label">Valor da Aposta</span>
                 <h2>{hasValidStake ? formatCurrency(numericStakeAmount, embedConfig.locale, embedConfig.currency) : 'Defina o valor'}</h2>
               </div>
-              <span className="stake-helper">O valor escolhido segue junto para o betslip.</span>
+              <span className="stake-helper">Selecione a stake antes de escolher o mercado.</span>
             </div>
 
             <div className="stake-options" role="group" aria-label="Valores rapidos">
@@ -331,6 +330,7 @@ function MarketPage() {
 
         <section className="markets-section">
           <h2>Mercados da Rodada</h2>
+          <p className="section-subtitle">Escolha uma linha e envie a selecao para o betslip.</p>
           <div className="markets-grid">
             {markets.length === 0 && (
               <div className="empty-state">Mercados indisponiveis para esta rodada.</div>
