@@ -1,0 +1,7 @@
+ultralytics
+opencv-python
+requests
+numpy
+lap>=0.5.12
+flask
+waitress
