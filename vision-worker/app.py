@@ -140,9 +140,13 @@ class AnnotatedFrameStreamer:
         self.stats = stats
         self._lock = threading.Lock()
         self._latest_jpeg: bytes | None = None
+        self._min_interval: float = 0.0  # 0 = sem limite
 
     def set_jpeg_quality(self, jpeg_quality: int):
         self.jpeg_quality = max(30, min(95, int(jpeg_quality)))
+
+    def set_fps_limit(self, fps: float):
+        self._min_interval = (1.0 / max(1.0, float(fps))) if fps > 0 else 0.0
 
     def update(self, frame):
         encode_start = time.perf_counter()
@@ -192,6 +196,7 @@ def create_mjpeg_app() -> Flask:
 
         def generate():
             last_sent = None
+            last_sent_at = 0.0
             runtime_stats.add_mjpeg_client()
 
             try:
@@ -205,7 +210,14 @@ def create_mjpeg_app() -> Flask:
                         time.sleep(0.01)
                         continue
 
+                    if streamer._min_interval > 0:
+                        now = time.monotonic()
+                        wait = streamer._min_interval - (now - last_sent_at)
+                        if wait > 0:
+                            time.sleep(wait)
+
                     last_sent = frame
+                    last_sent_at = time.monotonic()
                     yield (
                         b"--frame\r\n"
                         b"Content-Type: image/jpeg\r\n"
@@ -1045,6 +1057,7 @@ def main():
     config_path = "config.json"
     cfg = load_config(config_path)
     streamer.set_jpeg_quality(int(cfg.get("mjpeg_jpeg_quality", 70)))
+    streamer.set_fps_limit(float(cfg.get("mjpeg_fps_limit", 0)))
 
     os.makedirs(cfg["snapshot_dir"], exist_ok=True)
 
