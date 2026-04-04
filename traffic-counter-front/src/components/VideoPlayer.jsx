@@ -19,6 +19,7 @@ export default function VideoPlayer({
   src,
   fallbackSrc = '',
   title = 'Ao Vivo',
+  countValue = 0,
   onStreamStatusChange,
   resetKey,
 }) {
@@ -220,6 +221,11 @@ export default function VideoPlayer({
       </div>
 
       <div className="video-frame">
+        <div className="video-count-overlay">
+          <span className="video-count-label">Contagem Atual</span>
+          <strong className="video-count-value">{countValue ?? 0}</strong>
+        </div>
+
         {!webrtcSrc && !src && !fallbackSrc && (
           <div className="video-overlay-message">Defina uma URL de stream para iniciar.</div>
         )}
