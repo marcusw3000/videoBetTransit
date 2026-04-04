@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TimerCard from './components/TimerCard'
 import HistoryCard from './components/HistoryCard'
 import MarketCard from './components/MarketCard'
@@ -9,7 +9,6 @@ import { getRoundPhase, getTimeLeftInSeconds } from './utils/time'
 import { WEBRTC_URL, HLS_URL, MJPEG_URL } from './config'
 import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } from './embed'
 
-const MAX_HISTORY_POINTS = 30
 const RECENT_HISTORY_LIMIT = 6
 
 function formatCurrency(value, locale, currency) {
@@ -54,16 +53,21 @@ function getRoundDurationLabel(round) {
   return `${minutes} ${minutes === 1 ? 'MINUTO' : 'MINUTOS'}`
 }
 
+function getHeroKicker(round, roundDurationLabel) {
+  const displayName = getDisplayName(round).toUpperCase()
+  return roundDurationLabel ? `${displayName} · ${roundDurationLabel}` : displayName
+}
+
 function MarketPage() {
   const [embedConfig, setEmbedConfig] = useState(() => getEmbedConfig())
   const [round, setRound] = useState(null)
   const [history, setHistory] = useState([])
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(0)
   const [error, setError] = useState('')
-  const [countHistory, setCountHistory] = useState([])
   const [toast, setToast] = useState(null)
   const [selectedMarketId, setSelectedMarketId] = useState('')
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
+  const roundIdRef = useRef('')
 
   const liveWebRtcUrl = WEBRTC_URL
   const liveStreamUrl = HLS_URL
@@ -72,7 +76,7 @@ function MarketPage() {
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
   const markets = round?.markets || []
-  const videoTitle = embedConfig.cameraLabel || 'Transmissao ao vivo'
+  const videoTitle = embedConfig.cameraLabel || 'Transmissão ao vivo'
   const numericStakeAmount = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStakeAmount) && numericStakeAmount > 0
 
@@ -82,30 +86,40 @@ function MarketPage() {
     setTimeout(() => setToast((t) => (t?.id === id ? null : t)), 4000)
   }
 
-  async function loadCurrentRound() {
+  const updateRound = useCallback((nextRound) => {
+    const nextRoundId = nextRound?.roundId || ''
+    if (roundIdRef.current && nextRoundId && roundIdRef.current !== nextRoundId) {
+      setSelectedMarketId('')
+    }
+
+    roundIdRef.current = nextRoundId
+    setRound(nextRound)
+  }, [])
+
+  const loadCurrentRound = useCallback(async () => {
     try {
       const data = await getCurrentRound()
-      setRound(data)
+      updateRound(data)
       setError('')
     } catch (err) {
       console.error(err)
       setError('Falha ao carregar o round atual.')
     }
-  }
+  }, [updateRound])
 
-  async function loadHistory() {
+  const loadHistory = useCallback(async () => {
     try {
       const data = await getRoundHistory()
       setHistory(data)
     } catch (err) {
       console.error(err)
     }
-  }
+  }, [])
 
   function handleMarketSelect(market) {
     if (!round) return
     if (!hasValidStake) {
-      showToast('Escolha um valor de aposta valido antes de selecionar o mercado.')
+      showToast('Escolha um valor de aposta válido antes de selecionar o mercado.')
       return
     }
 
@@ -133,37 +147,57 @@ function MarketPage() {
   }
 
   useEffect(() => {
-    loadCurrentRound()
-    loadHistory()
+    let active = true
+
+    async function bootstrap() {
+      try {
+        const [currentRound, roundHistory] = await Promise.all([
+          getCurrentRound(),
+          getRoundHistory(),
+        ])
+
+        if (!active) return
+        updateRound(currentRound)
+        setHistory(roundHistory)
+        setError('')
+      } catch (err) {
+        if (!active) return
+        console.error(err)
+        setError('Falha ao carregar os dados iniciais.')
+      }
+    }
+
+    void bootstrap()
 
     startRoundConnection({
       onCountUpdated: (data) => {
-        setRound(data)
-        setCountHistory((prev) => {
-          const next = [...prev, data.currentCount]
-          return next.length > MAX_HISTORY_POINTS ? next.slice(-MAX_HISTORY_POINTS) : next
-        })
+        if (!active) return
+        updateRound(data)
       },
       onRoundSettled: async () => {
+        if (!active) return
         setSelectedMarketId('')
         showToast('Round encerrado! Novo round iniciado.')
-        setCountHistory([])
         await loadCurrentRound()
         await loadHistory()
       },
     }).catch((err) => {
+      if (!active) return
       console.error(err)
       setError('Falha ao conectar em tempo real.')
     })
 
     return () => {
+      active = false
       stopRoundConnection().catch(console.error)
     }
-  }, [])
+  }, [loadCurrentRound, loadHistory, updateRound])
 
   useEffect(() => {
     const handleConfigUpdate = () => {
-      setEmbedConfig(getEmbedConfig())
+      const nextConfig = getEmbedConfig()
+      setEmbedConfig(nextConfig)
+      setStakeAmount(String(nextConfig.defaultStake))
     }
 
     window.addEventListener(EMBED_CONFIG_EVENT, handleConfigUpdate)
@@ -173,7 +207,6 @@ function MarketPage() {
   useEffect(() => {
     applyEmbedTheme(embedConfig)
     document.title = `${embedConfig.brand} | ${embedConfig.cameraLabel}`
-    setStakeAmount(String(embedConfig.defaultStake))
     emitEmbedEvent('ready', {
       brand: embedConfig.brand,
       locale: embedConfig.locale,
@@ -186,10 +219,6 @@ function MarketPage() {
       mode: embedConfig.mode,
     }, embedConfig)
   }, [embedConfig])
-
-  useEffect(() => {
-    setSelectedMarketId('')
-  }, [round?.roundId])
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -241,10 +270,7 @@ function MarketPage() {
     return 'badge'
   }, [roundPhase])
 
-  const recentHistory = useMemo(
-    () => history.slice(0, RECENT_HISTORY_LIMIT),
-    [history],
-  )
+  const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
 
   return (
     <div className="page">
@@ -252,11 +278,7 @@ function MarketPage() {
         <header className="hero">
           <div>
             <h1>{embedConfig.brand}</h1>
-            <p className="hero-kicker">
-              {roundDurationLabel
-                ? `${getDisplayName(round).toUpperCase()} · ${roundDurationLabel}`
-                : getDisplayName(round).toUpperCase()}
-            </p>
+            <p className="hero-kicker">{getHeroKicker(round, roundDurationLabel)}</p>
             <div className={statusClass}>Status: {getRoundPhaseLabel(roundPhase)}</div>
           </div>
 
@@ -271,12 +293,12 @@ function MarketPage() {
         <section className="top-grid">
           <div className="video-column">
             <VideoPlayer
+              key={round?.roundId || 'live-player'}
               webrtcSrc={liveWebRtcUrl}
               src={liveStreamUrl}
               fallbackSrc={liveFallbackUrl}
               title={videoTitle}
               countValue={round?.currentCount}
-              resetKey={round?.roundId}
             />
           </div>
 
@@ -299,7 +321,7 @@ function MarketPage() {
               <span className="stake-helper">Selecione a stake antes de escolher o mercado.</span>
             </div>
 
-            <div className="stake-options" role="group" aria-label="Valores rapidos">
+            <div className="stake-options" role="group" aria-label="Valores rápidos">
               {embedConfig.stakeOptions.map((option) => (
                 <button
                   key={option}
@@ -330,10 +352,10 @@ function MarketPage() {
 
         <section className="markets-section">
           <h2>Mercados da Rodada</h2>
-          <p className="section-subtitle">Escolha uma linha e envie a selecao para o betslip.</p>
+          <p className="section-subtitle">Escolha uma linha e envie a seleção para o betslip.</p>
           <div className="markets-grid">
             {markets.length === 0 && (
-              <div className="empty-state">Mercados indisponiveis para esta rodada.</div>
+              <div className="empty-state">Mercados indisponíveis para esta rodada.</div>
             )}
 
             {markets.map((market) => (
@@ -353,7 +375,7 @@ function MarketPage() {
         </section>
 
         <section className="history-section">
-          <h2>Ultimos Resultados</h2>
+          <h2>Últimos Resultados</h2>
           <div className="history-list">
             {recentHistory.length === 0 && (
               <div className="empty-state">Nenhum round encerrado ainda.</div>

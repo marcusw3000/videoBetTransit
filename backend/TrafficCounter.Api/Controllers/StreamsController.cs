@@ -24,6 +24,15 @@ public class StreamsController : ControllerBase
         _urlValidation = urlValidation;
     }
 
+    [HttpGet]
+    public async Task<IActionResult> ListSessions([FromQuery] bool activeOnly = false)
+    {
+        var sessions = activeOnly
+            ? await _sessionService.ListActiveAsync()
+            : await _sessionService.ListAllAsync();
+        return Ok(sessions);
+    }
+
     [HttpPost]
     [RequireApiKey]
     public async Task<IActionResult> CreateStream([FromBody] CreateStreamRequest request)

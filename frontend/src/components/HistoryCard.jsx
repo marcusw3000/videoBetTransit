@@ -41,13 +41,12 @@ function getHistoryStatusLabel(item) {
 
 export default function HistoryCard({
   item,
-  summary,
   locale = 'pt-BR',
   timezone = 'America/Sao_Paulo',
 }) {
   const winners = getWinningMarkets(item)
-  const cameraLabel = summary?.cameraIds?.length ? summary.cameraIds.join(', ') : 'Sem camera'
-  const eventsCount = summary?.eventsCount ?? 0
+  const cameraLabel = item.cameraIds?.length ? item.cameraIds.join(', ') : 'Sem câmera'
+  const eventsCount = item.eventsCount ?? 0
 
   return (
     <div className="card history-card">

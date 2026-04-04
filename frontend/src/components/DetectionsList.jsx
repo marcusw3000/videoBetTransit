@@ -1,6 +1,5 @@
 export default function DetectionsList({ detections = [] }) {
-  // Mostra os últimos 8 veículos que cruzaram a linha (counted)
-  const counted = detections.filter(d => d.counted).slice(-8).reverse()
+  const counted = detections.filter((d) => d.counted).slice(-8).reverse()
 
   if (counted.length === 0) {
     return (

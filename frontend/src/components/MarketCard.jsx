@@ -30,7 +30,7 @@ function getMarketDescription(market) {
 
 function getMarketBadge(market, isActive, roundStatus, isSelected) {
   if (market.isWinner === true) return { label: 'VENCEU', className: 'market-active-badge market-result-win' }
-  if (market.isWinner === false && roundStatus === 'settled') return { label: 'NAO BATEU', className: 'market-active-badge market-result-lose' }
+  if (market.isWinner === false && roundStatus === 'settled') return { label: 'NÃO BATEU', className: 'market-active-badge market-result-lose' }
   if (isSelected && roundStatus === 'open') return { label: 'SELECIONADO', className: 'market-active-badge market-selected-badge' }
   if (roundStatus === 'closing') return { label: 'FECHADO', className: 'market-active-badge market-phase-closed' }
   if (roundStatus === 'settling') return { label: 'APURANDO', className: 'market-active-badge market-phase-settling' }
@@ -80,7 +80,7 @@ export default function MarketCard({
       <p className="market-odds">Odds {formatOdds(market.odds, locale)}</p>
       {badge && <span className={badge.className}>{badge.label}</span>}
       <span className="market-cta">
-        {requiresStake ? 'Escolha o valor da aposta' : roundStatus === 'open' ? 'Adicionar ao betslip' : roundStatus === 'closing' ? 'Mercado fechado' : roundStatus === 'settling' ? 'Resultado em apuracao' : roundStatus === 'settled' ? 'Resultado oficial' : 'Mercado indisponivel'}
+        {requiresStake ? 'Escolha o valor da aposta' : roundStatus === 'open' ? 'Adicionar ao betslip' : roundStatus === 'closing' ? 'Mercado fechado' : roundStatus === 'settling' ? 'Resultado em apuração' : roundStatus === 'settled' ? 'Resultado oficial' : 'Mercado indisponível'}
       </span>
     </button>
   )

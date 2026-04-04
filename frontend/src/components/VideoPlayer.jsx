@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Hls from 'hls.js'
 
 function buildReloadedSrc(src, reloadToken) {
@@ -8,9 +8,9 @@ function buildReloadedSrc(src, reloadToken) {
 }
 
 function getPreferredMode(webrtcSrc, primarySrc, fallbackSrc) {
-  if (fallbackSrc) return 'mjpeg'
   if (webrtcSrc) return 'webrtc'
   if (primarySrc) return 'hls'
+  if (fallbackSrc) return 'mjpeg'
   return 'webrtc'
 }
 
@@ -21,7 +21,6 @@ export default function VideoPlayer({
   title = 'Ao Vivo',
   countValue = 0,
   onStreamStatusChange,
-  resetKey,
 }) {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
@@ -38,11 +37,11 @@ export default function VideoPlayer({
     [fallbackSrc, reloadToken],
   )
 
-  function notifyStatus(status) {
+  const notifyStatus = useCallback((status) => {
     onStreamStatusChange?.(status)
-  }
+  }, [onStreamStatusChange])
 
-  function clearHlsResources() {
+  const clearHlsResources = useCallback(() => {
     if (syncIntervalRef.current) {
       clearInterval(syncIntervalRef.current)
       syncIntervalRef.current = null
@@ -52,29 +51,9 @@ export default function VideoPlayer({
       hlsRef.current.destroy()
       hlsRef.current = null
     }
-  }
+  }, [])
 
-  function handleReset() {
-    setHasError(false)
-    setIframeLoaded(false)
-    setMode(getPreferredMode(reloadedWebRtcSrc, primarySrc, mjpegFallbackSrc))
-    setReloadToken(Date.now())
-    notifyStatus('reconnecting')
-  }
-
-  function switchToHls() {
-    if (!primarySrc) {
-      switchToFallback()
-      return
-    }
-
-    clearHlsResources()
-    setMode('hls')
-    setHasError(false)
-    notifyStatus('fallback')
-  }
-
-  function switchToFallback() {
+  const switchToFallback = useCallback(() => {
     clearHlsResources()
 
     if (!mjpegFallbackSrc) {
@@ -86,18 +65,30 @@ export default function VideoPlayer({
     setMode('mjpeg')
     setHasError(false)
     notifyStatus('fallback')
-  }
+  }, [clearHlsResources, mjpegFallbackSrc, notifyStatus])
 
-  useEffect(() => {
-    if (!resetKey) return
-    handleReset()
-  }, [resetKey])
+  const switchToHls = useCallback(() => {
+    if (!primarySrc) {
+      switchToFallback()
+      return
+    }
+
+    clearHlsResources()
+    setMode('hls')
+    setHasError(false)
+    notifyStatus('fallback')
+  }, [clearHlsResources, notifyStatus, primarySrc, switchToFallback])
+
+  const handleReset = useCallback(() => {
+    setHasError(false)
+    setIframeLoaded(false)
+    setMode(getPreferredMode(webrtcSrc, src, fallbackSrc))
+    setReloadToken(Date.now())
+    notifyStatus('reconnecting')
+  }, [fallbackSrc, notifyStatus, src, webrtcSrc])
 
   useEffect(() => {
     if (!reloadedWebRtcSrc || mode !== 'webrtc') return undefined
-
-    setIframeLoaded(false)
-    setHasError(false)
 
     const timerId = setTimeout(() => {
       if (!iframeLoaded) {
@@ -106,7 +97,7 @@ export default function VideoPlayer({
     }, 4000)
 
     return () => clearTimeout(timerId)
-  }, [reloadedWebRtcSrc, iframeLoaded, mode, reloadToken])
+  }, [iframeLoaded, mode, reloadedWebRtcSrc, switchToHls])
 
   useEffect(() => {
     const video = videoRef.current
@@ -125,8 +116,10 @@ export default function VideoPlayer({
     }
 
     if (!Hls.isSupported()) {
-      switchToFallback()
-      return undefined
+      const fallbackTimerId = setTimeout(() => {
+        switchToFallback()
+      }, 0)
+      return () => clearTimeout(fallbackTimerId)
     }
 
     const hls = new Hls({
@@ -178,9 +171,9 @@ export default function VideoPlayer({
     return () => {
       clearHlsResources()
     }
-  }, [primarySrc, mode])
+  }, [clearHlsResources, mode, notifyStatus, primarySrc, switchToFallback])
 
-  useEffect(() => () => clearHlsResources(), [])
+  useEffect(() => () => clearHlsResources(), [clearHlsResources])
 
   function handleIframeLoad() {
     setIframeLoaded(true)

@@ -110,6 +110,18 @@ public class StreamSessionService
         return sessions.Select(ToResponse).ToList();
     }
 
+    public async Task<IList<StreamSessionResponse>> ListAllAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var sessions = await db.StreamSessions
+            .Include(s => s.CameraSource)
+            .OrderByDescending(s => s.CreatedAt)
+            .Take(50)
+            .ToListAsync();
+
+        return sessions.Select(ToResponse).ToList();
+    }
+
     public async Task<StreamSessionResponse> TransitionStatusAsync(
         Guid sessionId, SessionStatus next, string? failureReason = null)
     {

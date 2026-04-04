@@ -37,6 +37,8 @@ export function normalizeRoundContract(round) {
     currentCount: round.currentCount ?? 0,
     finalCount: round.finalCount ?? null,
     isSuspended: round.isSuspended ?? status !== 'open',
+    cameraIds: Array.isArray(round.cameraIds) ? round.cameraIds : [],
+    eventsCount: round.eventsCount ?? 0,
     markets,
   }
 }
