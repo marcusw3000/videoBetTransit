@@ -27,18 +27,18 @@
   "operator_preview_max_width": 960,
   "operator_preview_fps_limit": 10,
   "line": {
-    "x1": 300,
-    "y1": 346,
-    "x2": 601,
+    "x1": 233,
+    "y1": 370,
+    "x2": 618,
     "y2": 288
   },
   "roi": {
-    "x": 220,
-    "y": 86,
-    "w": 476,
-    "h": 385
+    "x": 226,
+    "y": 160,
+    "w": 446,
+    "h": 319
   },
-  "count_direction": "any",
+  "count_direction": "down",
   "show_window": true,
   "save_snapshots": true,
   "snapshot_queue_size": 64,
@@ -48,5 +48,27 @@
   "mjpeg_port": 8090,
   "min_hits_to_count": 4,
   "max_track_history_age": 300,
-  "min_bbox_area": 100
+  "min_bbox_area": 100,
+  "stream_profiles": [
+    {
+      "id": "stream_1775342309357",
+      "name": "cam_002",
+      "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
+      "camera_id": "cam_001",
+      "roi": {
+        "x": 226,
+        "y": 160,
+        "w": 446,
+        "h": 319
+      },
+      "line": {
+        "x1": 233,
+        "y1": 370,
+        "x2": 618,
+        "y2": 288
+      },
+      "count_direction": "down"
+    }
+  ],
+  "selected_stream_profile_id": "stream_1775342309357"
 }

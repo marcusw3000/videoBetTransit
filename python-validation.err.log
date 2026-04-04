@@ -1,0 +1,172 @@
+20:02:26 [INFO] Conectando ao stream: https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8
+20:02:26 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+20:02:26 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=30.00 | fps efetivo=30.00
+20:02:26 [INFO] MJPEG server iniciado em http://0.0.0.0:8090/video_feed
+20:02:26 [INFO] Iniciando contagem... | tracker: botsort_traffic.yaml | conf: 0.2 | imgsz: 256 | stride: 2 | jpeg: 65 | browserMaxWidth: 854 | operatorMaxWidth: 960 | operatorFps: 10.0
+20:02:26 [INFO] Resolução do stream: 704x480
+20:02:26 [INFO] ROI: {'x': 220, 'y': 86, 'w': 476, 'h': 385} | Linha: {'x1': 300, 'y1': 346, 'x2': 601, 'y2': 288} | Direção: any
+20:02:26 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:02:30 [INFO] FPS médio: 26.0 | Total contado: 0
+20:02:30 [INFO] FPS inst: 288.0 | inferencia media: 20.0 ms | JPEG medio: 1.1 ms | pipeline media: 25.7 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:34 [INFO] FPS médio: 28.6 | Total contado: 0
+20:02:34 [INFO] FPS inst: 182.4 | inferencia media: 21.3 ms | JPEG medio: 1.0 ms | pipeline media: 24.9 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:36 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:02:38 [INFO] FPS médio: 26.3 | Total contado: 0
+20:02:38 [INFO] FPS inst: 272.5 | inferencia media: 22.2 ms | JPEG medio: 1.1 ms | pipeline media: 25.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:41 [INFO] FPS médio: 28.9 | Total contado: 0
+20:02:41 [INFO] FPS inst: 260.5 | inferencia media: 22.3 ms | JPEG medio: 1.1 ms | pipeline media: 24.9 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:45 [INFO] FPS médio: 27.5 | Total contado: 0
+20:02:45 [INFO] FPS inst: 210.7 | inferencia media: 22.8 ms | JPEG medio: 1.1 ms | pipeline media: 25.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:46 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:02:48 [INFO] FPS médio: 27.8 | Total contado: 0
+20:02:48 [INFO] FPS inst: 248.9 | inferencia media: 22.6 ms | JPEG medio: 1.0 ms | pipeline media: 24.9 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:52 [INFO] FPS médio: 28.2 | Total contado: 0
+20:02:52 [INFO] FPS inst: 254.8 | inferencia media: 22.7 ms | JPEG medio: 1.0 ms | pipeline media: 24.9 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:55 [INFO] FPS médio: 29.1 | Total contado: 0
+20:02:55 [INFO] FPS inst: 167.0 | inferencia media: 22.5 ms | JPEG medio: 1.0 ms | pipeline media: 24.6 ms | MJPEG clientes: 0 | live descartados: 0
+20:02:56 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:02:59 [INFO] FPS médio: 28.3 | Total contado: 0
+20:02:59 [INFO] FPS inst: 273.3 | inferencia media: 22.3 ms | JPEG medio: 1.0 ms | pipeline media: 24.4 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:02 [INFO] FPS médio: 29.2 | Total contado: 0
+20:03:02 [INFO] FPS inst: 254.3 | inferencia media: 22.2 ms | JPEG medio: 1.0 ms | pipeline media: 24.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:06 [INFO] FPS médio: 29.2 | Total contado: 0
+20:03:06 [INFO] FPS inst: 279.1 | inferencia media: 22.1 ms | JPEG medio: 1.0 ms | pipeline media: 24.1 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:07 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:03:09 [INFO] FPS médio: 28.1 | Total contado: 0
+20:03:09 [INFO] FPS inst: 303.5 | inferencia media: 22.0 ms | JPEG medio: 1.0 ms | pipeline media: 23.9 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:11 [INFO] Auto-resync do stream apos 45.0s para manter a live mais proxima do ao vivo.
+20:03:11 [INFO] Reset manual do stream solicitado.
+20:03:11 [INFO] Conectando ao stream: https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8
+20:03:11 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+20:03:12 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=30.00 | fps efetivo=30.00
+20:03:13 [INFO] FPS médio: 25.0 | Total contado: 0
+20:03:13 [INFO] FPS inst: 300.2 | inferencia media: 21.9 ms | JPEG medio: 1.0 ms | pipeline media: 23.8 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:17 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:03:17 [INFO] FPS médio: 28.5 | Total contado: 0
+20:03:17 [INFO] FPS inst: 158.1 | inferencia media: 21.9 ms | JPEG medio: 1.0 ms | pipeline media: 23.8 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:20 [INFO] FPS médio: 29.3 | Total contado: 0
+20:03:20 [INFO] FPS inst: 247.7 | inferencia media: 21.8 ms | JPEG medio: 1.0 ms | pipeline media: 23.6 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:24 [INFO] FPS médio: 27.8 | Total contado: 0
+20:03:24 [INFO] FPS inst: 271.3 | inferencia media: 21.7 ms | JPEG medio: 1.0 ms | pipeline media: 23.5 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:27 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:03:27 [INFO] FPS médio: 29.3 | Total contado: 0
+20:03:27 [INFO] FPS inst: 328.9 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.4 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:31 [INFO] FPS médio: 29.2 | Total contado: 0
+20:03:31 [INFO] FPS inst: 258.4 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.4 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:34 [INFO] FPS médio: 27.6 | Total contado: 0
+20:03:34 [INFO] FPS inst: 232.8 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.3 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:37 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:03:38 [INFO] FPS médio: 29.0 | Total contado: 0
+20:03:38 [INFO] FPS inst: 297.3 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.3 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:41 [INFO] FPS médio: 28.5 | Total contado: 0
+20:03:41 [INFO] FPS inst: 259.4 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.3 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:45 [INFO] FPS médio: 27.5 | Total contado: 0
+20:03:45 [INFO] FPS inst: 308.2 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.3 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:47 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:03:48 [INFO] FPS médio: 29.3 | Total contado: 0
+20:03:48 [INFO] FPS inst: 213.2 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.3 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:52 [INFO] FPS médio: 29.0 | Total contado: 0
+20:03:52 [INFO] FPS inst: 290.4 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.3 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:55 [INFO] FPS médio: 28.0 | Total contado: 0
+20:03:55 [INFO] FPS inst: 298.8 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:03:57 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:03:57 [INFO] Auto-resync do stream apos 45.0s para manter a live mais proxima do ao vivo.
+20:03:57 [INFO] Reset manual do stream solicitado.
+20:03:57 [INFO] Conectando ao stream: https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8
+20:03:57 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+20:03:57 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=30.00 | fps efetivo=30.00
+20:03:59 [INFO] FPS médio: 25.1 | Total contado: 0
+20:03:59 [INFO] FPS inst: 246.8 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:03 [INFO] FPS médio: 29.0 | Total contado: 0
+20:04:03 [INFO] FPS inst: 275.1 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:06 [INFO] FPS médio: 29.4 | Total contado: 0
+20:04:06 [INFO] FPS inst: 303.8 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:07 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:04:10 [INFO] FPS médio: 27.5 | Total contado: 0
+20:04:10 [INFO] FPS inst: 287.9 | inferencia media: 21.6 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:13 [INFO] FPS médio: 29.5 | Total contado: 0
+20:04:13 [INFO] FPS inst: 290.4 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:17 [INFO] FPS médio: 29.1 | Total contado: 0
+20:04:17 [INFO] FPS inst: 310.3 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:17 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:04:20 [INFO] Mudanca de round detectada (rnd_a053ade8 -> rnd_3df686e7). Resetando stream local.
+20:04:20 [INFO] Reset manual do stream solicitado.
+20:04:20 [INFO] Conectando ao stream: https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8
+20:04:20 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+20:04:20 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=30.00 | fps efetivo=30.00
+20:04:21 [INFO] FPS médio: 24.1 | Total contado: 0
+20:04:21 [INFO] FPS inst: 255.6 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:24 [INFO] FPS médio: 28.9 | Total contado: 0
+20:04:24 [INFO] FPS inst: 206.1 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.2 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:27 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:04:27 [INFO] FPS médio: 29.7 | Total contado: 0
+20:04:27 [INFO] FPS inst: 304.5 | inferencia media: 21.4 ms | JPEG medio: 1.0 ms | pipeline media: 23.1 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:31 [INFO] FPS médio: 25.9 | Total contado: 0
+20:04:31 [INFO] FPS inst: 156.3 | inferencia media: 21.5 ms | JPEG medio: 1.0 ms | pipeline media: 23.1 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:35 [INFO] FPS médio: 29.6 | Total contado: 0
+20:04:35 [INFO] FPS inst: 307.8 | inferencia media: 21.4 ms | JPEG medio: 1.0 ms | pipeline media: 23.1 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:37 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:04:38 [INFO] FPS médio: 29.6 | Total contado: 0
+20:04:38 [INFO] FPS inst: 305.1 | inferencia media: 21.4 ms | JPEG medio: 1.0 ms | pipeline media: 23.0 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:42 [INFO] FPS médio: 27.9 | Total contado: 0
+20:04:42 [INFO] FPS inst: 287.4 | inferencia media: 21.3 ms | JPEG medio: 1.0 ms | pipeline media: 23.0 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:45 [INFO] FPS médio: 29.4 | Total contado: 0
+20:04:45 [INFO] FPS inst: 322.0 | inferencia media: 21.3 ms | JPEG medio: 1.0 ms | pipeline media: 23.0 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:47 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:04:48 [INFO] FPS médio: 29.5 | Total contado: 0
+20:04:48 [INFO] FPS inst: 272.3 | inferencia media: 21.2 ms | JPEG medio: 1.0 ms | pipeline media: 22.9 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:52 [INFO] FPS médio: 28.7 | Total contado: 0
+20:04:52 [INFO] FPS inst: 308.2 | inferencia media: 21.2 ms | JPEG medio: 1.0 ms | pipeline media: 22.9 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:55 [INFO] FPS médio: 29.3 | Total contado: 0
+20:04:55 [INFO] FPS inst: 252.8 | inferencia media: 21.2 ms | JPEG medio: 1.0 ms | pipeline media: 22.8 ms | MJPEG clientes: 0 | live descartados: 0
+20:04:57 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:04:59 [INFO] FPS médio: 29.2 | Total contado: 0
+20:04:59 [INFO] FPS inst: 273.7 | inferencia media: 21.1 ms | JPEG medio: 1.0 ms | pipeline media: 22.8 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:02 [INFO] FPS médio: 28.4 | Total contado: 0
+20:05:02 [INFO] FPS inst: 290.7 | inferencia media: 21.1 ms | JPEG medio: 1.0 ms | pipeline media: 22.8 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:06 [INFO] Auto-resync do stream apos 45.0s para manter a live mais proxima do ao vivo.
+20:05:06 [INFO] Reset manual do stream solicitado.
+20:05:06 [INFO] Conectando ao stream: https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8
+20:05:06 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+20:05:06 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=30.00 | fps efetivo=30.00
+20:05:06 [INFO] FPS médio: 25.2 | Total contado: 0
+20:05:06 [INFO] FPS inst: 248.3 | inferencia media: 21.1 ms | JPEG medio: 1.0 ms | pipeline media: 22.7 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:07 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:05:10 [INFO] FPS médio: 29.5 | Total contado: 0
+20:05:10 [INFO] FPS inst: 293.5 | inferencia media: 21.1 ms | JPEG medio: 1.0 ms | pipeline media: 22.7 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:13 [INFO] FPS médio: 29.4 | Total contado: 0
+20:05:13 [INFO] FPS inst: 294.6 | inferencia media: 21.0 ms | JPEG medio: 1.0 ms | pipeline media: 22.7 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:17 [INFO] FPS médio: 27.5 | Total contado: 0
+20:05:17 [INFO] FPS inst: 281.2 | inferencia media: 21.1 ms | JPEG medio: 1.0 ms | pipeline media: 22.7 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:17 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:05:20 [INFO] FPS médio: 29.7 | Total contado: 0
+20:05:20 [INFO] FPS inst: 322.6 | inferencia media: 21.0 ms | JPEG medio: 1.0 ms | pipeline media: 22.6 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:23 [INFO] FPS médio: 29.6 | Total contado: 0
+20:05:23 [INFO] FPS inst: 278.0 | inferencia media: 21.0 ms | JPEG medio: 1.0 ms | pipeline media: 22.6 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:27 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:05:27 [INFO] FPS médio: 28.9 | Total contado: 0
+20:05:27 [INFO] FPS inst: 177.9 | inferencia media: 20.9 ms | JPEG medio: 1.0 ms | pipeline media: 22.5 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:31 [INFO] FPS médio: 26.8 | Total contado: 0
+20:05:31 [INFO] FPS inst: 243.1 | inferencia media: 20.9 ms | JPEG medio: 1.0 ms | pipeline media: 22.6 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:34 [INFO] FPS médio: 27.9 | Total contado: 0
+20:05:34 [INFO] FPS inst: 299.1 | inferencia media: 21.0 ms | JPEG medio: 1.0 ms | pipeline media: 22.6 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:37 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:05:38 [INFO] FPS médio: 29.0 | Total contado: 0
+20:05:38 [INFO] FPS inst: 314.9 | inferencia media: 20.9 ms | JPEG medio: 1.0 ms | pipeline media: 22.5 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:41 [INFO] FPS médio: 28.4 | Total contado: 0
+20:05:41 [INFO] FPS inst: 300.1 | inferencia media: 21.0 ms | JPEG medio: 1.0 ms | pipeline media: 22.6 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:45 [INFO] FPS médio: 29.5 | Total contado: 0
+20:05:45 [INFO] FPS inst: 263.7 | inferencia media: 20.9 ms | JPEG medio: 1.0 ms | pipeline media: 22.5 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:47 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down
+20:05:48 [INFO] FPS médio: 28.7 | Total contado: 0
+20:05:48 [INFO] FPS inst: 324.8 | inferencia media: 20.9 ms | JPEG medio: 1.0 ms | pipeline media: 22.5 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:51 [INFO] Auto-resync do stream apos 45.0s para manter a live mais proxima do ao vivo.
+20:05:51 [INFO] Reset manual do stream solicitado.
+20:05:51 [INFO] Conectando ao stream: https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8
+20:05:51 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+20:05:52 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=30.00 | fps efetivo=30.00
+20:05:52 [INFO] FPS médio: 25.5 | Total contado: 0
+20:05:52 [INFO] FPS inst: 298.9 | inferencia media: 20.8 ms | JPEG medio: 1.0 ms | pipeline media: 22.4 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:55 [INFO] FPS médio: 29.9 | Total contado: 0
+20:05:55 [INFO] FPS inst: 302.9 | inferencia media: 20.8 ms | JPEG medio: 1.0 ms | pipeline media: 22.4 ms | MJPEG clientes: 0 | live descartados: 0
+20:05:57 [INFO] Config atualizada pelo admin: line={'x1': 11, 'y1': 22, 'x2': 33, 'y2': 44}, direction=down

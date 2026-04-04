@@ -109,6 +109,10 @@ Configuracoes relevantes em `config.json`:
 - `save_snapshots`: salva recortes dos veiculos contados
 - `mjpeg_host`: host do servidor MJPEG
 - `mjpeg_port`: porta do servidor MJPEG
+- `supabase_url`: URL do projeto Supabase para sincronizacao opcional da esteira
+- `supabase_service_key`: service role key usada pela engine para ler/escrever a esteira
+- `supabase_stream_profiles_table`: nome da tabela remota, por padrao `stream_profiles`
+- `supabase_stream_profiles_scope`: escopo logico para separar ambientes/projetos dentro da mesma tabela
 
 Observacao importante:
 - o browser nao desenha mais overlay separado sobre HLS
@@ -117,6 +121,10 @@ Observacao importante:
 - o feed MJPEG pode exigir `token` na query string
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
+- a esteira de streams continua salva localmente em `config.json` para garantir boot offline
+- quando `supabase_url` e `supabase_service_key` estao configurados, a engine sincroniza a esteira com o Supabase
+- no primeiro boot com Supabase, se a tabela remota estiver vazia, a configuracao local e publicada
+- se ja existirem perfis remotos, eles passam a popular a esteira local
 - a baseline atual de latencia ficou boa com:
   - `ffmpeg_capture_options`: `fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;32768`
   - `stream_buffer_size`: `1`
@@ -209,6 +217,7 @@ Observacao:
 
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
 - Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
+- se quiser sincronizar a esteira no Supabase, crie a tabela usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `config.json`
 - O uso do proxy `/proxy/video-feed` reduz o problema de mixed content e evita expor o token do MJPEG no browser por padrao.
 - A `.venv` precisa estar atualizada com `requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.
