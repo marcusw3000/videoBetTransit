@@ -26,3 +26,5 @@ appsettings.Development.json
 # Project specific
 snapshots/
 artifacts/
+config.json
+vision-worker/config.json
