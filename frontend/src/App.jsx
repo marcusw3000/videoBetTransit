@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import TimerCard from './components/TimerCard'
-import HistoryCard from './components/HistoryCard'
-import MarketCard from './components/MarketCard'
+import BettingPanel from './components/BettingPanel'
+import LastResults from './components/LastResults'
 import VideoPlayer from './components/VideoPlayer'
 import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
@@ -20,21 +19,15 @@ function formatCurrency(value, locale, currency) {
   }).format(value)
 }
 
-function getRoundPhaseLabel(roundPhase) {
-  switch (roundPhase) {
-    case 'open':
-      return 'Apostas Abertas'
-    case 'closing':
-      return 'Apostas Fechadas'
-    case 'settling':
-      return 'Apurando'
-    case 'settled':
-      return 'Encerrada'
-    case 'void':
-      return 'Anulada'
-    default:
-      return 'Carregando'
-  }
+function formatOdds(odds, locale = 'pt-BR') {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(odds ?? 0))
+}
+
+function padTime(n) {
+  return String(Math.max(0, Math.floor(n))).padStart(2, '0')
 }
 
 function getDisplayName(round) {
@@ -43,19 +36,31 @@ function getDisplayName(round) {
 
 function getRoundDurationLabel(round) {
   if (!round?.createdAt || !round?.endsAt) return null
-
   const created = new Date(round.createdAt).getTime()
   const ends = new Date(round.endsAt).getTime()
   if (Number.isNaN(created) || Number.isNaN(ends) || ends <= created) return null
-
   const minutes = Math.round((ends - created) / 60000)
   if (minutes <= 0) return null
-  return `${minutes} ${minutes === 1 ? 'MINUTO' : 'MINUTOS'}`
+  return `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`
 }
 
-function getHeroKicker(round, roundDurationLabel) {
-  const displayName = getDisplayName(round).toUpperCase()
-  return roundDurationLabel ? `${displayName} · ${roundDurationLabel}` : displayName
+function LiveBadge({ phase }) {
+  if (phase === 'open') {
+    return <span className="live-badge live-badge-open"><span className="live-dot" />AO VIVO</span>
+  }
+  if (phase === 'closing') {
+    return <span className="live-badge live-badge-closing">FECHADO</span>
+  }
+  if (phase === 'settling') {
+    return <span className="live-badge live-badge-settling">APURANDO</span>
+  }
+  if (phase === 'settled') {
+    return <span className="live-badge live-badge-settled">ENCERRADO</span>
+  }
+  if (phase === 'void') {
+    return <span className="live-badge live-badge-void">ANULADO</span>
+  }
+  return <span className="live-badge">CARREGANDO</span>
 }
 
 function MarketPage() {
@@ -69,16 +74,28 @@ function MarketPage() {
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
   const roundIdRef = useRef('')
 
-  const liveWebRtcUrl = WEBRTC_URL
-  const liveStreamUrl = HLS_URL
-  const liveFallbackUrl = MJPEG_URL
   const roundPhase = getRoundPhase(round)
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
   const markets = round?.markets || []
-  const videoTitle = embedConfig.cameraLabel || 'Transmissão ao vivo'
   const numericStakeAmount = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStakeAmount) && numericStakeAmount > 0
+
+  const headerTimerSeconds = roundPhase === 'open' ? betCloseSeconds : timeLeftSeconds
+  const headerMins = padTime(headerTimerSeconds / 60)
+  const headerSecs = padTime(headerTimerSeconds % 60)
+
+  const betCloseMins = padTime(betCloseSeconds / 60)
+  const betCloseSecs = padTime(betCloseSeconds % 60)
+
+  const overMarket = useMemo(() => markets.find((m) => m.marketType?.toLowerCase() === 'over') || null, [markets])
+  const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
+
+  const gameTitle = useMemo(() => {
+    const name = getDisplayName(round)
+    const dur = roundDurationLabel ? `(${roundDurationLabel})` : ''
+    return `${name}${dur ? ' ' + dur : ''}: quantos carros?`
+  }, [round, roundDurationLabel])
 
   function showToast(message) {
     const id = Date.now()
@@ -91,7 +108,6 @@ function MarketPage() {
     if (roundIdRef.current && nextRoundId && roundIdRef.current !== nextRoundId) {
       setSelectedMarketId('')
     }
-
     roundIdRef.current = nextRoundId
     setRound(nextRound)
   }, [])
@@ -122,9 +138,7 @@ function MarketPage() {
       showToast('Escolha um valor de aposta válido antes de selecionar o mercado.')
       return
     }
-
     setSelectedMarketId(market.marketId || market.id)
-    showToast(`${market.label || market.marketType} selecionado com ${formatCurrency(numericStakeAmount, embedConfig.locale, embedConfig.currency)}.`)
     emitEmbedEvent('market-select', {
       marketId: market.marketId || market.id,
       marketType: market.marketType,
@@ -155,7 +169,6 @@ function MarketPage() {
           getCurrentRound(),
           getRoundHistory(),
         ])
-
         if (!active) return
         updateRound(currentRound)
         setHistory(roundHistory)
@@ -199,7 +212,6 @@ function MarketPage() {
       setEmbedConfig(nextConfig)
       setStakeAmount(String(nextConfig.defaultStake))
     }
-
     window.addEventListener(EMBED_CONFIG_EVENT, handleConfigUpdate)
     return () => window.removeEventListener(EMBED_CONFIG_EVENT, handleConfigUpdate)
   }, [])
@@ -228,13 +240,11 @@ function MarketPage() {
         setTimeLeftSeconds(0)
       }
     }, 1000)
-
     return () => clearInterval(intervalId)
   }, [round])
 
   useEffect(() => {
     if (!round) return
-
     emitEmbedEvent('round-update', {
       roundId: round.roundId,
       status: round.status,
@@ -254,7 +264,6 @@ function MarketPage() {
 
   useEffect(() => {
     if (!hasValidStake) return
-
     emitEmbedEvent('stake-change', {
       stakeAmount: numericStakeAmount,
       formattedStake: formatCurrency(numericStakeAmount, embedConfig.locale, embedConfig.currency),
@@ -263,135 +272,110 @@ function MarketPage() {
     }, embedConfig)
   }, [embedConfig, hasValidStake, numericStakeAmount])
 
-  const statusClass = useMemo(() => {
-    if (roundPhase === 'open') return 'badge badge-live'
-    if (roundPhase === 'closing') return 'badge badge-closing'
-    if (roundPhase === 'settled') return 'badge badge-settled'
-    return 'badge'
-  }, [roundPhase])
-
-  const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
-
   return (
     <div className="page">
-      <div className="container">
-        <header className="hero">
-          <div>
-            <h1>{embedConfig.brand}</h1>
-            <p className="hero-kicker">{getHeroKicker(round, roundDurationLabel)}</p>
-            <div className={statusClass}>Status: {getRoundPhaseLabel(roundPhase)}</div>
+    <div className="page-inner">
+      {/* ── Header ── */}
+      <header className="exchange-header">
+        <div className="header-left">
+          <div className="header-brand-icon" aria-label="brand icon">🚗</div>
+          <div className="header-title-block">
+            <span className="header-game-title">{gameTitle}</span>
+            <LiveBadge phase={roundPhase} />
+          </div>
+        </div>
+        <div className="header-right">
+          <div className="header-timer-block">
+            <div className="header-timer-digits">
+              <span className="header-timer-num">{headerMins}</span>
+              <span className="header-timer-sep">:</span>
+              <span className="header-timer-num">{headerSecs}</span>
+            </div>
+            <div className="header-timer-labels">
+              <span>MINS</span>
+              <span>SECS</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Last results bar ── */}
+      <div className="recents-bar">
+        <LastResults history={recentHistory} overMarket={overMarket} />
+      </div>
+
+      {error && <div className="error-banner">{error}</div>}
+      {toast && <div className="toast" key={toast.id}>{toast.message}</div>}
+
+      {/* ── Main body ── */}
+      <div className="exchange-body">
+        {/* Left: video + count */}
+        <div className="left-panel">
+          <div className="count-bar">
+            <div className="count-bar-left">
+              <span className="count-bar-label">CONTAGEM ATUAL</span>
+              <span className="count-bar-value">
+                {round?.currentCount ?? '--'}
+              </span>
+            </div>
+            <div className="count-bar-right">
+              <span className="count-bar-label">PREVISÕES ENCERRAM EM</span>
+              <span className="count-bar-timer">{betCloseMins}:{betCloseSecs}</span>
+            </div>
           </div>
 
-          <div className="hero-actions">
-            <div className="hero-camera-pill">{embedConfig.cameraLabel}</div>
-          </div>
-        </header>
-
-        {error && <div className="error-banner">{error}</div>}
-        {toast && <div className="toast" key={toast.id}>{toast.message}</div>}
-
-        <section className="top-grid">
-          <div className="video-column">
+          <div className="video-wrapper">
             <VideoPlayer
               key={round?.roundId || 'live-player'}
-              webrtcSrc={liveWebRtcUrl}
-              src={liveStreamUrl}
-              fallbackSrc={liveFallbackUrl}
-              title={videoTitle}
+              webrtcSrc={WEBRTC_URL}
+              src={HLS_URL}
+              fallbackSrc={MJPEG_URL}
+              title={embedConfig.cameraLabel || 'Transmissão ao vivo'}
               countValue={round?.currentCount}
             />
           </div>
+        </div>
 
-          <div className="stats-column">
-            <TimerCard
-              seconds={roundPhase === 'open' ? betCloseSeconds : timeLeftSeconds}
-              label={roundPhase === 'open' ? 'Janela de Aposta' : roundPhase === 'closing' ? 'Mercado Fechado' : 'Resultado Oficial em Breve'}
-              tone={roundPhase === 'closing' || roundPhase === 'settling' ? 'warning' : 'default'}
-            />
-          </div>
-        </section>
-
-        <section className="stake-section">
-          <div className="card stake-card">
-            <div className="stake-header">
-              <div>
-                <span className="label">Valor da Aposta</span>
-                <h2>{hasValidStake ? formatCurrency(numericStakeAmount, embedConfig.locale, embedConfig.currency) : 'Defina o valor'}</h2>
-              </div>
-              <span className="stake-helper">Selecione a stake antes de escolher o mercado.</span>
-            </div>
-
-            <div className="stake-options" role="group" aria-label="Valores rápidos">
-              {embedConfig.stakeOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={`stake-chip${numericStakeAmount === option ? ' stake-chip-active' : ''}`}
-                  onClick={() => setStakeAmount(String(option))}
-                >
-                  {formatCurrency(option, embedConfig.locale, embedConfig.currency)}
-                </button>
-              ))}
-            </div>
-
-            <label className="stake-input-group">
-              <span>Outro valor</span>
-              <input
-                type="number"
-                min="1"
-                step="0.01"
-                inputMode="decimal"
-                className="stake-input"
-                value={stakeAmount}
-                onChange={(event) => setStakeAmount(event.target.value)}
-                placeholder="0,00"
-              />
-            </label>
-          </div>
-        </section>
-
-        <section className="markets-section">
-          <h2>Mercados da Rodada</h2>
-          <p className="section-subtitle">Escolha uma linha e envie a seleção para o betslip.</p>
-          <div className="markets-grid">
-            {markets.length === 0 && (
-              <div className="empty-state">Mercados indisponíveis para esta rodada.</div>
-            )}
-
-            {markets.map((market) => (
-              <MarketCard
-                key={market.marketId || market.id}
-                market={market}
-                isActive={roundPhase === 'open' && !round?.isSuspended}
-                roundStatus={roundPhase}
-                onSelect={handleMarketSelect}
-                isSelected={selectedMarketId === (market.marketId || market.id)}
-                locale={embedConfig.locale}
-                isSuspended={round?.isSuspended}
-                requiresStake={!hasValidStake}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="history-section">
-          <h2>Últimos Resultados</h2>
-          <div className="history-list">
-            {recentHistory.length === 0 && (
-              <div className="empty-state">Nenhum round encerrado ainda.</div>
-            )}
-
-            {recentHistory.map((item) => (
-              <HistoryCard
-                key={item.id}
-                item={item}
-                locale={embedConfig.locale}
-                timezone={embedConfig.timezone}
-              />
-            ))}
-          </div>
-        </section>
+        {/* Right: betting panel */}
+        <div className="right-panel">
+          <BettingPanel
+            markets={markets}
+            roundPhase={roundPhase}
+            selectedMarketId={selectedMarketId}
+            onMarketSelect={handleMarketSelect}
+            stakeAmount={stakeAmount}
+            onStakeChange={setStakeAmount}
+            stakeOptions={embedConfig.stakeOptions}
+            locale={embedConfig.locale}
+            currency={embedConfig.currency}
+            balance={0}
+            isSuspended={round?.isSuspended}
+          />
+        </div>
       </div>
+
+      {/* ── Bottom market bar ── */}
+      {markets.length > 0 && (
+        <div className="bottom-market-bar">
+          {markets.map((m) => {
+            const mId = m.marketId || m.id
+            const isSelected = mId === selectedMarketId
+            const type = (m.marketType || '').toLowerCase()
+            return (
+              <button
+                key={mId}
+                type="button"
+                className={`bottom-mkt-btn bottom-mkt-btn-${type}${isSelected ? ' bottom-mkt-btn-selected' : ''}`}
+                onClick={() => handleMarketSelect(m)}
+                disabled={roundPhase !== 'open' || round?.isSuspended}
+              >
+                {m.label || m.marketType} ({formatOdds(m.odds, embedConfig.locale)}x)
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
     </div>
   )
 }
