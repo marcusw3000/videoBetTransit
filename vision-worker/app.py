@@ -8,6 +8,7 @@ import atexit
 import tkinter as tk
 from tkinter import ttk
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import cv2
 from flask import Flask, Response, jsonify, request
@@ -15,6 +16,7 @@ from ultralytics import YOLO
 from waitress import create_server
 
 from backend_client import BackendClient
+from supabase_sync import SupabaseStreamProfileSync
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -343,14 +345,342 @@ atexit.register(cleanup_runtime)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+DEFAULT_ROI = {"x": 0, "y": 0, "w": 0, "h": 0}
+DEFAULT_LINE = {"x1": 0, "y1": 0, "x2": 0, "y2": 0}
+
+
+def normalize_roi_config(value, fallback: dict | None = None) -> dict:
+    source = value if isinstance(value, dict) else {}
+    base = fallback if isinstance(fallback, dict) else DEFAULT_ROI
+    return {
+        "x": int(source.get("x", base.get("x", 0)) or 0),
+        "y": int(source.get("y", base.get("y", 0)) or 0),
+        "w": int(source.get("w", base.get("w", 0)) or 0),
+        "h": int(source.get("h", base.get("h", 0)) or 0),
+    }
+
+
+def normalize_line_config(value, fallback: dict | None = None) -> dict:
+    source = value if isinstance(value, dict) else {}
+    base = fallback if isinstance(fallback, dict) else DEFAULT_LINE
+    return {
+        "x1": int(source.get("x1", base.get("x1", 0)) or 0),
+        "y1": int(source.get("y1", base.get("y1", 0)) or 0),
+        "x2": int(source.get("x2", base.get("x2", 0)) or 0),
+        "y2": int(source.get("y2", base.get("y2", 0)) or 0),
+    }
+
+
+def normalize_count_direction(value) -> str:
+    direction = str(value or "any").strip().lower()
+    if direction in {"up", "down", "any", "down_to_up", "up_to_down"}:
+        return direction
+    return "any"
+
+
+def shorten_text(value: str, max_len: int = 56) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_len:
+        return text
+    return f"{text[: max_len - 3]}..."
+
+
+def guess_stream_profile_name(stream_url: str, camera_id: str = "", index: int = 1) -> str:
+    camera_id = str(camera_id or "").strip()
+    if camera_id:
+        return camera_id
+
+    url = str(stream_url or "").strip()
+    if url:
+        parsed = urlparse(url)
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if len(path_parts) >= 2 and path_parts[-1].lower().startswith("stream"):
+            return path_parts[-2]
+        if path_parts:
+            return path_parts[-1]
+        if parsed.netloc:
+            return parsed.netloc
+
+    return f"Stream {index}"
+
+
+def format_stream_profile_label(profile: dict) -> str:
+    name = str(profile.get("name") or "").strip() or guess_stream_profile_name(
+        profile.get("stream_url", ""),
+        profile.get("camera_id", ""),
+    )
+    camera_id = str(profile.get("camera_id") or "").strip()
+    hint = camera_id or str(profile.get("stream_url") or "").strip()
+    hint = shorten_text(hint, max_len=48)
+    if hint and hint != name:
+        return f"{name} | {hint}"
+    return name
+
+
+def make_stream_profile_id(existing_ids: set[str]) -> str:
+    base = f"stream_{int(time.time() * 1000)}"
+    candidate = base
+    suffix = 1
+    while candidate in existing_ids:
+        suffix += 1
+        candidate = f"{base}_{suffix}"
+    return candidate
+
+
+def build_stream_profile(source: dict | None, fallback_cfg: dict, *, index: int) -> dict:
+    source = source if isinstance(source, dict) else {}
+    stream_url = str(
+        source.get("stream_url")
+        or source.get("url")
+        or fallback_cfg.get("stream_url", "")
+    ).strip()
+    camera_id = str(source.get("camera_id") or fallback_cfg.get("camera_id", "")).strip()
+    profile = {
+        "id": str(source.get("id") or "").strip(),
+        "name": str(source.get("name") or "").strip(),
+        "stream_url": stream_url,
+        "camera_id": camera_id,
+        "roi": normalize_roi_config(source.get("roi"), fallback_cfg.get("roi")),
+        "line": normalize_line_config(source.get("line"), fallback_cfg.get("line")),
+        "count_direction": normalize_count_direction(
+            source.get("count_direction") or fallback_cfg.get("count_direction", "any")
+        ),
+    }
+    if not profile["name"]:
+        profile["name"] = guess_stream_profile_name(stream_url, camera_id, index=index)
+    return profile
+
+
+def sync_config_with_selected_profile(cfg: dict, profile: dict) -> dict:
+    profile["roi"] = normalize_roi_config(profile.get("roi"), cfg.get("roi"))
+    profile["line"] = normalize_line_config(profile.get("line"), cfg.get("line"))
+    profile["count_direction"] = normalize_count_direction(
+        profile.get("count_direction") or cfg.get("count_direction", "any")
+    )
+    profile["camera_id"] = str(profile.get("camera_id") or cfg.get("camera_id", "")).strip()
+    profile["stream_url"] = str(profile.get("stream_url") or "").strip()
+    if not profile["name"]:
+        profile["name"] = guess_stream_profile_name(profile["stream_url"], profile["camera_id"])
+
+    cfg["selected_stream_profile_id"] = profile["id"]
+    cfg["stream_url"] = profile["stream_url"]
+    cfg["camera_id"] = profile["camera_id"]
+    cfg["roi"] = dict(profile["roi"])
+    cfg["line"] = dict(profile["line"])
+    cfg["count_direction"] = profile["count_direction"]
+    return profile
+
+
+def normalize_config(cfg: dict | None) -> dict:
+    cfg = dict(cfg or {})
+    raw_profiles = cfg.get("stream_profiles")
+    profiles = []
+
+    if isinstance(raw_profiles, list):
+        for index, raw_profile in enumerate(raw_profiles, start=1):
+            profile = build_stream_profile(raw_profile, cfg, index=index)
+            if profile["stream_url"]:
+                profiles.append(profile)
+
+    if not profiles:
+        profiles.append(build_stream_profile({}, cfg, index=1))
+
+    existing_ids: set[str] = set()
+    for index, profile in enumerate(profiles, start=1):
+        if not profile["id"] or profile["id"] in existing_ids:
+            profile["id"] = make_stream_profile_id(existing_ids)
+        if not profile["name"]:
+            profile["name"] = guess_stream_profile_name(
+                profile["stream_url"],
+                profile["camera_id"],
+                index=index,
+            )
+        existing_ids.add(profile["id"])
+
+    cfg["stream_profiles"] = profiles
+    selected_profile_id = str(cfg.get("selected_stream_profile_id") or "").strip()
+    selected_profile = next((profile for profile in profiles if profile["id"] == selected_profile_id), None)
+    if selected_profile is None:
+        current_stream_url = str(cfg.get("stream_url") or "").strip()
+        selected_profile = next((profile for profile in profiles if profile["stream_url"] == current_stream_url), None)
+    if selected_profile is None:
+        selected_profile = profiles[0]
+
+    sync_config_with_selected_profile(cfg, selected_profile)
+    return cfg
+
+
 def load_config(path: str = "config.json") -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return normalize_config(json.load(f))
 
 
 def save_config(path: str, cfg: dict):
+    normalized_cfg = normalize_config(cfg)
+    cfg.clear()
+    cfg.update(normalized_cfg)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
+        json.dump(normalized_cfg, f, indent=2)
+
+
+def bootstrap_stream_profiles_from_supabase(
+    cfg: dict,
+    config_path: str,
+    sync_client: SupabaseStreamProfileSync | None,
+) -> None:
+    if sync_client is None:
+        return
+
+    try:
+        remote_profiles, remote_selected_profile_id = sync_client.fetch_profiles()
+    except Exception as exc:
+        logger.warning("Falha ao carregar stream profiles do Supabase: %s", exc)
+        return
+
+    if remote_profiles:
+        cfg["stream_profiles"] = remote_profiles
+        if remote_selected_profile_id:
+            cfg["selected_stream_profile_id"] = remote_selected_profile_id
+        normalize_config(cfg)
+        save_config(config_path, cfg)
+        logger.info(
+            "Stream profiles carregados do Supabase: %d perfil(is)",
+            len(cfg.get("stream_profiles", [])),
+        )
+        return
+
+    try:
+        sync_client.upsert_profiles(
+            cfg.get("stream_profiles", []),
+            cfg.get("selected_stream_profile_id"),
+        )
+        logger.info(
+            "Supabase sem stream profiles. Config local publicada com %d perfil(is).",
+            len(cfg.get("stream_profiles", [])),
+        )
+    except Exception as exc:
+        logger.warning("Falha ao publicar stream profiles iniciais no Supabase: %s", exc)
+
+
+def sync_stream_profiles_to_supabase(
+    cfg: dict,
+    sync_client: SupabaseStreamProfileSync | None,
+) -> None:
+    if sync_client is None:
+        return
+
+    try:
+        sync_client.upsert_profiles(
+            cfg.get("stream_profiles", []),
+            cfg.get("selected_stream_profile_id"),
+        )
+    except Exception as exc:
+        logger.warning("Falha ao sincronizar esteira no Supabase: %s", exc)
+
+
+def get_selected_stream_profile(cfg: dict) -> dict:
+    selected_id = str(cfg.get("selected_stream_profile_id") or "").strip()
+    profiles = cfg.get("stream_profiles", [])
+    for profile in profiles:
+        if profile.get("id") == selected_id:
+            return profile
+    if profiles:
+        return profiles[0]
+    profile = build_stream_profile({}, cfg, index=1)
+    cfg["stream_profiles"] = [profile]
+    return sync_config_with_selected_profile(cfg, profile)
+
+
+class StreamProfileStore:
+    def __init__(self, cfg: dict):
+        normalized_cfg = normalize_config(cfg)
+        cfg.clear()
+        cfg.update(normalized_cfg)
+        self.cfg = cfg
+
+    def list_profiles(self) -> list[dict]:
+        return [dict(profile) for profile in self.cfg.get("stream_profiles", [])]
+
+    def get_selected_profile(self) -> dict:
+        return dict(get_selected_stream_profile(self.cfg))
+
+    def select_profile(self, profile_id: str) -> dict:
+        for profile in self.cfg.get("stream_profiles", []):
+            if profile.get("id") == profile_id:
+                return dict(sync_config_with_selected_profile(self.cfg, profile))
+        raise ValueError("Stream selecionada nao encontrada.")
+
+    def save_selected_profile(
+        self,
+        *,
+        name: str | None = None,
+        stream_url: str | None = None,
+        roi: dict | None = None,
+        line: dict | None = None,
+        count_direction: str | None = None,
+    ) -> dict:
+        current = get_selected_stream_profile(self.cfg)
+        target_url = str(stream_url or current.get("stream_url") or "").strip()
+        if not target_url:
+            raise ValueError("Informe uma URL de stream antes de salvar.")
+
+        selected_stream_url = str(current.get("stream_url") or "").strip()
+        if target_url != selected_stream_url:
+            for profile in self.cfg.get("stream_profiles", []):
+                if str(profile.get("stream_url") or "").strip() == target_url:
+                    current = profile
+                    break
+            else:
+                current = {
+                    "id": make_stream_profile_id({str(profile.get("id") or "") for profile in self.cfg.get("stream_profiles", [])}),
+                    "name": "",
+                    "stream_url": target_url,
+                    "camera_id": str(self.cfg.get("camera_id") or "").strip(),
+                    "roi": dict(self.cfg.get("roi") or DEFAULT_ROI),
+                    "line": dict(self.cfg.get("line") or DEFAULT_LINE),
+                    "count_direction": self.cfg.get("count_direction", "any"),
+                }
+                self.cfg.setdefault("stream_profiles", []).append(current)
+
+        if name is not None:
+            current["name"] = str(name).strip()
+        current["stream_url"] = target_url
+        if roi is not None:
+            current["roi"] = normalize_roi_config(roi, current.get("roi"))
+        if line is not None:
+            current["line"] = normalize_line_config(line, current.get("line"))
+        if count_direction is not None:
+            current["count_direction"] = normalize_count_direction(count_direction)
+
+        return dict(sync_config_with_selected_profile(self.cfg, current))
+
+    def apply_stream_url(self, stream_url: str, *, name: str | None = None) -> tuple[dict, bool]:
+        target_url = str(stream_url or "").strip()
+        if not target_url:
+            raise ValueError("Informe uma URL de stream.")
+
+        for profile in self.cfg.get("stream_profiles", []):
+            if str(profile.get("stream_url") or "").strip() == target_url:
+                if name is not None and str(name).strip():
+                    profile["name"] = str(name).strip()
+                return dict(sync_config_with_selected_profile(self.cfg, profile)), False
+
+        profile = {
+            "id": make_stream_profile_id({str(existing.get("id") or "") for existing in self.cfg.get("stream_profiles", [])}),
+            "name": str(name or "").strip()
+            or guess_stream_profile_name(
+                target_url,
+                self.cfg.get("camera_id", ""),
+                index=len(self.cfg.get("stream_profiles", [])) + 1,
+            ),
+            "stream_url": target_url,
+            "camera_id": str(self.cfg.get("camera_id") or "").strip(),
+            "roi": normalize_roi_config(self.cfg.get("roi")),
+            "line": normalize_line_config(self.cfg.get("line")),
+            "count_direction": normalize_count_direction(self.cfg.get("count_direction", "any")),
+        }
+        self.cfg.setdefault("stream_profiles", []).append(profile)
+        return dict(sync_config_with_selected_profile(self.cfg, profile)), True
 
 
 def now() -> str:
@@ -581,6 +911,16 @@ class ConfigEditor:
         self.line = dict(line)
         self._saved_roi = dict(roi)
         self._saved_line = dict(line)
+
+    def load_values(self, roi: dict, line: dict, message: str | None = None):
+        self.mode = "idle"
+        self.roi = dict(roi)
+        self.line = dict(line)
+        self._saved_roi = dict(roi)
+        self._saved_line = dict(line)
+        self.dirty = False
+        self._reset_drag()
+        self.message = message or "Stream config loaded"
 
     def begin_roi_mode(self):
         self.mode = "roi"
@@ -840,11 +1180,25 @@ class ConfigEditor:
 
 
 class EditorControlPanel:
-    def __init__(self, editor: ConfigEditor, on_save, on_reset_stream):
+    def __init__(
+        self,
+        editor: ConfigEditor,
+        stream_store: StreamProfileStore,
+        on_save,
+        on_reset_stream,
+        on_select_stream,
+        on_open_stream,
+        on_save_stream_profile,
+    ):
         self.editor = editor
+        self.stream_store = stream_store
         self.on_save = on_save
         self.on_reset_stream = on_reset_stream
+        self.on_select_stream = on_select_stream
+        self.on_open_stream = on_open_stream
+        self.on_save_stream_profile = on_save_stream_profile
         self.should_close = False
+        self._stream_profile_ids: list[str] = []
         self._root = tk.Tk()
         self._root.title("Controles de Configuracao")
         self._root.resizable(False, False)
@@ -852,42 +1206,72 @@ class EditorControlPanel:
 
         frame = ttk.Frame(self._root, padding=12)
         frame.grid(row=0, column=0, sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Esteira de Streams", font=("Segoe UI", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+        self._stream_name_var = tk.StringVar()
+        self._stream_url_var = tk.StringVar()
+        self._stream_selector = ttk.Combobox(frame, state="readonly", width=48)
+        self._stream_selector.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+        self._stream_selector.bind("<<ComboboxSelected>>", self._handle_profile_preview)
+        ttk.Button(frame, text="Carregar", command=self.load_selected_stream).grid(
+            row=1, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Label(frame, text="Nome da stream").grid(row=2, column=0, columnspan=2, sticky="w")
+        ttk.Entry(frame, textvariable=self._stream_name_var).grid(
+            row=3, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Label(frame, text="URL da stream").grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Entry(frame, textvariable=self._stream_url_var).grid(
+            row=5, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(frame, text="Abrir URL", command=self.open_stream_url).grid(
+            row=6, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
+        )
+        ttk.Button(frame, text="Salvar na Esteira", command=self.save_stream_profile).grid(
+            row=6, column=1, sticky="ew", pady=(0, 10)
+        )
 
         ttk.Label(frame, text="Ajuste de ROI e Linha", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+            row=7, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
 
         ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
-            row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=8, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
-            row=1, column=1, sticky="ew", pady=(0, 6)
+            row=8, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Salvar", command=self.save).grid(
-            row=2, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=9, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
-            row=2, column=1, sticky="ew", pady=(0, 6)
+            row=9, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
-            row=3, column=0, columnspan=2, sticky="ew"
+            row=10, column=0, columnspan=2, sticky="ew"
         )
         ttk.Button(frame, text="Fechar", command=self.request_close).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0)
+            row=11, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
 
         self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
         self._message_var = tk.StringVar(value=self.editor.message)
         ttk.Label(frame, textvariable=self._mode_var).grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=12, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
-        ttk.Label(frame, textvariable=self._message_var, wraplength=260).grid(
-            row=6, column=0, columnspan=2, sticky="w", pady=(4, 0)
+        ttk.Label(frame, textvariable=self._message_var, wraplength=360).grid(
+            row=13, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
         ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, T, Q").grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=14, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
+        self._refresh_stream_profiles()
+        self.set_active_stream_profile(self.stream_store.get_selected_profile())
 
     def refresh(self):
         self._mode_var.set(f"Modo: {self.editor.mode}")
@@ -906,6 +1290,72 @@ class EditorControlPanel:
 
     def reset_stream(self):
         self.on_reset_stream()
+
+    def load_selected_stream(self):
+        index = self._stream_selector.current()
+        if index < 0 or index >= len(self._stream_profile_ids):
+            self.editor.message = "Selecione uma stream salva na esteira."
+            return
+
+        try:
+            profile = self.on_select_stream(self._stream_profile_ids[index])
+        except ValueError as exc:
+            self.editor.message = str(exc)
+            return
+
+        self.set_active_stream_profile(profile)
+
+    def open_stream_url(self):
+        try:
+            profile = self.on_open_stream(
+                self._stream_url_var.get(),
+                self._stream_name_var.get(),
+            )
+        except ValueError as exc:
+            self.editor.message = str(exc)
+            return
+
+        self.set_active_stream_profile(profile)
+
+    def save_stream_profile(self):
+        try:
+            profile = self.on_save_stream_profile(
+                self._stream_name_var.get(),
+                self._stream_url_var.get(),
+            )
+        except ValueError as exc:
+            self.editor.message = str(exc)
+            return
+
+        self.set_active_stream_profile(profile)
+
+    def set_active_stream_profile(self, profile: dict):
+        self._refresh_stream_profiles(selected_profile_id=profile.get("id"))
+        self._stream_name_var.set(str(profile.get("name") or ""))
+        self._stream_url_var.set(str(profile.get("stream_url") or ""))
+
+    def _refresh_stream_profiles(self, selected_profile_id: str | None = None):
+        profiles = self.stream_store.list_profiles()
+        self._stream_profile_ids = [str(profile.get("id") or "") for profile in profiles]
+        self._stream_selector["values"] = [format_stream_profile_label(profile) for profile in profiles]
+
+        target_id = selected_profile_id or str(self.stream_store.get_selected_profile().get("id") or "")
+        if target_id in self._stream_profile_ids:
+            self._stream_selector.current(self._stream_profile_ids.index(target_id))
+        elif self._stream_profile_ids:
+            self._stream_selector.current(0)
+
+    def _handle_profile_preview(self, _event=None):
+        index = self._stream_selector.current()
+        if index < 0 or index >= len(self._stream_profile_ids):
+            return
+
+        profile_id = self._stream_profile_ids[index]
+        for profile in self.stream_store.list_profiles():
+            if str(profile.get("id") or "") == profile_id:
+                self._stream_name_var.set(str(profile.get("name") or ""))
+                self._stream_url_var.set(str(profile.get("stream_url") or ""))
+                break
 
     def request_close(self):
         self.should_close = True
@@ -1056,6 +1506,15 @@ def main():
 
     config_path = "config.json"
     cfg = load_config(config_path)
+    supabase_sync = SupabaseStreamProfileSync.from_config(cfg)
+    if supabase_sync is not None:
+        logger.info(
+            "Sincronizacao Supabase ativa | table=%s | scope=%s",
+            supabase_sync.table,
+            supabase_sync.scope,
+        )
+    bootstrap_stream_profiles_from_supabase(cfg, config_path, supabase_sync)
+    stream_store = StreamProfileStore(cfg)
     streamer.set_jpeg_quality(int(cfg.get("mjpeg_jpeg_quality", 70)))
     streamer.set_fps_limit(float(cfg.get("mjpeg_fps_limit", 0)))
 
@@ -1122,6 +1581,7 @@ def main():
     editor = None
     control_panel = None
     reset_stream_requested = False
+    pending_stream_profile = None
     current_round_id = str(cfg.get("round_id", "")).strip()
     last_visual_detections: list[dict] = []
     last_operator_preview = None
@@ -1159,9 +1619,17 @@ def main():
         if editor is None:
             return
 
+        stream_store.save_selected_profile(
+            roi=editor.roi,
+            line=editor.line,
+            count_direction=count_direction,
+        )
         editor.save(cfg, config_path)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
         roi = dict(editor.roi)
         line = dict(editor.line)
+        if control_panel is not None:
+            control_panel.set_active_stream_profile(stream_store.get_selected_profile())
 
         saved_backend = backend.save_camera_config(
             camera_id=cfg["camera_id"],
@@ -1186,6 +1654,72 @@ def main():
         if editor is not None:
             editor.message = "Manual stream reset requested"
 
+    def queue_stream_profile(profile: dict, *, message: str):
+        nonlocal pending_stream_profile, roi, line, count_direction
+
+        pending_stream_profile = dict(profile)
+        roi = dict(profile["roi"])
+        line = dict(profile["line"])
+        count_direction = profile["count_direction"]
+
+        if editor is not None:
+            editor.load_values(roi, line, message=message)
+        if control_panel is not None:
+            control_panel.set_active_stream_profile(profile)
+
+    def select_stream_profile(profile_id: str) -> dict:
+        profile = stream_store.select_profile(profile_id)
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        queue_stream_profile(
+            profile,
+            message=f"Stream pronta para trocar: {format_stream_profile_label(profile)}",
+        )
+        return profile
+
+    def open_stream_url(stream_url: str, stream_name: str) -> dict:
+        profile, created = stream_store.apply_stream_url(stream_url, name=stream_name)
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        action = "adicionada" if created else "reaberta"
+        queue_stream_profile(
+            profile,
+            message=f"Stream {action} na esteira: {format_stream_profile_label(profile)}",
+        )
+        return profile
+
+    def save_stream_profile(stream_name: str, stream_url: str) -> dict:
+        target_url = stream_url or cfg.get("stream_url", "")
+        profile = stream_store.save_selected_profile(
+            name=stream_name,
+            stream_url=target_url,
+            roi=editor.roi if editor is not None else roi,
+            line=editor.line if editor is not None else line,
+            count_direction=count_direction,
+        )
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        saved_backend = backend.save_camera_config(
+            camera_id=cfg["camera_id"],
+            roi=profile["roi"],
+            line={
+                "x1": profile["line"]["x1"],
+                "y1": profile["line"]["y1"],
+                "x2": profile["line"]["x2"],
+                "y2": profile["line"]["y2"],
+            },
+            count_direction=profile["count_direction"],
+        )
+        backend_suffix = " + backend" if saved_backend else " (backend pendente)"
+        queue_stream_profile(
+            profile,
+            message=(
+                f"Configuracao salva na esteira{backend_suffix}: "
+                f"{format_stream_profile_label(profile)}"
+            ),
+        )
+        return profile
+
     backend_round = backend.fetch_current_round()
     current_round_id, total, round_changed = resolve_round_sync(
         current_round_id,
@@ -1203,7 +1737,15 @@ def main():
         except Exception:
             pass
         cv2.setMouseCallback(WINDOW_NAME, lambda event, x, y, flags, param: editor.handle_mouse(event, x, y, flags, param))
-        control_panel = EditorControlPanel(editor, save_editor_state, request_stream_reset)
+        control_panel = EditorControlPanel(
+            editor,
+            stream_store,
+            save_editor_state,
+            request_stream_reset,
+            select_stream_profile,
+            open_stream_url,
+            save_stream_profile,
+        )
         active_control_panel_ref = control_panel
 
     try:
@@ -1227,6 +1769,41 @@ def main():
     fps_start_ts = time.time()
 
     while True:
+        if pending_stream_profile is not None:
+            profile = pending_stream_profile
+            pending_stream_profile = None
+            reset_tracking_state()
+            backend_round = backend.fetch_current_round()
+            if backend_round:
+                backend_round_id = str(backend_round.get("id", "")).strip()
+                if backend_round_id:
+                    current_round_id = backend_round_id
+                total = int(backend_round.get("currentCount", 0) or 0)
+
+            cfg["stream_url"] = profile["stream_url"]
+            cfg["camera_id"] = profile["camera_id"]
+            cfg["roi"] = dict(profile["roi"])
+            cfg["line"] = dict(profile["line"])
+            cfg["count_direction"] = profile["count_direction"]
+            roi = dict(profile["roi"])
+            line = dict(profile["line"])
+            count_direction = profile["count_direction"]
+            stream.url = cfg["stream_url"]
+            stream.reset()
+            last_stream_resync = time.time()
+            last_track_results = None
+            last_visual_detections = []
+            last_operator_preview = None
+            last_operator_preview_at = 0.0
+            frame_count = 0
+            fps_frame_count = 0
+            fps_start_ts = time.time()
+            logger.info(
+                "Perfil de stream aplicado: %s | url=%s",
+                format_stream_profile_label(profile),
+                cfg["stream_url"],
+            )
+
         if reset_stream_requested:
             stream.reset()
             reset_stream_requested = False
@@ -1300,6 +1877,13 @@ def main():
                 if admin_cfg.get("countDirection"):
                     count_direction = admin_cfg["countDirection"]
 
+                stream_store.save_selected_profile(
+                    roi=roi,
+                    line=line,
+                    count_direction=count_direction,
+                )
+                sync_stream_profiles_to_supabase(cfg, supabase_sync)
+
                 logger.info(
                     "Config atualizada pelo admin: line=%s, direction=%s",
                     line,
@@ -1307,6 +1891,8 @@ def main():
                 )
                 if editor is not None:
                     editor.sync_external_values(roi, line)
+                if control_panel is not None:
+                    control_panel.set_active_stream_profile(stream_store.get_selected_profile())
 
         inference_is_fresh = should_process_frame(frame_count, inference_frame_stride)
         inference_start = time.perf_counter()
