@@ -1,6 +1,6 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
 const SIGNALR_BASE_URL = import.meta.env.VITE_SIGNALR_BASE_URL || 'http://localhost:8080'
-const MJPEG_TOKEN = import.meta.env.VITE_MJPEG_TOKEN || 'SUA_MJPEG_TOKEN'
+const MJPEG_TOKEN = import.meta.env.VITE_MJPEG_TOKEN || 'CHANGE_ME'
 const WEBRTC_URL = import.meta.env.VITE_WEBRTC_URL || null
 const HLS_URL = import.meta.env.VITE_HLS_URL || null
 

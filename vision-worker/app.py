@@ -519,7 +519,27 @@ def normalize_config(cfg: dict | None) -> dict:
 
 def load_config(path: str = "config.json") -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return normalize_config(json.load(f))
+        cfg = normalize_config(json.load(f))
+
+    env_overrides = {
+        "backend_url": os.getenv("BACKEND_URL"),
+        "api_key": os.getenv("BACKEND_API_KEY") or os.getenv("API_KEY"),
+        "mjpeg_token": os.getenv("MJPEG_TOKEN"),
+        "supabase_url": os.getenv("SUPABASE_URL"),
+        "supabase_service_key": os.getenv("SUPABASE_SERVICE_KEY"),
+        "supabase_stream_profiles_table": os.getenv("SUPABASE_STREAM_PROFILES_TABLE"),
+        "supabase_stream_profiles_scope": os.getenv("SUPABASE_STREAM_PROFILES_SCOPE"),
+        "camera_id": os.getenv("CAMERA_ID"),
+        "session_id": os.getenv("SESSION_ID"),
+        "line_id": os.getenv("LINE_ID"),
+        "stream_url": os.getenv("STREAM_URL"),
+    }
+
+    for key, value in env_overrides.items():
+        if value is not None and str(value).strip():
+            cfg[key] = value.strip()
+
+    return normalize_config(cfg)
 
 
 def save_config(path: str, cfg: dict):

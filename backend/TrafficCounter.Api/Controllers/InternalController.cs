@@ -53,7 +53,8 @@ public class InternalController : ControllerBase
     [HttpPost("round-count-event")]
     public async Task<IActionResult> ReceiveRoundCountEvent([FromBody] RoundCountEventDto dto)
     {
-        await _roundService.IncrementCountAsync();
+        var cameraId = string.IsNullOrWhiteSpace(dto.CameraId) ? "default" : dto.CameraId.Trim();
+        await _roundService.IncrementCountAsync(cameraId);
         return Ok(new { received = true });
     }
 

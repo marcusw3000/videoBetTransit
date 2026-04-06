@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    ports:
+      - "8554:8554"
+      - "8889:8889"
+      - "8890:8890"
+      - "9997:9997"
+    volumes:
+      - ../mediamtx/mediamtx.yml:/mediamtx.yml
+
+  backend:
+    build:
+      context: ../backend/TrafficCounter.Api
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ConnectionStrings__DefaultConnection: "${SUPABASE_DB_URL}"
+      Security__BackendApiKey: "${BACKEND_API_KEY:-CHANGE_ME}"
+      Security__EnforceHashChain: "false"
+      MediaMtx__ApiBaseUrl: "http://mediamtx:9997"
+      MediaMtx__RtspBaseUrl: "rtsp://mediamtx:8554"
+      VisionWorker__BaseUrl: "http://vision-worker:8000"
+      Cors__AllowedOrigins__0: "http://localhost:5173"
+      Cors__AllowedOrigins__1: "http://localhost:3000"
+      ASPNETCORE_ENVIRONMENT: Production
+    depends_on:
+      mediamtx:
+        condition: service_started
+
+  vision-worker:
+    build:
+      context: ../vision-worker
+    environment:
+      BACKEND_URL: "http://backend:8080"
+      BACKEND_API_KEY: "${BACKEND_API_KEY:-CHANGE_ME}"
+      SUPABASE_URL: "${SUPABASE_URL}"
+      SUPABASE_SERVICE_KEY: "${SUPABASE_SERVICE_KEY}"
+      SUPABASE_STREAM_PROFILES_TABLE: "${SUPABASE_STREAM_PROFILES_TABLE:-stream_profiles}"
+      SUPABASE_STREAM_PROFILES_SCOPE: "${SUPABASE_STREAM_PROFILES_SCOPE:-videoBetTransit}"
+      CAMERA_ID: "${CAMERA_ID:-cam_001}"
+      LINE_ID: "${LINE_ID:-main-line}"
+      MEDIAMTX_RTSP_URL: "rtsp://mediamtx:8554"
+    depends_on:
+      - backend
+      - mediamtx
+
+  frontend:
+    build:
+      context: ../frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-http://localhost:8080}"
+      VITE_SIGNALR_BASE_URL: "${VITE_SIGNALR_BASE_URL:-http://localhost:8080}"
+      VITE_MJPEG_TOKEN: "${VITE_MJPEG_TOKEN:-CHANGE_ME}"
+    depends_on:
+      - backend

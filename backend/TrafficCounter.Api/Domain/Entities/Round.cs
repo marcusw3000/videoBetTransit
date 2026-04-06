@@ -5,6 +5,7 @@ namespace TrafficCounter.Api.Domain.Entities;
 public class Round
 {
     public Guid RoundId { get; set; }
+    public string CameraId { get; set; } = "default";
     public RoundStatus Status { get; set; }
     public string DisplayName { get; set; } = "Rodada Turbo";
 

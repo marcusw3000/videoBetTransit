@@ -32,15 +32,16 @@ public class RoundService
     // ── API pública ─────────────────────────────────────────────────────────
 
     /// <summary>Garante que existe um round ativo. Cria um se não houver.</summary>
-    public async Task<bool> EnsureActiveRoundAsync()
+    public async Task<bool> EnsureActiveRoundAsync(string cameraId = "default")
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var active = await db.Rounds.AnyAsync(r =>
+            r.CameraId == cameraId &&
             r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void);
         if (active) return false;
 
-        await CreateNewRoundAsync(db);
+        await CreateNewRoundAsync(db, cameraId);
         return true;
     }
 
@@ -50,70 +51,105 @@ public class RoundService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var now = DateTime.UtcNow;
 
-        var round = await db.Rounds
+        var rounds = await db.Rounds
             .Include(r => r.Markets)
             .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
-            .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync();
+            .OrderBy(r => r.CameraId)
+            .ThenByDescending(r => r.CreatedAt)
+            .ToListAsync();
 
-        if (round is null) return false;
+        if (rounds.Count == 0) return false;
 
-        bool changed = false;
+        var changed = false;
+        var settledRounds = new List<Round>();
 
-        // Open → Closing
-        if (round.Status == RoundStatus.Open && now >= round.BetCloseAt)
+        foreach (var round in rounds)
         {
-            round.Status = RoundStatus.Closing;
-            changed = true;
-            _logger.LogInformation("[Round {Id}] Apostas fechadas.", round.RoundId);
-        }
+            // Open → Closing
+            if (round.Status == RoundStatus.Open && now >= round.BetCloseAt)
+            {
+                round.Status = RoundStatus.Closing;
+                changed = true;
+                _logger.LogInformation("[Round {Id}] Apostas fechadas.", round.RoundId);
+            }
 
-        // Closing → Settled
-        if (round.Status == RoundStatus.Closing && now >= round.EndsAt)
-        {
-            round.Status = RoundStatus.Settled;
-            round.FinalCount = round.CurrentCount;
-            round.SettledAt = now;
-            changed = true;
+            // Closing → Settled
+            if (round.Status == RoundStatus.Closing && now >= round.EndsAt)
+            {
+                round.Status = RoundStatus.Settled;
+                round.FinalCount = round.CurrentCount;
+                round.SettledAt = now;
+                changed = true;
 
-            // Avalia cada mercado
-            foreach (var market in round.Markets)
-                market.IsWinner = EvaluateMarket(market, round.FinalCount.Value);
+                foreach (var market in round.Markets)
+                    market.IsWinner = EvaluateMarket(market, round.FinalCount.Value);
 
-            _logger.LogInformation("[Round {Id}] Encerrado. Total: {Count}", round.RoundId, round.FinalCount);
+                settledRounds.Add(round);
+                _logger.LogInformation("[Round {Id}] Encerrado. Total: {Count}", round.RoundId, round.FinalCount);
+            }
         }
 
         if (changed)
             await db.SaveChangesAsync();
 
-        if (round.Status == RoundStatus.Settled)
+        foreach (var round in settledRounds)
         {
             await BroadcastAsync("round_settled", round);
             await using var db2 = await _dbFactory.CreateDbContextAsync();
-            await CreateNewRoundAsync(db2);
-            return true;
+            await CreateNewRoundAsync(db2, round.CameraId);
         }
 
-        return false;
+        return changed;
     }
 
     /// <summary>Incrementa a contagem do round ativo e envia count_updated.</summary>
-    public async Task IncrementCountAsync()
+    public async Task<Round?> IncrementCountAsync(string cameraId = "default")
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var round = await db.Rounds
             .Include(r => r.Markets)
             .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+            .Where(r => r.CameraId == cameraId)
             .OrderByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
 
-        if (round is null) return;
+        if (round is null)
+        {
+            await CreateNewRoundAsync(db, cameraId);
+            round = await db.Rounds
+                .Include(r => r.Markets)
+                .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+                .Where(r => r.CameraId == cameraId)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstAsync();
+        }
 
         round.CurrentCount++;
         await db.SaveChangesAsync();
 
         await BroadcastAsync("count_updated", round);
+        return round;
+    }
+
+    public async Task<Round?> GetCurrentRoundAsync(string cameraId = "default")
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var round = await db.Rounds
+            .Include(r => r.Markets)
+            .Where(r => r.CameraId == cameraId)
+            .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        round ??= await db.Rounds
+            .Include(r => r.Markets)
+            .Where(r => r.CameraId == cameraId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        return round;
     }
 
     /// <summary>Anula um round. Retorna false se não encontrado ou já finalizado.</summary>
@@ -141,19 +177,20 @@ public class RoundService
 
         // Inicia novo round para não deixar a UI parada
         await using var db2 = await _dbFactory.CreateDbContextAsync();
-        await CreateNewRoundAsync(db2);
+        await CreateNewRoundAsync(db2, round.CameraId);
 
         return true;
     }
 
     // ── Internos ────────────────────────────────────────────────────────────
 
-    private async Task CreateNewRoundAsync(AppDbContext db)
+    private async Task CreateNewRoundAsync(AppDbContext db, string cameraId)
     {
         var now = DateTime.UtcNow;
         var round = new Round
         {
             RoundId = Guid.NewGuid(),
+            CameraId = string.IsNullOrWhiteSpace(cameraId) ? "default" : cameraId.Trim(),
             Status = RoundStatus.Open,
             DisplayName = "Rodada Turbo",
             CreatedAt = now,
@@ -183,8 +220,8 @@ public class RoundService
         await db.SaveChangesAsync();
 
         _logger.LogInformation(
-            "[Round {Id}] Iniciado com {Count} mercado(s). Encerra às {EndsAt:HH:mm:ss} UTC.",
-            round.RoundId, markets.Count, round.EndsAt);
+            "[Round {Id}] Iniciado para camera {CameraId} com {Count} mercado(s). Encerra às {EndsAt:HH:mm:ss} UTC.",
+            round.RoundId, round.CameraId, markets.Count, round.EndsAt);
     }
 
     private static bool EvaluateMarket(RoundMarket market, int finalCount) =>
@@ -207,6 +244,8 @@ public class RoundService
     private static RoundResponse ToResponse(Round r) => new()
     {
         RoundId = r.RoundId.ToString(),
+        CameraId = r.CameraId,
+        CameraIds = string.IsNullOrWhiteSpace(r.CameraId) ? [] : [r.CameraId],
         DisplayName = r.DisplayName,
         Status = r.Status.ToString().ToLowerInvariant(),
         IsSuspended = r.Status != RoundStatus.Open,

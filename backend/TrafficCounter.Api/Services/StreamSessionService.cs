@@ -165,6 +165,7 @@ public class StreamSessionService
             .Select(e => new CrossingEventResponse
             {
                 Id = e.Id,
+                RoundId = e.RoundId,
                 SessionId = e.SessionId,
                 TimestampUtc = e.TimestampUtc,
                 TrackId = e.TrackId,

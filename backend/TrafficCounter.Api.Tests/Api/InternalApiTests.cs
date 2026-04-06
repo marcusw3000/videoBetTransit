@@ -70,4 +70,28 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var response = await _client.PostAsJsonAsync("/internal/health-report", dto);
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    [Fact]
+    public async Task RoundCountEvent_creates_and_increments_round_for_camera()
+    {
+        var dto = new RoundCountEventDto
+        {
+            CameraId = "cam_001",
+            TrackId = "track-1",
+            VehicleType = "car",
+            CrossedAt = DateTime.UtcNow,
+            TotalCount = 1,
+        };
+
+        var countResponse = await _client.PostAsJsonAsync("/internal/round-count-event", dto);
+        countResponse.EnsureSuccessStatusCode();
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_001");
+
+        Assert.NotNull(round);
+        Assert.Equal("cam_001", round!.CameraId);
+        Assert.Contains("cam_001", round.CameraIds);
+        Assert.Equal(1, round.CurrentCount);
+        Assert.Equal("open", round.Status);
+    }
 }

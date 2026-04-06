@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using TrafficCounter.Api.Contracts.Responses;
 using TrafficCounter.Api.Data;
 using TrafficCounter.Api.Domain.Enums;
+using TrafficCounter.Api.Services;
 
 namespace TrafficCounter.Api.Controllers;
 
@@ -11,44 +12,41 @@ namespace TrafficCounter.Api.Controllers;
 public class RoundsController : ControllerBase
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly RoundService _roundService;
 
-    public RoundsController(IDbContextFactory<AppDbContext> dbFactory)
+    public RoundsController(IDbContextFactory<AppDbContext> dbFactory, RoundService roundService)
     {
         _dbFactory = dbFactory;
+        _roundService = roundService;
     }
 
     [HttpGet("current")]
-    public async Task<IActionResult> GetCurrent()
+    public async Task<IActionResult> GetCurrent([FromQuery] string? cameraId = null)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-
-        // Round ativo (não settled e não void)
-        var round = await db.Rounds
-            .Include(r => r.Markets)
-            .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
-            .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync();
-
-        // Fallback: último round encerrado
-        round ??= await db.Rounds
-            .Include(r => r.Markets)
-            .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync();
+        var effectiveCameraId = string.IsNullOrWhiteSpace(cameraId) ? "default" : cameraId.Trim();
+        var round = await _roundService.GetCurrentRoundAsync(effectiveCameraId);
 
         if (round is null)
-            return NotFound(new { error = "Nenhum round disponível ainda." });
+            return NotFound(new { error = $"Nenhum round disponível ainda para camera '{effectiveCameraId}'." });
 
         return Ok(ToResponse(round));
     }
 
     [HttpGet("history")]
-    public async Task<IActionResult> GetHistory([FromQuery] int limit = 20)
+    public async Task<IActionResult> GetHistory([FromQuery] int limit = 20, [FromQuery] string? cameraId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
+        var effectiveCameraId = string.IsNullOrWhiteSpace(cameraId) ? null : cameraId.Trim();
 
-        var rounds = await db.Rounds
+        var query = db.Rounds
             .Include(r => r.Markets)
             .Where(r => r.Status == RoundStatus.Settled || r.Status == RoundStatus.Void)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(effectiveCameraId))
+            query = query.Where(r => r.CameraId == effectiveCameraId);
+
+        var rounds = await query
             .OrderByDescending(r => r.SettledAt ?? r.VoidedAt)
             .Take(Math.Clamp(limit, 1, 100))
             .ToListAsync();
@@ -68,6 +66,8 @@ public class RoundsController : ControllerBase
     private static RoundResponse ToResponse(Domain.Entities.Round r) => new()
     {
         RoundId = r.RoundId.ToString(),
+        CameraId = r.CameraId,
+        CameraIds = string.IsNullOrWhiteSpace(r.CameraId) ? [] : [r.CameraId],
         DisplayName = r.DisplayName,
         Status = r.Status.ToString().ToLowerInvariant(),
         IsSuspended = r.Status != RoundStatus.Open,

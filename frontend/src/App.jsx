@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AdminDashboard from './components/AdminDashboard'
 import BettingPanel from './components/BettingPanel'
 import LastResults from './components/LastResults'
 import VideoPlayer from './components/VideoPlayer'
@@ -45,7 +46,10 @@ function getRoundDurationLabel(round) {
   return `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`
 }
 
-function LiveBadge({ phase }) {
+function LiveBadge({ phase, workerOnline = false }) {
+  if (phase === 'loading' && workerOnline) {
+    return <span className="live-badge live-badge-open"><span className="live-dot" />AO VIVO</span>
+  }
   if (phase === 'open') {
     return <span className="live-badge live-badge-open"><span className="live-dot" />AO VIVO</span>
   }
@@ -62,6 +66,17 @@ function LiveBadge({ phase }) {
     return <span className="live-badge live-badge-void">ANULADO</span>
   }
   return <span className="live-badge">CARREGANDO</span>
+}
+
+function getAppView() {
+  const params = new URLSearchParams(window.location.search)
+  const queryView = params.get('view')
+  const hashView = window.location.hash.replace('#', '')
+
+  if (window.location.pathname.startsWith('/admin')) return 'admin'
+  if (queryView === 'admin') return 'admin'
+  if (hashView === 'admin') return 'admin'
+  return 'market'
 }
 
 function MarketPage() {
@@ -84,6 +99,7 @@ function MarketPage() {
   const workerTotalCount = Number.isFinite(Number(workerHealth?.totalCount))
     ? Number(workerHealth.totalCount)
     : null
+  const workerOnline = Boolean(workerHealth?.ok || workerHealth?.streamConnected)
   const displayCount = workerTotalCount ?? roundCount
   const numericStakeAmount = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStakeAmount) && numericStakeAmount > 0
@@ -104,7 +120,7 @@ function MarketPage() {
     return `${name}${dur ? ' ' + dur : ''}: quantos carros?`
   }, [round, roundDurationLabel])
   const counterLabel = workerTotalCount !== null ? 'TOTAL DE VEICULOS' : 'CONTAGEM ATUAL'
-  const secondaryStatusLabel = roundCount !== null ? 'CONTAGEM DA RODADA' : 'FPS DO WORKER'
+  const secondaryStatusLabel = 'CONTAGEM DA RODADA'
 
   function showToast(message) {
     const id = Date.now()
@@ -123,23 +139,23 @@ function MarketPage() {
 
   const loadCurrentRound = useCallback(async () => {
     try {
-      const data = await getCurrentRound()
+      const data = await getCurrentRound(embedConfig.cameraId)
       updateRound(data)
       setError('')
     } catch (err) {
       console.error(err)
       setError('Falha ao carregar o round atual.')
     }
-  }, [updateRound])
+  }, [embedConfig.cameraId, updateRound])
 
   const loadHistory = useCallback(async () => {
     try {
-      const data = await getRoundHistory()
+      const data = await getRoundHistory(embedConfig.cameraId)
       setHistory(data)
     } catch (err) {
       console.error(err)
     }
-  }, [])
+  }, [embedConfig.cameraId])
 
   function handleMarketSelect(market) {
     if (!round) return
@@ -175,8 +191,8 @@ function MarketPage() {
     async function bootstrap() {
       try {
         const [currentRound, roundHistory] = await Promise.all([
-          getCurrentRound(),
-          getRoundHistory(),
+          getCurrentRound(embedConfig.cameraId),
+          getRoundHistory(embedConfig.cameraId),
         ])
         if (!active) return
         updateRound(currentRound)
@@ -213,7 +229,7 @@ function MarketPage() {
       active = false
       stopRoundConnection().catch(console.error)
     }
-  }, [loadCurrentRound, loadHistory, updateRound])
+  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, updateRound])
 
   useEffect(() => {
     let active = true
@@ -317,10 +333,17 @@ function MarketPage() {
           <div className="header-brand-icon" aria-label="brand icon">🚗</div>
           <div className="header-title-block">
             <span className="header-game-title">{gameTitle}</span>
-            <LiveBadge phase={roundPhase} />
+            <LiveBadge phase={roundPhase} workerOnline={workerOnline} />
           </div>
         </div>
         <div className="header-right">
+          <button
+            type="button"
+            className="header-link-btn"
+            onClick={() => { window.location.href = '?view=admin' }}
+          >
+            Admin
+          </button>
           <div className="header-timer-block">
             <div className="header-timer-digits">
               <span className="header-timer-num">{headerMins}</span>
@@ -357,7 +380,7 @@ function MarketPage() {
             <div className="count-bar-right">
               <span className="count-bar-label">{secondaryStatusLabel}</span>
               <span className="count-bar-timer">
-                {roundCount !== null ? roundCount : `FPS ${Math.round(workerHealth?.fpsAverage ?? 0)}`}
+                {roundCount ?? 0}
               </span>
             </div>
           </div>
@@ -419,5 +442,17 @@ function MarketPage() {
 }
 
 export default function App() {
-  return <MarketPage />
+  const [view, setView] = useState(() => getAppView())
+
+  useEffect(() => {
+    const handleLocationChange = () => setView(getAppView())
+    window.addEventListener('popstate', handleLocationChange)
+    window.addEventListener('hashchange', handleLocationChange)
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange)
+      window.removeEventListener('hashchange', handleLocationChange)
+    }
+  }, [])
+
+  return view === 'admin' ? <AdminDashboard /> : <MarketPage />
 }

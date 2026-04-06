@@ -5,13 +5,27 @@ set "BACKEND_PORT=8080"
 set "FRONTEND_PORT=5173"
 set "BACKEND_URL=http://localhost:%BACKEND_PORT%"
 set "FRONTEND_URL=http://localhost:%FRONTEND_PORT%"
+set "MODE=%~1"
 
+if /I "%MODE%"=="" set "MODE=dev"
+if /I "%MODE%"=="supabase" goto :run_supabase
+if /I "%MODE%"=="dev" goto :run_dev
+
+echo [ERRO] Modo invalido: %MODE%
+echo Uso:
+echo   start.bat
+echo   start.bat dev
+echo   start.bat supabase
+pause
+exit /b 1
+
+:run_dev
 echo ============================================================
 echo  TrafficCounter MVP - Inicializando sistema (modo dev)
 echo  Backend : %BACKEND_URL%
 echo  Frontend: %FRONTEND_URL%
-echo  OBS: MediaMTX e PostgreSQL devem estar rodando separadamente
-echo       (via Docker ou servico local)
+echo  OBS: Em modo dev o backend usa SQLite local.
+echo       MediaMTX deve estar rodando separadamente.
 echo ============================================================
 echo.
 
@@ -106,8 +120,56 @@ echo  Frontend : %FRONTEND_URL%
 echo  Backend  : %BACKEND_URL%
 echo  Docs API : %BACKEND_URL%/streams
 echo.
-echo  Certifique-se que PostgreSQL e MediaMTX estejam rodando.
-echo  Para subir via Docker: cd infra ^&^& docker compose up postgres mediamtx
+echo  Certifique-se que MediaMTX esteja rodando.
+echo  Para Supabase, use: start.bat supabase
+echo  Para stack local Docker: cd infra ^&^& docker compose up postgres mediamtx
 echo  Para encerrar: feche as 3 janelas do terminal.
 echo ============================================================
 pause
+exit /b 0
+
+:run_supabase
+echo ============================================================
+echo  TrafficCounter MVP - Inicializando sistema (modo supabase)
+echo  Backend : %BACKEND_URL%
+echo  Frontend: %FRONTEND_URL%
+echo  Compose : infra\docker-compose.supabase.yml
+echo ============================================================
+echo.
+
+if not exist "%D%.env" (
+    echo [ERRO] Arquivo .env nao encontrado na raiz do projeto.
+    echo Copie .env.supabase.example para .env e preencha as variaveis.
+    pause & exit /b 1
+)
+
+where docker >nul 2>&1
+if errorlevel 1 (
+    echo [ERRO] docker nao encontrado. Instale o Docker Desktop.
+    pause & exit /b 1
+)
+
+where dotnet >nul 2>&1
+if errorlevel 1 (
+    echo [ERRO] dotnet nao encontrado. Instale o .NET 8 SDK: https://dot.net
+    pause & exit /b 1
+)
+
+echo [OK] Dependencias encontradas.
+echo.
+
+echo 1. Aplicando migrations no banco configurado no .env...
+start cmd /k "cd /d %D%backend\TrafficCounter.Api && title [MIGRATIONS] Supabase EF && powershell -NoProfile -Command \"$env:ConnectionStrings__DefaultConnection = (Get-Content '%D%.env' | Where-Object { $_ -like 'SUPABASE_DB_URL=*' } | Select-Object -First 1).Substring(16); dotnet ef database update\""
+
+echo 2. Subindo stack Docker com Supabase...
+start cmd /k "cd /d %D%infra && title [STACK] Supabase Compose && docker compose -f docker-compose.supabase.yml --env-file ..\.env up --build"
+
+echo.
+echo ============================================================
+echo  Inicializacao Supabase disparada.
+echo  Aguarde a janela [STACK] concluir o build e subir os servicos.
+echo  Variaveis: .env na raiz do projeto
+echo  Guia     : SUPABASE_SETUP.md
+echo ============================================================
+pause
+exit /b 0

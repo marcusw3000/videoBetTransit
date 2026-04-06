@@ -42,9 +42,15 @@ public class CrossingEventService
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var session = await db.StreamSessions.FindAsync(sessionId);
+        var session = await db.StreamSessions
+            .Include(s => s.CameraSource)
+            .FirstOrDefaultAsync(s => s.Id == sessionId);
         if (session is null || session.Status is not SessionStatus.Running and not SessionStatus.Degraded)
             return false;
+
+        var cameraId = string.IsNullOrWhiteSpace(session.CameraSource?.Name)
+            ? "default"
+            : session.CameraSource.Name.Trim();
 
         // Find previous event for hash chaining
         var previousEvent = await db.VehicleCrossingEvents
@@ -65,9 +71,12 @@ public class CrossingEventService
                 return false;
         }
 
+        var round = await _roundService.IncrementCountAsync(cameraId);
+
         var @event = new VehicleCrossingEvent
         {
             Id = Guid.NewGuid(),
+            RoundId = round?.RoundId,
             SessionId = sessionId,
             TimestampUtc = dto.TimestampUtc,
             TrackId = dto.TrackId,
@@ -98,9 +107,6 @@ public class CrossingEventService
 
         await _hub.Clients.Group($"session:{sessionId}")
             .SendAsync("metrics_updated", metrics);
-
-        // Incrementa a contagem do round ativo e transmite via RoundHub
-        await _roundService.IncrementCountAsync();
 
         return true;
     }

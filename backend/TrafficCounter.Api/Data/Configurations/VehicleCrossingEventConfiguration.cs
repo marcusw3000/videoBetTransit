@@ -16,6 +16,7 @@ public class VehicleCrossingEventConfiguration : IEntityTypeConfiguration<Vehicl
         builder.Property(e => e.EventHash).HasMaxLength(128).IsRequired();
 
         builder.HasIndex(e => new { e.SessionId, e.TimestampUtc });
+        builder.HasIndex(e => e.RoundId);
         builder.HasIndex(e => e.EventHash);
 
         builder.HasOne(e => e.Session)

@@ -3,6 +3,7 @@ namespace TrafficCounter.Api.Contracts.Responses;
 public class CrossingEventResponse
 {
     public Guid Id { get; set; }
+    public Guid? RoundId { get; set; }
     public Guid SessionId { get; set; }
     public DateTime TimestampUtc { get; set; }
     public long TrackId { get; set; }

@@ -3,6 +3,7 @@ namespace TrafficCounter.Api.Domain.Entities;
 public class VehicleCrossingEvent
 {
     public Guid Id { get; set; }
+    public Guid? RoundId { get; set; }
     public Guid SessionId { get; set; }
     public StreamSession Session { get; set; } = null!;
     public DateTime TimestampUtc { get; set; }

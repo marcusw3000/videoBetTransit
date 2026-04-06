@@ -8,6 +8,16 @@ using TrafficCounter.Api.Workers;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var defaultUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+if (string.IsNullOrWhiteSpace(defaultUrls))
+{
+    builder.WebHost.UseUrls("http://0.0.0.0:8080");
+}
+
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 // ── Database ──────────────────────────────────────────────────────────────────
 var connString = builder.Configuration.GetConnectionString("DefaultConnection")!;
 var useSqlite = connString.StartsWith("Data Source", StringComparison.OrdinalIgnoreCase);
