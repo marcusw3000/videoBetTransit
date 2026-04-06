@@ -19,17 +19,20 @@ public class CrossingEventService
     private readonly IHubContext<MetricsHub> _hub;
     private readonly SecurityOptions _security;
     private readonly ILogger<CrossingEventService> _logger;
+    private readonly RoundService _roundService;
 
     public CrossingEventService(
         IDbContextFactory<AppDbContext> dbFactory,
         IHubContext<MetricsHub> hub,
         IOptions<SecurityOptions> security,
-        ILogger<CrossingEventService> logger)
+        ILogger<CrossingEventService> logger,
+        RoundService roundService)
     {
         _dbFactory = dbFactory;
         _hub = hub;
         _security = security.Value;
         _logger = logger;
+        _roundService = roundService;
     }
 
     public async Task<bool> IngestAsync(CrossingEventInboundDto dto)
@@ -95,6 +98,9 @@ public class CrossingEventService
 
         await _hub.Clients.Group($"session:{sessionId}")
             .SendAsync("metrics_updated", metrics);
+
+        // Incrementa a contagem do round ativo e transmite via RoundHub
+        await _roundService.IncrementCountAsync();
 
         return true;
     }

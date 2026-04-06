@@ -215,7 +215,7 @@ export default function VideoPlayer({
 
       <div className="video-frame">
         <div className="video-count-overlay">
-          <span className="video-count-label">Contagem Atual</span>
+          <span className="video-count-label">Total de Veiculos</span>
           <strong className="video-count-value">{countValue ?? 0}</strong>
         </div>
 

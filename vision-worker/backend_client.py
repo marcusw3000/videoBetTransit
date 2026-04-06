@@ -1,14 +1,37 @@
+import hashlib
 import logging
 import queue
 import threading
 import time
-import hashlib
+from urllib.parse import urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_api_root(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    parsed = urlparse(raw)
+
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    if "/internal/" in raw:
+        return raw.split("/internal/", 1)[0]
+
+    return raw
+
+
+def normalize_crossing_events_url(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if raw.endswith("/internal/crossing-events"):
+        return raw
+    if raw.endswith("/internal/round-count-event"):
+        return f"{normalize_api_root(raw)}/internal/crossing-events"
+    return f"{normalize_api_root(raw)}/internal/crossing-events"
 
 
 class BackendClient:
@@ -26,9 +49,10 @@ class BackendClient:
         live_worker_count: int = 1,
         start_workers: bool = True,
     ):
-        # base_url is the crossing-events endpoint; derive host from it
-        self.base_url = base_url.rsplit("/", 2)[0]
-        self.count_events_url = base_url
+        self.base_url = normalize_api_root(base_url)
+        self.count_events_url = normalize_crossing_events_url(base_url)
+        self.round_count_url = f"{self.base_url}/internal/round-count-event"
+        self.current_round_url = f"{self.base_url}/rounds/current"
         self.health_report_url = f"{self.base_url}/internal/health-report"
         self.api_key = api_key
         self.session_id = session_id
@@ -74,12 +98,33 @@ class BackendClient:
         if start_workers:
             self._start_workers(max(1, count_worker_count), max(1, live_worker_count))
 
-    # ── Stubs for removed endpoints ──────────────────────────────────────────
-    # The new backend has no round or camera-config endpoints.
-    # These stubs keep app.py running without modification.
-
     def fetch_current_round(self) -> dict | None:
-        return None
+        try:
+            resp = self._session.get(
+                self.current_round_url,
+                headers=self._default_headers,
+                timeout=3,
+            )
+            if resp.status_code == 200:
+                self._mark_success()
+                return resp.json()
+
+            self._mark_error(
+                f"current round HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+            return None
+        except requests.Timeout:
+            self._mark_error("timeout fetching current round")
+            logger.warning("[BACKEND] Timeout ao buscar round atual")
+            return None
+        except requests.ConnectionError:
+            self._mark_error("connection error fetching current round")
+            logger.warning("[BACKEND] Sem conexao ao buscar round atual")
+            return None
+        except Exception as exc:
+            self._mark_error(f"unexpected fetch_current_round error: {exc}")
+            logger.warning("[BACKEND] Erro ao buscar round atual: %s", exc)
+            return None
 
     def fetch_camera_config(self, _camera_id: str) -> dict | None:
         return None
@@ -93,18 +138,38 @@ class BackendClient:
     ) -> bool:
         return True
 
-    # ── Active methods ────────────────────────────────────────────────────────
-
     def send_count_event(self, payload: dict):
-        """
-        Accepts the legacy payload from app.py and converts it to the new
-        /internal/crossing-events schema before enqueuing.
-        """
         if not self.session_id:
-            logger.warning("[BACKEND] session_id nao configurado — evento de cruzamento ignorado")
+            round_payload = {
+                "cameraId": payload.get("cameraId", ""),
+                "roundId": payload.get("roundId", ""),
+                "trackId": str(payload.get("trackId", "")),
+                "vehicleType": payload.get("vehicleType", "car"),
+                "crossedAt": payload.get(
+                    "crossedAt",
+                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                ),
+                "snapshotUrl": payload.get("snapshotUrl", ""),
+                "totalCount": int(payload.get("totalCount", 0) or 0),
+            }
+            if self._enqueue_payload(
+                self._count_queue,
+                round_payload,
+                dropped_key="countDropped",
+                queued_key="countQueued",
+                label="round-count-event",
+                replace_oldest=False,
+                target_url=self.round_count_url,
+            ):
+                logger.debug("[BACKEND] Round-count-event enfileirado")
+            else:
+                logger.warning("[BACKEND] Round-count-event descartado por fila cheia")
             return
 
-        timestamp_utc = payload.get("crossedAt", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        timestamp_utc = payload.get(
+            "crossedAt",
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
         track_id = int(payload.get("trackId", 0))
         object_class = payload.get("vehicleType", "car")
         confidence = float(payload.get("confidence", 0.0))
@@ -144,17 +209,16 @@ class BackendClient:
             queued_key="countQueued",
             label="count-event",
             replace_oldest=False,
+            target_url=self.count_events_url,
         ):
             logger.debug("[BACKEND] Count-event enfileirado")
         else:
             logger.warning("[BACKEND] Count-event descartado por fila cheia")
 
     def send_live_detections(self, payload: dict):
-        # Live detection overlay is not used in the new backend (overlay is server-side).
-        pass
+        del payload
 
     def send_health_report(self, report: dict):
-        """POST /internal/health-report — opcional, chamado pelo vision worker."""
         if not self.session_id:
             return
         report["sessionId"] = self.session_id
@@ -165,14 +229,13 @@ class BackendClient:
             queued_key="liveQueued",
             label="health-report",
             replace_oldest=True,
+            target_url=self.health_report_url,
         ):
             logger.debug("[BACKEND] Health report enfileirado")
 
     def get_health_snapshot(self) -> dict:
         with self._lock:
             return dict(self._stats)
-
-    # ── Internals ─────────────────────────────────────────────────────────────
 
     def _compute_hash(
         self,
@@ -205,7 +268,7 @@ class BackendClient:
         for index in range(count_worker_count):
             worker = threading.Thread(
                 target=self._worker_loop,
-                args=(self._count_queue, self.count_events_url, "countInFlight", "countQueued"),
+                args=(self._count_queue, "countInFlight", "countQueued"),
                 name=f"backend-count-worker-{index + 1}",
                 daemon=True,
             )
@@ -215,7 +278,7 @@ class BackendClient:
         for index in range(live_worker_count):
             worker = threading.Thread(
                 target=self._worker_loop,
-                args=(self._live_queue, self.health_report_url, "liveInFlight", "liveQueued"),
+                args=(self._live_queue, "liveInFlight", "liveQueued"),
                 name=f"backend-health-worker-{index + 1}",
                 daemon=True,
             )
@@ -225,16 +288,15 @@ class BackendClient:
     def _worker_loop(
         self,
         payload_queue: queue.Queue,
-        url: str,
         inflight_key: str,
         queued_key: str,
     ):
         while True:
-            payload = payload_queue.get()
+            job = payload_queue.get()
             self._decrement_stat(queued_key)
             self._increment_stat(inflight_key)
             try:
-                self._post(url, payload)
+                self._post(job["url"], job["payload"])
             finally:
                 self._decrement_stat(inflight_key)
                 payload_queue.task_done()
@@ -248,9 +310,14 @@ class BackendClient:
         queued_key: str,
         label: str,
         replace_oldest: bool,
+        target_url: str,
     ) -> bool:
+        job = {
+            "url": target_url,
+            "payload": payload,
+        }
         try:
-            payload_queue.put_nowait(payload)
+            payload_queue.put_nowait(job)
             self._increment_stat(queued_key)
             return True
         except queue.Full:
@@ -264,7 +331,7 @@ class BackendClient:
                 except queue.Empty:
                     pass
                 try:
-                    payload_queue.put_nowait(payload)
+                    payload_queue.put_nowait(job)
                     self._increment_stat(queued_key)
                     return True
                 except queue.Full:

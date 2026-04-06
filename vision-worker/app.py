@@ -184,6 +184,13 @@ def is_mjpeg_request_authorized() -> bool:
 def create_mjpeg_app() -> Flask:
     app = Flask(__name__)
 
+    @app.after_request
+    def add_cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        return response
+
     @app.get("/health")
     def health():
         backend_health = (
@@ -1528,6 +1535,7 @@ def main():
         count_direction=cfg.get("count_direction", "down_to_up"),
         line_id=cfg.get("line_id", "main-line"),
     )
+    round_sync_enabled = bool(str(cfg.get("session_id", "")).strip())
     backend_client_ref = backend
     mjpeg_token_ref = str(cfg.get("mjpeg_token", "")).strip()
     snapshot_writer = AsyncSnapshotWriter(
@@ -1720,14 +1728,15 @@ def main():
         )
         return profile
 
-    backend_round = backend.fetch_current_round()
-    current_round_id, total, round_changed = resolve_round_sync(
-        current_round_id,
-        backend_round,
-        total,
-    )
-    if round_changed:
-        reset_tracking_state()
+    if round_sync_enabled:
+        backend_round = backend.fetch_current_round()
+        current_round_id, total, round_changed = resolve_round_sync(
+            current_round_id,
+            backend_round,
+            total,
+        )
+        if round_changed:
+            reset_tracking_state()
 
     if cfg.get("show_window", True):
         editor = ConfigEditor(roi, line)
@@ -1773,12 +1782,13 @@ def main():
             profile = pending_stream_profile
             pending_stream_profile = None
             reset_tracking_state()
-            backend_round = backend.fetch_current_round()
-            if backend_round:
-                backend_round_id = str(backend_round.get("id", "")).strip()
-                if backend_round_id:
-                    current_round_id = backend_round_id
-                total = int(backend_round.get("currentCount", 0) or 0)
+            if round_sync_enabled:
+                backend_round = backend.fetch_current_round()
+                if backend_round:
+                    backend_round_id = str(backend_round.get("id", "")).strip()
+                    if backend_round_id:
+                        current_round_id = backend_round_id
+                    total = int(backend_round.get("currentCount", 0) or 0)
 
             cfg["stream_url"] = profile["stream_url"]
             cfg["camera_id"] = profile["camera_id"]
@@ -1827,7 +1837,7 @@ def main():
             logger.info("ROI: %s | Linha: %s | Direção: %s", roi, line, count_direction)
 
         now_ts = time.time()
-        if now_ts - last_round_sync >= ROUND_SYNC_INTERVAL:
+        if round_sync_enabled and now_ts - last_round_sync >= ROUND_SYNC_INTERVAL:
             last_round_sync = now_ts
             backend_round = backend.fetch_current_round()
             next_round_id, next_total, round_changed = resolve_round_sync(

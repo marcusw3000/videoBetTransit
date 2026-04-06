@@ -12,6 +12,8 @@ public class AppDbContext : DbContext
     public DbSet<VehicleCrossingEvent> VehicleCrossingEvents => Set<VehicleCrossingEvent>();
     public DbSet<StreamHealthLog> StreamHealthLogs => Set<StreamHealthLog>();
     public DbSet<RecordingSegment> RecordingSegments => Set<RecordingSegment>();
+    public DbSet<Round> Rounds => Set<Round>();
+    public DbSet<RoundMarket> RoundMarkets => Set<RoundMarket>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

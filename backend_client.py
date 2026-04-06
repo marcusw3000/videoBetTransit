@@ -2,6 +2,7 @@ import logging
 import queue
 import threading
 import time
+from urllib.parse import urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -22,8 +23,8 @@ class BackendClient:
         live_worker_count: int = 1,
         start_workers: bool = True,
     ):
-        self.base_url = base_url.rsplit("/", 2)[0]
-        self.count_events_url = base_url
+        self.base_url = normalize_api_root(base_url)
+        self.count_events_url = normalize_count_events_url(base_url)
         self.current_round_url = f"{self.base_url}/rounds/current"
         self.live_detections_url = f"{self.base_url}/live-detections"
         self.camera_config_url = f"{self.base_url}/camera-config"
@@ -310,3 +311,25 @@ class BackendClient:
     def _decrement_stat(self, key: str):
         with self._lock:
             self._stats[key] = max(0, self._stats[key] - 1)
+
+
+def normalize_api_root(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    parsed = urlparse(raw)
+
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    if "/internal/" in raw:
+        return raw.split("/internal/", 1)[0]
+
+    return raw
+
+
+def normalize_count_events_url(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if raw.endswith("/internal/round-count-event") or raw.endswith("/internal/crossing-events"):
+        return raw
+
+    base = normalize_api_root(raw)
+    return f"{base}/internal/round-count-event"

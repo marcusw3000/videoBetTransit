@@ -4,6 +4,7 @@ import LastResults from './components/LastResults'
 import VideoPlayer from './components/VideoPlayer'
 import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
+import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds } from './utils/time'
 import { WEBRTC_URL, HLS_URL, MJPEG_URL } from './config'
 import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } from './embed'
@@ -72,12 +73,18 @@ function MarketPage() {
   const [toast, setToast] = useState(null)
   const [selectedMarketId, setSelectedMarketId] = useState('')
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
+  const [workerHealth, setWorkerHealth] = useState(null)
   const roundIdRef = useRef('')
 
   const roundPhase = getRoundPhase(round)
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
   const markets = round?.markets || []
+  const roundCount = round?.currentCount ?? null
+  const workerTotalCount = Number.isFinite(Number(workerHealth?.totalCount))
+    ? Number(workerHealth.totalCount)
+    : null
+  const displayCount = workerTotalCount ?? roundCount
   const numericStakeAmount = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStakeAmount) && numericStakeAmount > 0
 
@@ -96,6 +103,8 @@ function MarketPage() {
     const dur = roundDurationLabel ? `(${roundDurationLabel})` : ''
     return `${name}${dur ? ' ' + dur : ''}: quantos carros?`
   }, [round, roundDurationLabel])
+  const counterLabel = workerTotalCount !== null ? 'TOTAL DE VEICULOS' : 'CONTAGEM ATUAL'
+  const secondaryStatusLabel = roundCount !== null ? 'CONTAGEM DA RODADA' : 'FPS DO WORKER'
 
   function showToast(message) {
     const id = Date.now()
@@ -207,6 +216,31 @@ function MarketPage() {
   }, [loadCurrentRound, loadHistory, updateRound])
 
   useEffect(() => {
+    let active = true
+
+    async function loadWorkerHealth() {
+      try {
+        const data = await getWorkerHealth()
+        if (!active) return
+        setWorkerHealth(data)
+      } catch {
+        if (!active) return
+        setWorkerHealth(null)
+      }
+    }
+
+    void loadWorkerHealth()
+    const intervalId = setInterval(() => {
+      void loadWorkerHealth()
+    }, 2000)
+
+    return () => {
+      active = false
+      clearInterval(intervalId)
+    }
+  }, [])
+
+  useEffect(() => {
     const handleConfigUpdate = () => {
       const nextConfig = getEmbedConfig()
       setEmbedConfig(nextConfig)
@@ -250,6 +284,8 @@ function MarketPage() {
       status: round.status,
       isSuspended: round.isSuspended,
       currentCount: round.currentCount,
+      displayCount,
+      workerTotalCount,
       createdAt: round.createdAt,
       betCloseAt: round.betCloseAt,
       endsAt: round.endsAt,
@@ -260,7 +296,7 @@ function MarketPage() {
       markets: round.markets,
       cameraId: embedConfig.cameraId,
     }, embedConfig)
-  }, [embedConfig, round])
+  }, [displayCount, embedConfig, round, workerTotalCount])
 
   useEffect(() => {
     if (!hasValidStake) return
@@ -313,14 +349,16 @@ function MarketPage() {
         <div className="left-panel">
           <div className="count-bar">
             <div className="count-bar-left">
-              <span className="count-bar-label">CONTAGEM ATUAL</span>
+              <span className="count-bar-label">{counterLabel}</span>
               <span className="count-bar-value">
-                {round?.currentCount ?? '--'}
+                {displayCount ?? '--'}
               </span>
             </div>
             <div className="count-bar-right">
-              <span className="count-bar-label">PREVISÕES ENCERRAM EM</span>
-              <span className="count-bar-timer">{betCloseMins}:{betCloseSecs}</span>
+              <span className="count-bar-label">{secondaryStatusLabel}</span>
+              <span className="count-bar-timer">
+                {roundCount !== null ? roundCount : `FPS ${Math.round(workerHealth?.fpsAverage ?? 0)}`}
+              </span>
             </div>
           </div>
 
@@ -331,7 +369,7 @@ function MarketPage() {
               src={HLS_URL}
               fallbackSrc={MJPEG_URL}
               title={embedConfig.cameraLabel || 'Transmissão ao vivo'}
-              countValue={round?.currentCount}
+              countValue={displayCount}
             />
           </div>
         </div>

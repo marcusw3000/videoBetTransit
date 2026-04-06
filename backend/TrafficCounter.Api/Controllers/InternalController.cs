@@ -20,17 +20,20 @@ public class InternalController : ControllerBase
     private readonly StreamSessionService _sessionService;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly HealthMonitorOptions _healthOptions;
+    private readonly RoundService _roundService;
 
     public InternalController(
         CrossingEventService crossingEventService,
         StreamSessionService sessionService,
         IDbContextFactory<AppDbContext> dbFactory,
-        IOptions<HealthMonitorOptions> healthOptions)
+        IOptions<HealthMonitorOptions> healthOptions,
+        RoundService roundService)
     {
         _crossingEventService = crossingEventService;
         _sessionService = sessionService;
         _dbFactory = dbFactory;
         _healthOptions = healthOptions.Value;
+        _roundService = roundService;
     }
 
     [HttpPost("crossing-events")]
@@ -41,6 +44,27 @@ public class InternalController : ControllerBase
             return Conflict(new { error = "Session not found or not in a running state." });
 
         return Ok(new { received = true });
+    }
+
+    /// <summary>
+    /// Endpoint chamado pelo vision worker Python a cada veículo detectado.
+    /// Não requer sessão — incrementa diretamente o round ativo.
+    /// </summary>
+    [HttpPost("round-count-event")]
+    public async Task<IActionResult> ReceiveRoundCountEvent([FromBody] RoundCountEventDto dto)
+    {
+        await _roundService.IncrementCountAsync();
+        return Ok(new { received = true });
+    }
+
+    [HttpPost("rounds/{roundId:guid}/void")]
+    public async Task<IActionResult> VoidRound(Guid roundId, [FromBody] VoidRoundRequest request)
+    {
+        var ok = await _roundService.VoidRoundAsync(roundId, request.Reason);
+        if (!ok)
+            return Conflict(new { error = "Round não encontrado ou já encerrado/anulado." });
+
+        return Ok(new { voided = true });
     }
 
     [HttpPost("health-report")]

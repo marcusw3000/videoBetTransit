@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using TrafficCounter.Api.Data;
 using TrafficCounter.Api.Hubs;
 using TrafficCounter.Api.Options;
@@ -8,14 +9,23 @@ using TrafficCounter.Api.Workers;
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Database ──────────────────────────────────────────────────────────────────
+var connString = builder.Configuration.GetConnectionString("DefaultConnection")!;
+var useSqlite = connString.StartsWith("Data Source", StringComparison.OrdinalIgnoreCase);
+
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+{
+    if (useSqlite)
+        options.UseSqlite(connString);
+    else
+        options.UseNpgsql(connString);
+});
 
 // ── Options ───────────────────────────────────────────────────────────────────
 builder.Services.Configure<MediaMtxOptions>(builder.Configuration.GetSection("MediaMtx"));
 builder.Services.Configure<VisionWorkerOptions>(builder.Configuration.GetSection("VisionWorker"));
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection("Security"));
 builder.Services.Configure<HealthMonitorOptions>(builder.Configuration.GetSection("HealthMonitor"));
+builder.Services.Configure<RoundOptions>(builder.Configuration.GetSection("Rounds"));
 
 // ── HTTP Clients ───────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient();
@@ -25,9 +35,17 @@ builder.Services.AddHttpClient<MediaMtxClient>();
 builder.Services.AddScoped<StreamSessionService>();
 builder.Services.AddScoped<CrossingEventService>();
 builder.Services.AddScoped<UrlValidationService>();
+builder.Services.AddScoped<RoundService>();
 
-// ── MediaMTX client (interface-backed for mocking in tests) ───────────────────
-builder.Services.AddScoped<IMediaMtxClient, MediaMtxClient>();
+// ── MediaMTX client — Singleton para poder ser injetado em Singletons/Workers ─
+builder.Services.AddSingleton<IMediaMtxClient>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    var http = factory.CreateClient(nameof(MediaMtxClient));
+    var opts = sp.GetRequiredService<IOptions<MediaMtxOptions>>();
+    var logger = sp.GetRequiredService<ILogger<MediaMtxClient>>();
+    return new MediaMtxClient(http, opts, logger);
+});
 
 // ── Orchestrator (Singleton — holds per-session SemaphoreSlim map) ────────────
 builder.Services.AddSingleton<PipelineOrchestratorService>();
@@ -35,6 +53,7 @@ builder.Services.AddSingleton<PipelineOrchestratorService>();
 // ── Background workers ────────────────────────────────────────────────────────
 builder.Services.AddHostedService<SessionStateWorker>();
 builder.Services.AddHostedService<HealthMonitorWorker>();
+builder.Services.AddHostedService<RoundManagerWorker>();
 
 // ── SignalR ───────────────────────────────────────────────────────────────────
 builder.Services.AddSignalR();
@@ -63,6 +82,7 @@ await MigrateWithRetryAsync(app);
 app.UseCors();
 app.MapControllers();
 app.MapHub<MetricsHub>("/hubs/metrics");
+app.MapHub<RoundHub>("/hubs/round");
 
 Console.WriteLine("TrafficCounter backend running on http://0.0.0.0:8080");
 app.Run();
@@ -81,10 +101,13 @@ static async Task MigrateWithRetryAsync(WebApplication app)
             var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
             await using var ctx = await factory.CreateDbContextAsync();
 
-            if (ctx.Database.IsRelational())
-                await ctx.Database.MigrateAsync();
+            // SQLite e InMemory: EnsureCreated (cria schema direto do modelo)
+            // PostgreSQL: MigrateAsync (aplica migrations versionadas)
+            var providerName = ctx.Database.ProviderName ?? "";
+            if (providerName.Contains("Sqlite") || !ctx.Database.IsRelational())
+                await ctx.Database.EnsureCreatedAsync();
             else
-                await ctx.Database.EnsureCreatedAsync(); // InMemory (tests)
+                await ctx.Database.MigrateAsync();
 
             return;
         }

@@ -79,7 +79,11 @@ echo.
 if not exist "%D%logs" mkdir "%D%logs"
 
 echo 1. Iniciando Backend .NET (porta %BACKEND_PORT%)...
-start cmd /k "cd /d %D%backend\TrafficCounter.Api && title [BACKEND] .NET API :8080 && set ASPNETCORE_ENVIRONMENT=Development && dotnet run"
+if exist "%D%backend\TrafficCounter.Api\publish_dev\TrafficCounter.Api.dll" (
+    start cmd /k "cd /d %D%backend\TrafficCounter.Api\publish_dev && title [BACKEND] .NET API :8080 && set ASPNETCORE_ENVIRONMENT=Development && dotnet TrafficCounter.Api.dll --urls http://0.0.0.0:8080"
+) else (
+    start cmd /k "cd /d %D%backend\TrafficCounter.Api && title [BACKEND] .NET API :8080 && set ASPNETCORE_ENVIRONMENT=Development && dotnet run"
+)
 
 echo 2. Iniciando Frontend React (porta %FRONTEND_PORT%)...
 if exist "%D%frontend\node_modules" (
