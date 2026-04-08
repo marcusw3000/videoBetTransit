@@ -6,7 +6,7 @@ import VideoPlayer from './components/VideoPlayer'
 import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
-import { getRoundPhase, getTimeLeftInSeconds } from './utils/time'
+import { getRoundPhase, getTimeLeftInSeconds, parseTimestampMs } from './utils/time'
 import { WEBRTC_URL, HLS_URL, MJPEG_URL } from './config'
 import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } from './embed'
 
@@ -38,8 +38,8 @@ function getDisplayName(round) {
 
 function getRoundDurationLabel(round) {
   if (!round?.createdAt || !round?.endsAt) return null
-  const created = new Date(round.createdAt).getTime()
-  const ends = new Date(round.endsAt).getTime()
+  const created = parseTimestampMs(round.createdAt)
+  const ends = parseTimestampMs(round.endsAt)
   if (Number.isNaN(created) || Number.isNaN(ends) || ends <= created) return null
   const minutes = Math.round((ends - created) / 60000)
   if (minutes <= 0) return null
@@ -96,20 +96,10 @@ function MarketPage() {
   const roundDurationLabel = getRoundDurationLabel(round)
   const markets = round?.markets || []
   const roundCount = round?.currentCount ?? null
-  const workerTotalCount = Number.isFinite(Number(workerHealth?.totalCount))
-    ? Number(workerHealth.totalCount)
-    : null
   const workerOnline = Boolean(workerHealth?.ok || workerHealth?.streamConnected)
-  const displayCount = workerTotalCount ?? roundCount
+  const displayCount = roundCount
   const numericStakeAmount = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStakeAmount) && numericStakeAmount > 0
-
-  const headerTimerSeconds = roundPhase === 'open' ? betCloseSeconds : timeLeftSeconds
-  const headerMins = padTime(headerTimerSeconds / 60)
-  const headerSecs = padTime(headerTimerSeconds % 60)
-
-  const betCloseMins = padTime(betCloseSeconds / 60)
-  const betCloseSecs = padTime(betCloseSeconds % 60)
 
   const overMarket = useMemo(() => markets.find((m) => m.marketType?.toLowerCase() === 'over') || null, [markets])
   const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
@@ -119,8 +109,7 @@ function MarketPage() {
     const dur = roundDurationLabel ? `(${roundDurationLabel})` : ''
     return `${name}${dur ? ' ' + dur : ''}: quantos carros?`
   }, [round, roundDurationLabel])
-  const counterLabel = workerTotalCount !== null ? 'TOTAL DE VEICULOS' : 'CONTAGEM ATUAL'
-  const secondaryStatusLabel = 'CONTAGEM DA RODADA'
+  const counterLabel = 'CONTAGEM DA RODADA'
 
   function showToast(message) {
     const id = Date.now()
@@ -283,13 +272,16 @@ function MarketPage() {
   }, [embedConfig])
 
   useEffect(() => {
-    const intervalId = setInterval(() => {
+    const syncTimeLeft = () => {
       if (round?.endsAt) {
         setTimeLeftSeconds(getTimeLeftInSeconds(round.endsAt))
       } else {
         setTimeLeftSeconds(0)
       }
-    }, 1000)
+    }
+
+    syncTimeLeft()
+    const intervalId = setInterval(syncTimeLeft, 1000)
     return () => clearInterval(intervalId)
   }, [round])
 
@@ -301,7 +293,6 @@ function MarketPage() {
       isSuspended: round.isSuspended,
       currentCount: round.currentCount,
       displayCount,
-      workerTotalCount,
       createdAt: round.createdAt,
       betCloseAt: round.betCloseAt,
       endsAt: round.endsAt,
@@ -312,7 +303,7 @@ function MarketPage() {
       markets: round.markets,
       cameraId: embedConfig.cameraId,
     }, embedConfig)
-  }, [displayCount, embedConfig, round, workerTotalCount])
+  }, [displayCount, embedConfig, round])
 
   useEffect(() => {
     if (!hasValidStake) return
@@ -344,17 +335,6 @@ function MarketPage() {
           >
             Admin
           </button>
-          <div className="header-timer-block">
-            <div className="header-timer-digits">
-              <span className="header-timer-num">{headerMins}</span>
-              <span className="header-timer-sep">:</span>
-              <span className="header-timer-num">{headerSecs}</span>
-            </div>
-            <div className="header-timer-labels">
-              <span>MINS</span>
-              <span>SECS</span>
-            </div>
-          </div>
         </div>
       </header>
 
@@ -378,9 +358,9 @@ function MarketPage() {
               </span>
             </div>
             <div className="count-bar-right">
-              <span className="count-bar-label">{secondaryStatusLabel}</span>
+              <span className="count-bar-label">TEMPO DO ROUND</span>
               <span className="count-bar-timer">
-                {roundCount ?? 0}
+                {padTime(timeLeftSeconds / 60)}:{padTime(timeLeftSeconds % 60)}
               </span>
             </div>
           </div>
@@ -402,6 +382,7 @@ function MarketPage() {
           <BettingPanel
             markets={markets}
             roundPhase={roundPhase}
+            betCloseSeconds={betCloseSeconds}
             selectedMarketId={selectedMarketId}
             onMarketSelect={handleMarketSelect}
             stakeAmount={stakeAmount}

@@ -34,7 +34,7 @@ if not exist "%D%frontend\package.json" (
 )
 
 echo 1. Iniciando backend local...
-start cmd /k "cd /d %D%backend\TrafficCounter.Api && title [BACKEND] .NET API :8080 && set ASPNETCORE_ENVIRONMENT=Development && dotnet run --urls http://0.0.0.0:8080"
+start cmd /k "cd /d %D% && call backend-dev.bat"
 
 echo 2. Iniciando frontend...
 if exist "%D%frontend\node_modules" (

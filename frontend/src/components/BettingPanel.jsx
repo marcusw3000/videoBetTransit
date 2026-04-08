@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react'
 
+function formatCountdown(seconds) {
+  const safe = Math.max(0, Math.floor(seconds || 0))
+  const mm = String(Math.floor(safe / 60)).padStart(2, '0')
+  const ss = String(safe % 60).padStart(2, '0')
+  return `${mm}:${ss}`
+}
+
 function formatOdds(odds, locale = 'pt-BR') {
   return new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
@@ -18,19 +25,20 @@ function formatCurrency(value, locale, currency) {
 
 function getMarketBtnClass(marketType) {
   switch ((marketType || '').toLowerCase()) {
-    case 'over':  return 'mkt-pick-btn mkt-pick-over'
+    case 'over': return 'mkt-pick-btn mkt-pick-over'
     case 'under': return 'mkt-pick-btn mkt-pick-under'
     case 'range': return 'mkt-pick-btn mkt-pick-range'
     case 'exact': return 'mkt-pick-btn mkt-pick-exact'
-    default:      return 'mkt-pick-btn mkt-pick-default'
+    default: return 'mkt-pick-btn mkt-pick-default'
   }
 }
 
-const POSITIONS_TABS = ['Posições', 'Em aberto', 'Encerrados']
+const POSITIONS_TABS = ['Posicoes', 'Em aberto', 'Encerrados']
 
 export default function BettingPanel({
   markets = [],
   roundPhase = 'open',
+  betCloseSeconds = 0,
   selectedMarketId = '',
   onMarketSelect,
   stakeAmount = '3',
@@ -41,10 +49,7 @@ export default function BettingPanel({
   balance = 0,
   isSuspended = false,
 }) {
-  const [activeTab, setActiveTab] = useState('Comprar')
-  const [posTab, setPosTab] = useState('Posições')
-
-  const betTabs = ['Comprar', 'Vender', 'A mercado']
+  const [posTab, setPosTab] = useState('Posicoes')
 
   const numericStake = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStake) && numericStake > 0
@@ -68,39 +73,28 @@ export default function BettingPanel({
 
   return (
     <div className="betting-panel">
-
-      {/* Panel header */}
       <div className="betting-panel-header">
-        {selectedMarket ? (
-          <div className="betting-panel-title">
-            <span className={`panel-mkt-dot panel-mkt-dot-${(selectedMarket.marketType || '').toLowerCase()}`} />
-            <span className="panel-mkt-name">{selectedMarket.label || selectedMarket.marketType}</span>
-          </div>
-        ) : (
-          <span className="panel-mkt-placeholder">Escolha um mercado</span>
-        )}
+        <div className="betting-panel-timer">
+          <span className="betting-panel-timer-label">Apostas se encerram em</span>
+          <strong className="betting-panel-timer-value">
+            {roundPhase === 'open' ? formatCountdown(betCloseSeconds) : '00:00'}
+          </strong>
+        </div>
       </div>
 
-      {/* Bet type tabs */}
       <div className="bet-type-tabs">
-        {betTabs.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            className={`bet-type-tab${activeTab === tab ? ' bet-type-tab-active' : ''}${tab !== 'Comprar' ? ' bet-type-tab-disabled' : ''}`}
-            onClick={() => tab === 'Comprar' && setActiveTab(tab)}
-            disabled={tab !== 'Comprar'}
-          >
-            {tab}
-          </button>
-        ))}
+        <button
+          type="button"
+          className="bet-type-tab bet-type-tab-active"
+        >
+          Comprar
+        </button>
         <span className="bet-type-refresh" title="Atualizar odds">↻</span>
       </div>
 
-      {/* Market pick buttons */}
       <div className="mkt-pick-grid">
         {markets.length === 0 && (
-          <span className="mkt-pick-empty">Mercados indisponíveis</span>
+          <span className="mkt-pick-empty">Mercados indisponiveis</span>
         )}
         {markets.map((m) => {
           const mId = m.marketId || m.id
@@ -120,7 +114,6 @@ export default function BettingPanel({
         })}
       </div>
 
-      {/* Stake section */}
       <div className="stake-section-panel">
         <div className="stake-section-header">
           <span className="stake-section-label">Quantia</span>
@@ -132,7 +125,7 @@ export default function BettingPanel({
             type="button"
             className="stake-stepper"
             onClick={() => handleStakeIncrement(-1)}
-          >−</button>
+          >-</button>
           <div className="stake-display">
             <input
               type="number"
@@ -172,7 +165,6 @@ export default function BettingPanel({
         </div>
       </div>
 
-      {/* Payout */}
       {selectedMarket && hasValidStake && (
         <div className="payout-row">
           <div className="payout-label">
@@ -186,7 +178,6 @@ export default function BettingPanel({
         </div>
       )}
 
-      {/* CTA button */}
       <button
         type="button"
         className={`bet-cta-btn${canBet ? ' bet-cta-btn-active' : ''}`}
@@ -195,15 +186,14 @@ export default function BettingPanel({
         {!isBettingOpen
           ? roundPhase === 'closing' ? 'Mercado Fechado' : 'Aguardando Round'
           : !hasValidStake
-          ? 'Escolha o valor da aposta'
-          : !selectedMarket
-          ? 'Escolha um mercado'
-          : `Comprar ${selectedMarket.label || selectedMarket.marketType}`}
+            ? 'Escolha o valor da aposta'
+            : !selectedMarket
+              ? 'Escolha um mercado'
+              : `Comprar ${selectedMarket.label || selectedMarket.marketType}`}
       </button>
 
-      {/* Positions section */}
       <div className="positions-section">
-        <span className="positions-title">Minhas posições</span>
+        <span className="positions-title">Minhas posicoes</span>
         <div className="positions-tabs">
           {POSITIONS_TABS.map((t) => (
             <button
@@ -217,7 +207,7 @@ export default function BettingPanel({
           ))}
         </div>
         <div className="positions-empty">
-          Faça login para visualizar suas posições.
+          Faca login para visualizar suas posicoes.
         </div>
       </div>
     </div>

@@ -514,6 +514,7 @@ body {
   min-height: 44px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
 }
 
 .betting-panel-title {
@@ -543,6 +544,29 @@ body {
 .panel-mkt-placeholder {
   font-size: 13px;
   color: var(--color-muted);
+}
+
+.betting-panel-timer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.betting-panel-timer-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.betting-panel-timer-value {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  color: #ff6767;
 }
 
 /* Bet type tabs */
@@ -815,7 +839,7 @@ body {
 .positions-section {
   padding: 16px 16px 20px;
   border-top: 1px solid var(--color-border);
-  margin-top: auto;
+  margin-top: 8px;
 }
 
 .positions-title {

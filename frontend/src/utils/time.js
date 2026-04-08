@@ -1,7 +1,27 @@
+function normalizeIsoUtc(value) {
+  if (typeof value !== 'string') return value
+
+  const trimmed = value.trim()
+  if (!trimmed) return trimmed
+
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/.test(trimmed)
+  return hasTimezone ? trimmed : `${trimmed}Z`
+}
+
+export function parseTimestampMs(value) {
+  if (!value) return Number.NaN
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : Number.NaN
+  }
+
+  return new Date(normalizeIsoUtc(value)).getTime()
+}
+
 export function getTimeLeftInSeconds(endsAt) {
   if (!endsAt) return 0
 
-  const end = new Date(endsAt).getTime()
+  const end = parseTimestampMs(endsAt)
   const now = Date.now()
   const diff = Math.floor((end - now) / 1000)
 
@@ -15,8 +35,8 @@ export function getRoundPhase(round) {
   if (status === 'settled' || status === 'void') return status
 
   const now = Date.now()
-  const end = round.endsAt ? new Date(round.endsAt).getTime() : 0
-  const close = round.betCloseAt ? new Date(round.betCloseAt).getTime() : 0
+  const end = round.endsAt ? parseTimestampMs(round.endsAt) : 0
+  const close = round.betCloseAt ? parseTimestampMs(round.betCloseAt) : 0
 
   if (end && now >= end) return 'settling'
   if (close && now >= close) return 'closing'
