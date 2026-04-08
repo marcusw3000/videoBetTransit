@@ -9,17 +9,17 @@ const MAX_RETRIES = 10
 const RETRY_DELAY_MS = 3000
 
 export async function startRoundConnection({ onCountUpdated, onRoundSettled }) {
-  // Se já existe uma conexão ativa, retorna ela
+  // Se já existe uma conexão ativa, retorna ela.
   if (connection && connection.state === signalR.HubConnectionState.Connected) {
     return connection
   }
 
-  // Se já existe uma tentativa de conexão em andamento, espera ela
+  // Se já existe uma tentativa de conexão em andamento, espera ela.
   if (connectionPromise) {
     return connectionPromise
   }
 
-  // Limpa conexão anterior morta (ex: Strict Mode cleanup)
+  // Limpa conexão anterior morta, por exemplo após cleanup do Strict Mode.
   if (connection) {
     connection.off('count_updated')
     connection.off('round_settled')
@@ -54,7 +54,7 @@ async function connectWithRetry(conn, attempt) {
   } catch (err) {
     if (attempt < MAX_RETRIES) {
       console.warn(`[SignalR] Tentativa ${attempt + 1}/${MAX_RETRIES} falhou. Retentando em ${RETRY_DELAY_MS / 1000}s...`)
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS))
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
       return connectWithRetry(conn, attempt + 1)
     }
     connectionPromise = null

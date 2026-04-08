@@ -15,7 +15,7 @@ function AlertItem({ alert }) {
         <span>{alert.badge}</span>
       </div>
       <p>{alert.message}</p>
-      <small>Ultimo sinal: {formatDateTime(alert.at)}</small>
+      <small>Último sinal: {formatDateTime(alert.at)}</small>
     </div>
   )
 }

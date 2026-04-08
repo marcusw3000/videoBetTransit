@@ -1,16 +1,22 @@
 import { useState } from 'react'
 import { createSession, startSession } from '../services/streamApi'
+import LiveBadge from './LiveBadge'
 
 const DEFAULT_LINE = { x1: 300, y1: 346, x2: 601, y2: 288 }
 
 function fmt(iso) {
   if (!iso) return ''
   try {
-    return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  } catch { return iso }
+    return new Date(iso).toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return iso
+  }
 }
-
-import LiveBadge from './LiveBadge'
 
 export default function CreateSessionPanel({ onSessionCreated, recentSessions = [] }) {
   const [form, setForm] = useState({
@@ -98,7 +104,10 @@ export default function CreateSessionPanel({ onSessionCreated, recentSessions = 
                   <button
                     className="load-btn"
                     style={{ padding: '0.35rem 0.75rem', fontSize: '0.72rem' }}
-                    onClick={() => { sessionStorage.setItem('sessionId', s.id); onSessionCreated(s.id) }}
+                    onClick={() => {
+                      sessionStorage.setItem('sessionId', s.id)
+                      onSessionCreated(s.id)
+                    }}
                   >
                     Retomar
                   </button>
@@ -171,7 +180,7 @@ export default function CreateSessionPanel({ onSessionCreated, recentSessions = 
         {error && <div className="form-error">{error}</div>}
 
         <button className="submit-btn" type="submit" disabled={loading}>
-          {loading ? 'Iniciando...' : '◆  Iniciar Sessão'}
+          {loading ? 'Iniciando...' : '◆ Iniciar Sessão'}
         </button>
       </form>
 

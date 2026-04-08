@@ -33,7 +33,7 @@ function getMarketBtnClass(marketType) {
   }
 }
 
-const POSITIONS_TABS = ['Posicoes', 'Em aberto', 'Encerrados']
+const POSITIONS_TABS = ['Posições', 'Em aberto', 'Encerrados']
 
 export default function BettingPanel({
   markets = [],
@@ -49,7 +49,7 @@ export default function BettingPanel({
   balance = 0,
   isSuspended = false,
 }) {
-  const [posTab, setPosTab] = useState('Posicoes')
+  const [posTab, setPosTab] = useState('Posições')
 
   const numericStake = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStake) && numericStake > 0
@@ -94,7 +94,7 @@ export default function BettingPanel({
 
       <div className="mkt-pick-grid">
         {markets.length === 0 && (
-          <span className="mkt-pick-empty">Mercados indisponiveis</span>
+          <span className="mkt-pick-empty">Mercados indisponíveis</span>
         )}
         {markets.map((m) => {
           const mId = m.marketId || m.id
@@ -193,7 +193,7 @@ export default function BettingPanel({
       </button>
 
       <div className="positions-section">
-        <span className="positions-title">Minhas posicoes</span>
+        <span className="positions-title">Minhas posições</span>
         <div className="positions-tabs">
           {POSITIONS_TABS.map((t) => (
             <button
@@ -207,7 +207,7 @@ export default function BettingPanel({
           ))}
         </div>
         <div className="positions-empty">
-          Faca login para visualizar suas posicoes.
+          Faça login para visualizar suas posições.
         </div>
       </div>
     </div>

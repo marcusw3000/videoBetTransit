@@ -2,12 +2,12 @@ export default function LiveBadge({ status }) {
   const s = (status || '').toLowerCase()
 
   const labels = {
-    running:   '● AO VIVO',
-    degraded:  '◐ DEGRADADO',
-    starting:  '○ INICIANDO',
-    ready:     '○ PRONTO',
-    failed:    '✕ FALHA',
-    stopped:   '■ PARADO',
+    running: '● AO VIVO',
+    degraded: '◐ DEGRADADO',
+    starting: '○ INICIANDO',
+    ready: '○ PRONTO',
+    failed: '✕ FALHA',
+    stopped: '■ PARADO',
   }
 
   const label = labels[s] || `○ ${status || '—'}`

@@ -130,11 +130,11 @@ export default function AdminDashboard() {
       const operationsFailed = failed.some(({ index }) => index === 1)
 
       if (backendFailed && operationsFailed) {
-        setError('Backend e worker estao indisponiveis no momento.')
+        setError('Backend e worker estão indisponíveis no momento.')
       } else if (backendFailed) {
-        setError('Backend indisponivel. O painel operacional segue com dados do worker.')
+        setError('Backend indisponível. O painel operacional segue com dados do worker.')
       } else {
-        setError('Worker indisponivel. Os controles administrativos seguem disponiveis.')
+        setError('Worker indisponível. Os controles administrativos seguem disponíveis.')
       }
     }
 
@@ -218,7 +218,7 @@ export default function AdminDashboard() {
       await loadSessionDetails(session.id)
     } catch (err) {
       console.error(err)
-      setError('Nao foi possivel parar a sessao selecionada.')
+      setError('Não foi possível parar a sessão selecionada.')
     } finally {
       setIsStopping(false)
     }
@@ -233,7 +233,7 @@ export default function AdminDashboard() {
       await loadRounds()
     } catch (err) {
       console.error(err)
-      setError('Nao foi possivel anular o round atual.')
+      setError('Não foi possível anular o round atual.')
     } finally {
       setIsVoiding(false)
     }
@@ -246,7 +246,7 @@ export default function AdminDashboard() {
           <span className="admin-kicker">Painel Administrativo</span>
           <h1>Controle operacional do Traffic Counter</h1>
           <p>
-            Administre sessoes, acompanhe saude do worker e monitore o round oficial da camera{' '}
+            Administre sessões, acompanhe a saúde do worker e monitore o round oficial da câmera{' '}
             <strong>{embedConfig.cameraId}</strong>.
           </p>
         </div>
@@ -273,7 +273,7 @@ export default function AdminDashboard() {
           <div className="card admin-video-card">
             <div className="admin-section-head">
               <div>
-                <span className="label">Transmissao</span>
+                <span className="label">Transmissão</span>
                 <h2>Monitor ao vivo</h2>
               </div>
               <div className="admin-inline-stats">
@@ -291,7 +291,7 @@ export default function AdminDashboard() {
                 webrtcSrc={WEBRTC_URL}
                 src={HLS_URL}
                 fallbackSrc={MJPEG_URL}
-                title={activeSession?.cameraName || embedConfig.cameraLabel || 'Camera ativa'}
+                title={activeSession?.cameraName || embedConfig.cameraLabel || 'Câmera ativa'}
                 countValue={round?.currentCount ?? operations?.totalCount ?? operations?.health?.totalCount ?? 0}
               />
             </div>
@@ -370,14 +370,14 @@ export default function AdminDashboard() {
           <div className="card admin-sessions-card">
             <div className="admin-section-head">
               <div>
-                <span className="label">Sessoes</span>
+                <span className="label">Sessões</span>
                 <h3>Pipelines cadastrados</h3>
               </div>
             </div>
 
             <div className="admin-session-list">
               {sessions.length === 0 && (
-                <div className="admin-empty">Nenhuma sessao encontrada.</div>
+                <div className="admin-empty">Nenhuma sessão encontrada.</div>
               )}
 
               {sessions.map((item) => (
@@ -391,7 +391,7 @@ export default function AdminDashboard() {
                   }}
                 >
                   <div>
-                    <strong>{item.cameraName || 'Camera sem nome'}</strong>
+                    <strong>{item.cameraName || 'Câmera sem nome'}</strong>
                     <span>{item.status}</span>
                   </div>
                   <span>{item.totalCount ?? 0}</span>

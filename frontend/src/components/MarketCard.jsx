@@ -80,7 +80,17 @@ export default function MarketCard({
       <p className="market-odds">Odds {formatOdds(market.odds, locale)}</p>
       {badge && <span className={badge.className}>{badge.label}</span>}
       <span className="market-cta">
-        {requiresStake ? 'Escolha o valor da aposta' : roundStatus === 'open' ? 'Adicionar ao betslip' : roundStatus === 'closing' ? 'Mercado fechado' : roundStatus === 'settling' ? 'Resultado em apuração' : roundStatus === 'settled' ? 'Resultado oficial' : 'Mercado indisponível'}
+        {requiresStake
+          ? 'Escolha o valor da aposta'
+          : roundStatus === 'open'
+            ? 'Adicionar ao betslip'
+            : roundStatus === 'closing'
+              ? 'Mercado fechado'
+              : roundStatus === 'settling'
+                ? 'Resultado em apuração'
+                : roundStatus === 'settled'
+                  ? 'Resultado oficial'
+                  : 'Mercado indisponível'}
       </span>
     </button>
   )

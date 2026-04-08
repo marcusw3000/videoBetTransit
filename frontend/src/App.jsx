@@ -317,107 +317,105 @@ function MarketPage() {
 
   return (
     <div className="page">
-    <div className="page-inner">
-      {/* ── Header ── */}
-      <header className="exchange-header">
-        <div className="header-left">
-          <div className="header-brand-icon" aria-label="brand icon">🚗</div>
-          <div className="header-title-block">
-            <span className="header-game-title">{gameTitle}</span>
-            <LiveBadge phase={roundPhase} workerOnline={workerOnline} />
-          </div>
-        </div>
-        <div className="header-right">
-          <button
-            type="button"
-            className="header-link-btn"
-            onClick={() => { window.location.href = '?view=admin' }}
-          >
-            Admin
-          </button>
-        </div>
-      </header>
-
-      {/* ── Last results bar ── */}
-      <div className="recents-bar">
-        <LastResults history={recentHistory} overMarket={overMarket} />
-      </div>
-
-      {error && <div className="error-banner">{error}</div>}
-      {toast && <div className="toast" key={toast.id}>{toast.message}</div>}
-
-      {/* ── Main body ── */}
-      <div className="exchange-body">
-        {/* Left: video + count */}
-        <div className="left-panel">
-          <div className="count-bar">
-            <div className="count-bar-left">
-              <span className="count-bar-label">{counterLabel}</span>
-              <span className="count-bar-value">
-                {displayCount ?? '--'}
-              </span>
-            </div>
-            <div className="count-bar-right">
-              <span className="count-bar-label">TEMPO DO ROUND</span>
-              <span className="count-bar-timer">
-                {padTime(timeLeftSeconds / 60)}:{padTime(timeLeftSeconds % 60)}
-              </span>
+      <div className="page-inner">
+        {/* Header */}
+        <header className="exchange-header">
+          <div className="header-left">
+            <div className="header-brand-icon" aria-label="brand icon">🚗</div>
+            <div className="header-title-block">
+              <span className="header-game-title">{gameTitle}</span>
+              <LiveBadge phase={roundPhase} workerOnline={workerOnline} />
             </div>
           </div>
+          <div className="header-right">
+            <button
+              type="button"
+              className="header-link-btn"
+              onClick={() => { window.location.href = '?view=admin' }}
+            >
+              Admin
+            </button>
+          </div>
+        </header>
 
-          <div className="video-wrapper">
-            <VideoPlayer
-              key={round?.roundId || 'live-player'}
-              webrtcSrc={WEBRTC_URL}
-              src={HLS_URL}
-              fallbackSrc={MJPEG_URL}
-              title={embedConfig.cameraLabel || 'Transmissão ao vivo'}
-              countValue={displayCount}
+        {/* Last results bar */}
+        <div className="recents-bar">
+          <LastResults history={recentHistory} overMarket={overMarket} />
+        </div>
+
+        {error && <div className="error-banner">{error}</div>}
+        {toast && <div className="toast" key={toast.id}>{toast.message}</div>}
+
+        {/* Main body */}
+        <div className="exchange-body">
+          <div className="left-panel">
+            <div className="count-bar">
+              <div className="count-bar-left">
+                <span className="count-bar-label">{counterLabel}</span>
+                <span className="count-bar-value">
+                  {displayCount ?? '--'}
+                </span>
+              </div>
+              <div className="count-bar-right">
+                <span className="count-bar-label">TEMPO DO ROUND</span>
+                <span className="count-bar-timer">
+                  {padTime(timeLeftSeconds / 60)}:{padTime(timeLeftSeconds % 60)}
+                </span>
+              </div>
+            </div>
+
+            <div className="video-wrapper">
+              <VideoPlayer
+                key={round?.roundId || 'live-player'}
+                webrtcSrc={WEBRTC_URL}
+                src={HLS_URL}
+                fallbackSrc={MJPEG_URL}
+                title={embedConfig.cameraLabel || 'Transmissão ao vivo'}
+                countValue={displayCount}
+              />
+            </div>
+          </div>
+
+          <div className="right-panel">
+            <BettingPanel
+              markets={markets}
+              roundPhase={roundPhase}
+              betCloseSeconds={betCloseSeconds}
+              selectedMarketId={selectedMarketId}
+              onMarketSelect={handleMarketSelect}
+              stakeAmount={stakeAmount}
+              onStakeChange={setStakeAmount}
+              stakeOptions={embedConfig.stakeOptions}
+              locale={embedConfig.locale}
+              currency={embedConfig.currency}
+              balance={0}
+              isSuspended={round?.isSuspended}
             />
           </div>
         </div>
 
-        {/* Right: betting panel */}
-        <div className="right-panel">
-          <BettingPanel
-            markets={markets}
-            roundPhase={roundPhase}
-            betCloseSeconds={betCloseSeconds}
-            selectedMarketId={selectedMarketId}
-            onMarketSelect={handleMarketSelect}
-            stakeAmount={stakeAmount}
-            onStakeChange={setStakeAmount}
-            stakeOptions={embedConfig.stakeOptions}
-            locale={embedConfig.locale}
-            currency={embedConfig.currency}
-            balance={0}
-            isSuspended={round?.isSuspended}
-          />
-        </div>
+        {/* Bottom market bar */}
+        {markets.length > 0 && (
+          <div className="bottom-market-bar">
+            {markets.map((m) => {
+              const mId = m.marketId || m.id
+              const isSelected = mId === selectedMarketId
+              const type = (m.marketType || '').toLowerCase()
+              return (
+                <button
+                  key={mId}
+                  type="button"
+                  className={`bottom-mkt-btn bottom-mkt-btn-${type}${isSelected ? ' bottom-mkt-btn-selected' : ''}`}
+                  onClick={() => handleMarketSelect(m)}
+                  disabled={roundPhase !== 'open' || round?.isSuspended}
+                >
+                  {m.label || m.marketType} ({formatOdds(m.odds, embedConfig.locale)}x)
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
-
-      {/* ── Bottom market bar ── */}
-      {markets.length > 0 && (
-        <div className="bottom-market-bar">
-          {markets.map((m) => {
-            const mId = m.marketId || m.id
-            const isSelected = mId === selectedMarketId
-            const type = (m.marketType || '').toLowerCase()
-            return (
-              <button
-                key={mId}
-                type="button"
-                className={`bottom-mkt-btn bottom-mkt-btn-${type}${isSelected ? ' bottom-mkt-btn-selected' : ''}`}
-                onClick={() => handleMarketSelect(m)}
-                disabled={roundPhase !== 'open' || round?.isSuspended}
-              >
-                {m.label || m.marketType} ({formatOdds(m.odds, embedConfig.locale)}x)
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
     </div>
   )
 }

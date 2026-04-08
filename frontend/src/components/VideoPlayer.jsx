@@ -197,7 +197,7 @@ export default function VideoPlayer({
     <div className="card video-card">
       <div className="video-header">
         <div>
-          <span className="label">Transmissao</span>
+          <span className="label">Transmissão</span>
           <h2>{title}</h2>
         </div>
 
@@ -209,7 +209,7 @@ export default function VideoPlayer({
 
       <div className="video-toolbar">
         <button type="button" className="secondary-button" onClick={handleReset}>
-          Resetar Video
+          Resetar vídeo
         </button>
       </div>
 
@@ -226,7 +226,7 @@ export default function VideoPlayer({
         {(webrtcSrc || src || fallbackSrc) && hasError && (
           <div className="video-overlay-message">
             <div className="video-overlay-stack">
-              <span>Falha ao carregar a transmissao.</span>
+              <span>Falha ao carregar a transmissão.</span>
               <button type="button" className="secondary-button" onClick={handleReset}>
                 Tentar Novamente
               </button>

@@ -1,5 +1,5 @@
 function formatStatus(value) {
-  if (!value) return 'Indisponivel'
+  if (!value) return 'Indisponível'
   return value
 }
 
@@ -54,8 +54,8 @@ export default function OperationsCard({
     <div className="card operations-card">
       <div className="operations-header">
         <div>
-          <span className="label">Operacao</span>
-          <h3>Painel de Saude</h3>
+          <span className="label">Operação</span>
+          <h3>Painel de Saúde</h3>
         </div>
         <span className="operations-updated">
           Atualizado em {formatDateTime(operations?.updatedAt)}
@@ -64,7 +64,7 @@ export default function OperationsCard({
 
       <div className="operations-pills">
         <StatusPill
-          label="Camera"
+          label="Câmera"
           status={cameraOnline ? 'Online' : 'Sem stream'}
           tone={cameraOnline ? 'ok' : 'warn'}
         />
@@ -81,9 +81,9 @@ export default function OperationsCard({
       </div>
 
       <div className="operations-grid">
-        <Metric label="FPS medio" value={formatNumber(health?.fpsAverage)} />
-        <Metric label="FPS instantaneo" value={formatNumber(health?.fpsInstant)} />
-        <Metric label="Latencia estimada" value={formatNumber(estimatedLatencyMs, ' ms')} />
+        <Metric label="FPS médio" value={formatNumber(health?.fpsAverage)} />
+        <Metric label="FPS instantâneo" value={formatNumber(health?.fpsInstant)} />
+        <Metric label="Latência estimada" value={formatNumber(estimatedLatencyMs, ' ms')} />
         <Metric label="Clientes MJPEG" value={health?.mjpegClients ?? 0} />
         <Metric label="Frames processados" value={health?.framesProcessed ?? 0} />
         <Metric label="Total contado" value={health?.totalCount ?? 0} />
@@ -91,13 +91,13 @@ export default function OperationsCard({
 
       <div className="operations-footer">
         <div className="ops-event">
-          <span className="ops-footer-label">Ultimo evento recebido</span>
+          <span className="ops-footer-label">Último evento recebido</span>
           <strong>{lastEvent?.label ?? 'Aguardando eventos em tempo real'}</strong>
           <span>{formatDateTime(lastEvent?.at)}</span>
         </div>
 
         <div className="ops-event">
-          <span className="ops-footer-label">Ultima atividade do backend</span>
+          <span className="ops-footer-label">Última atividade do backend</span>
           <strong>{backend?.lastError ? 'Com falha recente' : 'Sem falhas recentes'}</strong>
           <span>{formatDateTime(backend?.lastSuccessAt || backend?.lastErrorAt)}</span>
         </div>
