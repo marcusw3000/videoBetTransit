@@ -4,6 +4,16 @@ import LiveBadge from './LiveBadge'
 
 const DEFAULT_LINE = { x1: 300, y1: 346, x2: 601, y2: 288 }
 
+function normalizeCameraId(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+  return normalized || 'cam_001'
+}
+
 function fmt(iso) {
   if (!iso) return ''
   try {
@@ -41,10 +51,11 @@ export default function CreateSessionPanel({ onSessionCreated, recentSessions = 
     setLoading(true)
     try {
       const payload = {
-        cameraName: form.cameraName,
+        name: form.cameraName,
+        cameraId: normalizeCameraId(form.cameraName),
         sourceUrl: form.sourceUrl,
-        protocol: form.protocol,
-        countDirection: form.direction,
+        sourceProtocol: form.protocol,
+        direction: form.direction,
         countLine: {
           x1: Number(form.x1),
           y1: Number(form.y1),

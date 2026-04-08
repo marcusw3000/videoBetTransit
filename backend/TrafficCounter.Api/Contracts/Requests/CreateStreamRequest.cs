@@ -3,6 +3,7 @@ namespace TrafficCounter.Api.Contracts.Requests;
 public class CreateStreamRequest
 {
     public string Name { get; set; } = string.Empty;
+    public string CameraId { get; set; } = string.Empty;
     public string SourceUrl { get; set; } = string.Empty;
     public string SourceProtocol { get; set; } = "rtsp";
     public CountLineRequest CountLine { get; set; } = new();

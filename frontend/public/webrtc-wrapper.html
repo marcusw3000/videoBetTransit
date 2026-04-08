@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Wrapper</title>
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+
+      iframe {
+        border: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe id="player" title="WebRTC Player" allow="autoplay; fullscreen"></iframe>
+    <script>
+      (function () {
+        const WRAPPER_SOURCE = 'videobettransit-webrtc-wrapper';
+        const params = new URLSearchParams(window.location.search);
+        const src = params.get('src') || '';
+        const player = document.getElementById('player');
+        let ready = false;
+
+        function emit(type, extra) {
+          window.parent.postMessage({
+            source: WRAPPER_SOURCE,
+            type,
+            ts: Date.now(),
+            ...extra,
+          }, '*');
+        }
+
+        if (!src) {
+          emit('error', { reason: 'missing-src' });
+          return;
+        }
+
+        player.addEventListener('load', function () {
+          ready = true;
+          emit('first-frame');
+          emit('playing');
+        });
+
+        player.addEventListener('error', function () {
+          emit('error', { reason: 'iframe-error' });
+        });
+
+        setInterval(function () {
+          if (ready) emit('playing');
+        }, 5000);
+
+        player.src = src;
+      })();
+    </script>
+  </body>
+</html>

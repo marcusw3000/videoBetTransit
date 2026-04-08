@@ -37,6 +37,9 @@ public class StreamSessionService
         if (!Enum.TryParse<SourceProtocol>(request.SourceProtocol, ignoreCase: true, out var protocol))
             throw new ArgumentException($"Invalid protocol '{request.SourceProtocol}'.");
 
+        var cameraId = StreamPathNaming.NormalizeCameraId(
+            string.IsNullOrWhiteSpace(request.CameraId) ? request.Name : request.CameraId);
+
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var source = new CameraSource
@@ -58,6 +61,8 @@ public class StreamSessionService
             CountLineX2 = request.CountLine.X2,
             CountLineY2 = request.CountLine.Y2,
             CountDirection = request.Direction,
+            RawStreamPath = StreamPathNaming.BuildRawPath(cameraId),
+            ProcessedStreamPath = StreamPathNaming.BuildProcessedPath(cameraId),
             TotalCount = 0,
             CreatedAt = DateTime.UtcNow,
         };
@@ -197,6 +202,7 @@ public class StreamSessionService
         Id = s.Id,
         Status = s.Status.ToString(),
         CameraName = s.CameraSource.Name,
+        CameraId = StreamPathNaming.ExtractCameraId(s),
         SourceUrl = s.CameraSource.SourceUrl,
         SourceProtocol = s.CameraSource.Protocol.ToString(),
         TotalCount = s.TotalCount,

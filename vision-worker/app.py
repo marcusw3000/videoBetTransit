@@ -2,11 +2,14 @@ import json
 import logging
 import os
 import queue
+import requests
+import subprocess
 import threading
 import time
 import atexit
 import tkinter as tk
 from tkinter import ttk
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -33,11 +36,19 @@ class RuntimeStats:
     def __init__(self):
         self._lock = threading.Lock()
         self._started_at = time.time()
+        self._captured_frames = 0
         self._frames_processed = 0
+        self._published_frames = 0
         self._last_capture_at = None
+        self._last_capture_frame_at = None
         self._last_frame_at = None
+        self._last_publish_at = None
+        self._capture_fps_instant = 0.0
+        self._capture_fps_average = 0.0
         self._fps_instant = 0.0
         self._fps_average = 0.0
+        self._publish_fps_instant = 0.0
+        self._publish_fps_average = 0.0
         self._last_inference_ms = 0.0
         self._avg_inference_ms = 0.0
         self._last_jpeg_encode_ms = 0.0
@@ -49,9 +60,21 @@ class RuntimeStats:
         self._stream_failures = 0
         self._last_stream_error_at = None
         self._total_count = 0
+        self._publisher_healthy = False
+        self._publisher_restart_count = 0
+        self._active_transport = "mjpeg"
 
     def record_capture(self, captured_at: float):
         with self._lock:
+            self._captured_frames += 1
+            if self._last_capture_frame_at is not None:
+                elapsed = captured_at - self._last_capture_frame_at
+                if elapsed > 0:
+                    self._capture_fps_instant = 1.0 / elapsed
+            total_elapsed = captured_at - self._started_at
+            if total_elapsed > 0:
+                self._capture_fps_average = self._captured_frames / total_elapsed
+            self._last_capture_frame_at = captured_at
             self._last_capture_at = captured_at
 
     def record_processed_frame(self, total_count: int):
@@ -67,6 +90,19 @@ class RuntimeStats:
             if total_elapsed > 0:
                 self._fps_average = self._frames_processed / total_elapsed
             self._last_frame_at = now_ts
+
+    def record_published_frame(self, published_at: float | None = None):
+        now_ts = published_at or time.time()
+        with self._lock:
+            self._published_frames += 1
+            if self._last_publish_at is not None:
+                elapsed = now_ts - self._last_publish_at
+                if elapsed > 0:
+                    self._publish_fps_instant = 1.0 / elapsed
+            total_elapsed = now_ts - self._started_at
+            if total_elapsed > 0:
+                self._publish_fps_average = self._published_frames / total_elapsed
+            self._last_publish_at = now_ts
 
     def record_inference_ms(self, duration_ms: float):
         with self._lock:
@@ -101,13 +137,43 @@ class RuntimeStats:
         with self._lock:
             self._mjpeg_clients = max(0, self._mjpeg_clients - 1)
 
-    def snapshot(self, backend_health: dict | None = None) -> dict:
+    def set_publisher_status(
+        self,
+        healthy: bool,
+        *,
+        restart_count: int | None = None,
+        active_transport: str | None = None,
+    ):
         with self._lock:
+            self._publisher_healthy = healthy
+            if restart_count is not None:
+                self._publisher_restart_count = max(0, int(restart_count))
+            if active_transport:
+                self._active_transport = str(active_transport)
+
+    def snapshot(self, backend_health: dict | None = None) -> dict:
+        now_ts = time.time()
+        with self._lock:
+            raw_frame_age_ms = (
+                round((now_ts - self._last_capture_at) * 1000, 2)
+                if self._last_capture_at is not None
+                else None
+            )
+            annotated_frame_age_ms = (
+                round((now_ts - self._last_frame_at) * 1000, 2)
+                if self._last_frame_at is not None
+                else None
+            )
             return {
                 "ok": self._stream_connected,
+                "captureFps": round(self._capture_fps_average, 2),
+                "captureFpsInstant": round(self._capture_fps_instant, 2),
+                "inferenceFps": round(self._fps_average, 2),
                 "framesProcessed": self._frames_processed,
                 "fpsInstant": round(self._fps_instant, 2),
                 "fpsAverage": round(self._fps_average, 2),
+                "publishFps": round(self._publish_fps_average, 2),
+                "publishFpsInstant": round(self._publish_fps_instant, 2),
                 "lastInferenceMs": round(self._last_inference_ms, 2),
                 "avgInferenceMs": round(self._avg_inference_ms, 2),
                 "lastJpegEncodeMs": round(self._last_jpeg_encode_ms, 2),
@@ -119,8 +185,14 @@ class RuntimeStats:
                 "streamFailures": self._stream_failures,
                 "lastCaptureAt": self._last_capture_at,
                 "lastFrameAt": self._last_frame_at,
+                "lastPublishAt": self._last_publish_at,
                 "lastStreamErrorAt": self._last_stream_error_at,
                 "totalCount": self._total_count,
+                "rawFrameAgeMs": raw_frame_age_ms,
+                "annotatedFrameAgeMs": annotated_frame_age_ms,
+                "publisherHealthy": self._publisher_healthy,
+                "publisherRestartCount": self._publisher_restart_count,
+                "activeTransport": "mjpeg" if self._mjpeg_clients > 0 else self._active_transport,
                 "backend": backend_health or {},
             }
 
@@ -169,8 +241,377 @@ class AnnotatedFrameStreamer:
         with self._lock:
             return self._latest_jpeg
 
+    def clear(self):
+        with self._lock:
+            self._latest_jpeg = None
+
 
 streamer = AnnotatedFrameStreamer(jpeg_quality=80, stats=runtime_stats)
+
+
+class LatestFrameSlot:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._frame = None
+        self._timestamp = None
+
+    def update(self, frame, timestamp: float | None = None):
+        with self._lock:
+            self._seq += 1
+            self._frame = frame
+            self._timestamp = timestamp or time.time()
+            return self._seq
+
+    def wait_for_new(self, last_seq: int, timeout: float = 0.25):
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            with self._lock:
+                if self._seq > last_seq and self._frame is not None:
+                    return self._seq, self._frame, self._timestamp
+            if time.monotonic() >= deadline:
+                return last_seq, None, None
+            time.sleep(0.005)
+
+    def get_latest(self):
+        with self._lock:
+            return self._seq, self._frame, self._timestamp
+
+    def clear(self):
+        with self._lock:
+            self._seq = 0
+            self._frame = None
+            self._timestamp = None
+
+
+@dataclass
+class PipelineStartRequest:
+    session_id: str = ""
+    camera_id: str = ""
+    source_url: str = ""
+    raw_stream_path: str = ""
+    processed_stream_path: str = ""
+    direction: str = "any"
+    count_line: dict | None = None
+
+
+class RtspFramePublisher:
+    def __init__(
+        self,
+        *,
+        rtsp_url: str,
+        fps: float,
+        ffmpeg_bin: str = "ffmpeg",
+        stats: RuntimeStats | None = None,
+    ):
+        self.rtsp_url = rtsp_url
+        self.fps = max(1.0, float(fps))
+        self.ffmpeg_bin = ffmpeg_bin or "ffmpeg"
+        self.stats = stats
+        self._process: subprocess.Popen | None = None
+        self._shape = None
+        self._restart_count = 0
+        self._lock = threading.Lock()
+
+    @property
+    def restart_count(self) -> int:
+        with self._lock:
+            return self._restart_count
+
+    def _build_command(self, frame_shape) -> list[str]:
+        height, width = frame_shape[:2]
+        gop = max(1, int(round(self.fps)))
+        return [
+            self.ffmpeg_bin,
+            "-loglevel", "warning",
+            "-fflags", "nobuffer",
+            "-f", "rawvideo",
+            "-pix_fmt", "bgr24",
+            "-s", f"{width}x{height}",
+            "-r", f"{self.fps:.02f}",
+            "-i", "-",
+            "-an",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-pix_fmt", "yuv420p",
+            "-bf", "0",
+            "-g", str(gop),
+            "-keyint_min", str(gop),
+            "-rtsp_transport", "tcp",
+            "-f", "rtsp",
+            self.rtsp_url,
+        ]
+
+    def _set_stats(self, healthy: bool):
+        if self.stats is not None:
+            self.stats.set_publisher_status(
+                healthy,
+                restart_count=self.restart_count,
+                active_transport="webrtc" if healthy else "mjpeg",
+            )
+
+    def _start_process(self, frame_shape):
+        self.stop()
+        command = self._build_command(frame_shape)
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        logger.info("Iniciando publisher RTSP: %s", self.rtsp_url)
+        try:
+            self._process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creation_flags,
+            )
+            self._shape = tuple(frame_shape[:2])
+            self._set_stats(True)
+            return True
+        except Exception as exc:
+            logger.warning("Falha ao iniciar publisher RTSP: %s", exc)
+            self._process = None
+            self._shape = None
+            self._set_stats(False)
+            return False
+
+    def publish(self, frame):
+        if frame is None:
+            return False
+
+        frame_shape = tuple(frame.shape[:2])
+        process = self._process
+        if process is None or self._shape != frame_shape or process.poll() is not None:
+            with self._lock:
+                self._restart_count += 1
+            if not self._start_process(frame.shape):
+                return False
+            process = self._process
+
+        try:
+            assert process is not None and process.stdin is not None
+            process.stdin.write(frame.tobytes())
+            process.stdin.flush()
+            if self.stats is not None:
+                self.stats.record_published_frame()
+            self._set_stats(True)
+            return True
+        except Exception as exc:
+            logger.warning("Falha ao publicar frame no RTSP: %s", exc)
+            self._set_stats(False)
+            self.stop()
+            return False
+
+    def stop(self):
+        process = self._process
+        self._process = None
+        self._shape = None
+        if process is None:
+            self._set_stats(False)
+            return
+
+        try:
+            if process.stdin is not None:
+                process.stdin.close()
+        except Exception:
+            pass
+
+        try:
+            process.terminate()
+            process.wait(timeout=3)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+        finally:
+            self._set_stats(False)
+
+
+class PipelineRuntime:
+    def __init__(self, stats: RuntimeStats, mjpeg_streamer: AnnotatedFrameStreamer):
+        self.stats = stats
+        self.mjpeg_streamer = mjpeg_streamer
+        self.raw_frames = LatestFrameSlot()
+        self.annotated_frames = LatestFrameSlot()
+        self._lock = threading.Lock()
+        self._capture_thread = None
+        self._publish_thread = None
+        self._capture_stop = None
+        self._publish_stop = None
+        self._stream = None
+        self._publisher = None
+        self._config = None
+        self._running = False
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._running
+
+    def get_config(self) -> dict | None:
+        with self._lock:
+            return dict(self._config or {}) if self._config else None
+
+    def start(self, config: dict):
+        self.stop()
+
+        capture_source_url = str(config.get("capture_source_url") or config.get("stream_url") or "").strip()
+        if not capture_source_url:
+            raise ValueError("Nenhuma URL de captura configurada para a pipeline.")
+
+        stream = StreamCapture(
+            capture_source_url,
+            stats=self.stats,
+            ffmpeg_options=config.get("ffmpeg_capture_options"),
+            buffer_size=int(config.get("stream_buffer_size", 1)),
+            open_timeout_ms=int(config.get("stream_open_timeout_ms", 5000)),
+            read_timeout_ms=int(config.get("stream_read_timeout_ms", 5000)),
+            target_fps=float(config.get("stream_target_fps", 0)),
+        )
+
+        publisher = RtspFramePublisher(
+            rtsp_url=str(config.get("publisher_rtsp_url") or "").strip(),
+            fps=float(config.get("publisher_fps", 10)),
+            ffmpeg_bin=str(config.get("publisher_ffmpeg_bin") or "ffmpeg"),
+            stats=self.stats,
+        )
+
+        capture_stop = threading.Event()
+        publish_stop = threading.Event()
+
+        capture_thread = threading.Thread(
+            target=self._capture_loop,
+            args=(stream, capture_stop),
+            daemon=True,
+            name="capture-loop",
+        )
+        publish_thread = threading.Thread(
+            target=self._publish_loop,
+            args=(publisher, publish_stop, float(config.get("publisher_fps", 10))),
+            daemon=True,
+            name="publish-loop",
+        )
+
+        with self._lock:
+            self._stream = stream
+            self._publisher = publisher
+            self._capture_stop = capture_stop
+            self._publish_stop = publish_stop
+            self._capture_thread = capture_thread
+            self._publish_thread = publish_thread
+            self._config = dict(config)
+            self._running = True
+
+        self.raw_frames.clear()
+        self.annotated_frames.clear()
+        capture_thread.start()
+        publish_thread.start()
+
+    def stop(self):
+        with self._lock:
+            stream = self._stream
+            publisher = self._publisher
+            capture_stop = self._capture_stop
+            publish_stop = self._publish_stop
+            capture_thread = self._capture_thread
+            publish_thread = self._publish_thread
+            self._stream = None
+            self._publisher = None
+            self._capture_stop = None
+            self._publish_stop = None
+            self._capture_thread = None
+            self._publish_thread = None
+            self._config = None
+            self._running = False
+
+        if capture_stop is not None:
+            capture_stop.set()
+        if publish_stop is not None:
+            publish_stop.set()
+
+        if capture_thread is not None and capture_thread.is_alive():
+            capture_thread.join(timeout=2)
+        if publish_thread is not None and publish_thread.is_alive():
+            publish_thread.join(timeout=2)
+
+        if stream is not None:
+            stream.release()
+        if publisher is not None:
+            publisher.stop()
+
+        self.raw_frames.clear()
+        self.annotated_frames.clear()
+
+    def request_capture_reset(self):
+        with self._lock:
+            stream = self._stream
+        if stream is not None:
+            stream.reset()
+
+    def wait_for_raw_frame(self, last_seq: int, timeout: float = 0.25):
+        return self.raw_frames.wait_for_new(last_seq, timeout)
+
+    def push_annotated_frame(self, frame):
+        self.annotated_frames.update(frame, time.time())
+        self.mjpeg_streamer.update(frame)
+
+    def _capture_loop(self, stream: "StreamCapture", stop_event: threading.Event):
+        while not stop_event.is_set():
+            ret, frame = stream.read()
+            if not ret:
+                time.sleep(0.005)
+                continue
+
+            captured_at = time.time()
+            self.stats.record_capture(captured_at)
+            self.raw_frames.update(frame, captured_at)
+
+    def _publish_loop(self, publisher: RtspFramePublisher, stop_event: threading.Event, fps: float):
+        interval = 1.0 / max(1.0, fps)
+        last_seq = 0
+        last_frame = None
+
+        while not stop_event.is_set():
+            seq, frame, _ = self.annotated_frames.wait_for_new(last_seq, timeout=interval)
+            if frame is not None:
+                last_seq = seq
+                last_frame = frame
+
+            if last_frame is None:
+                time.sleep(0.01)
+                continue
+
+            publisher.publish(last_frame)
+            time.sleep(interval)
+
+
+pipeline_runtime = PipelineRuntime(runtime_stats, streamer)
+pipeline_request_lock = threading.Lock()
+pending_pipeline_start: PipelineStartRequest | None = None
+pending_pipeline_stop = False
+
+
+def queue_pipeline_start(request_data: PipelineStartRequest):
+    global pending_pipeline_start, pending_pipeline_stop
+    with pipeline_request_lock:
+        pending_pipeline_start = request_data
+        pending_pipeline_stop = False
+
+
+def queue_pipeline_stop():
+    global pending_pipeline_start, pending_pipeline_stop
+    with pipeline_request_lock:
+        pending_pipeline_stop = True
+        pending_pipeline_start = None
+
+
+def consume_pipeline_commands():
+    global pending_pipeline_start, pending_pipeline_stop
+    with pipeline_request_lock:
+        next_start = pending_pipeline_start
+        next_stop = pending_pipeline_stop
+        pending_pipeline_start = None
+        pending_pipeline_stop = False
+    return next_start, next_stop
 
 def is_mjpeg_request_authorized() -> bool:
     if not mjpeg_token_ref:
@@ -188,7 +629,7 @@ def create_mjpeg_app() -> Flask:
     def add_cors_headers(response):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key"
-        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         return response
 
     @app.get("/health")
@@ -196,7 +637,49 @@ def create_mjpeg_app() -> Flask:
         backend_health = (
             backend_client_ref.get_health_snapshot() if backend_client_ref else {}
         )
-        return jsonify(runtime_stats.snapshot(backend_health))
+        payload = runtime_stats.snapshot(backend_health)
+        active_config = pipeline_runtime.get_config() or {}
+        payload["pipelineRunning"] = pipeline_runtime.is_running()
+        payload["cameraId"] = active_config.get("camera_id", "")
+        payload["sourceUrl"] = active_config.get("stream_url", "")
+        payload["captureSourceUrl"] = active_config.get("capture_source_url", "")
+        payload["processedStreamPath"] = active_config.get("processed_stream_path", "")
+        return jsonify(payload)
+
+    @app.post("/pipeline/start")
+    def pipeline_start():
+        data = request.get_json(silent=True) or {}
+        source_url = str(data.get("sourceUrl") or "").strip()
+        camera_id = str(data.get("cameraId") or "").strip()
+        processed_stream_path = str(data.get("processedStreamPath") or "").strip()
+
+        if not source_url:
+            return jsonify({"message": "sourceUrl is required."}), 400
+        if not camera_id:
+            return jsonify({"message": "cameraId is required."}), 400
+        if not processed_stream_path:
+            processed_stream_path = f"processed/{camera_id}"
+
+        queue_pipeline_start(PipelineStartRequest(
+            session_id=str(data.get("sessionId") or "").strip(),
+            camera_id=camera_id,
+            source_url=source_url,
+            raw_stream_path=str(data.get("rawStreamPath") or "").strip(),
+            processed_stream_path=processed_stream_path,
+            direction=str(data.get("direction") or "any").strip(),
+            count_line=data.get("countLine") if isinstance(data.get("countLine"), dict) else None,
+        ))
+
+        return jsonify({
+            "ok": True,
+            "cameraId": camera_id,
+            "processedStreamPath": processed_stream_path,
+        })
+
+    @app.post("/pipeline/stop")
+    def pipeline_stop():
+        queue_pipeline_stop()
+        return jsonify({"ok": True})
 
     @app.get("/video_feed")
     def video_feed():
@@ -327,6 +810,8 @@ class AsyncSnapshotWriter:
 
 def cleanup_runtime():
     global active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref, active_snapshot_writer_ref
+
+    pipeline_runtime.stop()
 
     if active_stream_ref is not None:
         active_stream_ref.release()
@@ -525,6 +1010,9 @@ def load_config(path: str = "config.json") -> dict:
         "backend_url": os.getenv("BACKEND_URL"),
         "api_key": os.getenv("BACKEND_API_KEY") or os.getenv("API_KEY"),
         "mjpeg_token": os.getenv("MJPEG_TOKEN"),
+        "mediamtx_api_url": os.getenv("MEDIAMTX_API_URL"),
+        "mediamtx_rtsp_url": os.getenv("MEDIAMTX_RTSP_URL"),
+        "publisher_ffmpeg_bin": os.getenv("FFMPEG_BIN"),
         "supabase_url": os.getenv("SUPABASE_URL"),
         "supabase_service_key": os.getenv("SUPABASE_SERVICE_KEY"),
         "supabase_stream_profiles_table": os.getenv("SUPABASE_STREAM_PROFILES_TABLE"),
@@ -744,6 +1232,84 @@ def normalize_ffmpeg_capture_options(options) -> str:
         return "|".join(parts)
 
     return ""
+
+
+def normalize_media_path_name(value: str, fallback: str = "cam_001") -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        raw = fallback
+    normalized = []
+    for char in raw:
+        if char.isalnum() or char in {"-", "_"}:
+            normalized.append(char)
+        else:
+            normalized.append("_")
+    path_name = "".join(normalized).strip("_")
+    return path_name or fallback
+
+
+def ensure_mediamtx_source_path(cfg: dict, path_name: str, source_url: str) -> bool:
+    api_base = str(cfg.get("mediamtx_api_url") or "").strip().rstrip("/")
+    if not api_base or not path_name or not source_url:
+        return False
+
+    try:
+        exists_response = requests.get(
+            f"{api_base}/v3/paths/get/{path_name}",
+            timeout=3,
+        )
+        if exists_response.ok:
+            return True
+    except Exception:
+        pass
+
+    try:
+        response = requests.post(
+            f"{api_base}/v3/config/paths/add/{path_name}",
+            json={"source": source_url},
+            timeout=5,
+        )
+        if response.ok:
+            logger.info("Path MediaMTX garantido: %s -> %s", path_name, source_url)
+            return True
+
+        logger.warning(
+            "Falha ao garantir path MediaMTX %s (HTTP %d): %s",
+            path_name,
+            response.status_code,
+            response.text[:200],
+        )
+        return False
+    except Exception as exc:
+        logger.warning("Falha ao configurar source path no MediaMTX: %s", exc)
+        return False
+
+
+def build_pipeline_config(cfg: dict, *, source_url: str | None = None, camera_id: str | None = None,
+    raw_stream_path: str | None = None, processed_stream_path: str | None = None) -> dict:
+    pipeline_cfg = dict(cfg)
+    normalized_camera_id = normalize_media_path_name(
+        camera_id or cfg.get("camera_id", "") or "cam_001"
+    )
+    original_source_url = str(source_url or cfg.get("stream_url") or "").strip()
+    raw_path = str(raw_stream_path or f"raw/{normalized_camera_id}").strip()
+    processed_path = str(processed_stream_path or f"processed/{normalized_camera_id}").strip()
+    rtsp_base = str(cfg.get("mediamtx_rtsp_url") or "rtsp://localhost:8554").strip().rstrip("/")
+
+    capture_source_url = original_source_url
+    if original_source_url and ensure_mediamtx_source_path(cfg, raw_path, original_source_url):
+        capture_source_url = f"{rtsp_base}/{raw_path}"
+
+    pipeline_cfg["camera_id"] = normalized_camera_id
+    pipeline_cfg["raw_stream_path"] = raw_path
+    pipeline_cfg["processed_stream_path"] = processed_path
+    pipeline_cfg["stream_url"] = original_source_url
+    pipeline_cfg["capture_source_url"] = capture_source_url
+    pipeline_cfg["publisher_rtsp_url"] = f"{rtsp_base}/{processed_path}"
+    pipeline_cfg.setdefault("publisher_fps", 10)
+    pipeline_cfg.setdefault("publisher_ffmpeg_bin", "ffmpeg")
+    pipeline_cfg.setdefault("stream_auto_resync_interval_seconds", 0)
+    return pipeline_cfg
 
 
 def resize_frame_max_width(frame, max_width: int):
@@ -1421,8 +1987,6 @@ class StreamCapture:
         self.read_timeout_ms = max(0, int(read_timeout_ms))
         self.target_fps = max(0.0, float(target_fps))
         self._effective_fps = 0.0
-        self._frame_interval_s = 0.0
-        self._next_frame_due = 0.0
         self._connect()
 
     def _connect(self):
@@ -1466,8 +2030,6 @@ class StreamCapture:
         else:
             self._effective_fps = 15.0
 
-        self._frame_interval_s = 1.0 / self._effective_fps
-        self._next_frame_due = time.perf_counter()
         logger.info(
             "Pacing do stream: fps configurado=%.2f | fps detectado=%.2f | fps efetivo=%.2f",
             self.target_fps,
@@ -1479,13 +2041,6 @@ class StreamCapture:
             logger.warning("Falha ao abrir stream na conexão inicial.")
 
     def read(self):
-        if self._frame_interval_s > 0:
-            now_ts = time.perf_counter()
-            if self._next_frame_due > now_ts:
-                time.sleep(self._next_frame_due - now_ts)
-                now_ts = time.perf_counter()
-            self._next_frame_due = max(self._next_frame_due + self._frame_interval_s, now_ts)
-
         ret, frame = self.cap.read()
         if not ret:
             self._fail_count += 1
@@ -1563,21 +2118,14 @@ def main():
         jpeg_quality=int(cfg.get("snapshot_jpeg_quality", 85)),
     )
     active_snapshot_writer_ref = snapshot_writer
-    stream = StreamCapture(
-        cfg["stream_url"],
-        stats=runtime_stats,
-        ffmpeg_options=cfg.get("ffmpeg_capture_options"),
-        buffer_size=int(cfg.get("stream_buffer_size", 1)),
-        open_timeout_ms=int(cfg.get("stream_open_timeout_ms", 5000)),
-        read_timeout_ms=int(cfg.get("stream_read_timeout_ms", 5000)),
-        target_fps=float(cfg.get("stream_target_fps", 15)),
-    )
-    active_stream_ref = stream
     mjpeg_server = run_mjpeg_server(
         host=cfg.get("mjpeg_host", "0.0.0.0"),
         port=int(cfg.get("mjpeg_port", 8090)),
     )
     active_mjpeg_server_ref = mjpeg_server
+    current_pipeline_cfg = build_pipeline_config(cfg)
+    pipeline_runtime.start(current_pipeline_cfg)
+    active_stream_ref = None
 
     class_names = build_class_names(cfg["allowed_classes"])
 
@@ -1588,6 +2136,7 @@ def main():
 
     total = 0
     frame_count = 0
+    last_raw_seq = 0
     last_live_send = 0.0
     last_config_poll = 0.0
     last_round_sync = 0.0
@@ -1605,7 +2154,7 @@ def main():
     browser_stream_max_width = int(cfg.get("browser_stream_max_width", 960))
     operator_preview_max_width = int(cfg.get("operator_preview_max_width", 1280))
     operator_preview_fps_limit = float(cfg.get("operator_preview_fps_limit", 12))
-    auto_resync_interval_seconds = float(cfg.get("stream_auto_resync_interval_seconds", 0))
+    auto_resync_interval_seconds = float(current_pipeline_cfg.get("stream_auto_resync_interval_seconds", 0))
     editor = None
     control_panel = None
     reset_stream_requested = False
@@ -1679,6 +2228,7 @@ def main():
         nonlocal reset_stream_requested
 
         reset_stream_requested = True
+        pipeline_runtime.request_capture_reset()
         if editor is not None:
             editor.message = "Manual stream reset requested"
 
@@ -1798,6 +2348,55 @@ def main():
     fps_start_ts = time.time()
 
     while True:
+        next_pipeline_start, should_stop_pipeline = consume_pipeline_commands()
+
+        if should_stop_pipeline:
+            pipeline_runtime.stop()
+            streamer.clear()
+            last_raw_seq = 0
+            if editor is not None:
+                editor.message = "Pipeline parada pelo orquestrador"
+
+        if next_pipeline_start is not None:
+            if next_pipeline_start.source_url:
+                cfg["stream_url"] = next_pipeline_start.source_url
+            if next_pipeline_start.camera_id:
+                cfg["camera_id"] = next_pipeline_start.camera_id
+            if next_pipeline_start.direction:
+                cfg["count_direction"] = next_pipeline_start.direction
+                count_direction = next_pipeline_start.direction
+            if isinstance(next_pipeline_start.count_line, dict):
+                line = {
+                    "x1": int(next_pipeline_start.count_line.get("x1", line["x1"])),
+                    "y1": int(next_pipeline_start.count_line.get("y1", line["y1"])),
+                    "x2": int(next_pipeline_start.count_line.get("x2", line["x2"])),
+                    "y2": int(next_pipeline_start.count_line.get("y2", line["y2"])),
+                }
+                cfg["line"] = dict(line)
+                if editor is not None:
+                    editor.line = dict(line)
+
+            current_pipeline_cfg = build_pipeline_config(
+                cfg,
+                source_url=next_pipeline_start.source_url or cfg.get("stream_url"),
+                camera_id=next_pipeline_start.camera_id or cfg.get("camera_id"),
+                raw_stream_path=next_pipeline_start.raw_stream_path or None,
+                processed_stream_path=next_pipeline_start.processed_stream_path or None,
+            )
+            pipeline_runtime.start(current_pipeline_cfg)
+            auto_resync_interval_seconds = float(current_pipeline_cfg.get("stream_auto_resync_interval_seconds", 0))
+            reset_tracking_state()
+            last_track_results = None
+            last_visual_detections = []
+            last_operator_preview = None
+            last_operator_preview_at = 0.0
+            frame_count = 0
+            last_raw_seq = 0
+            fps_frame_count = 0
+            fps_start_ts = time.time()
+            if editor is not None:
+                editor.message = f"Pipeline ativa em {current_pipeline_cfg['processed_stream_path']}"
+
         if pending_stream_profile is not None:
             profile = pending_stream_profile
             pending_stream_profile = None
@@ -1818,14 +2417,16 @@ def main():
             roi = dict(profile["roi"])
             line = dict(profile["line"])
             count_direction = profile["count_direction"]
-            stream.url = cfg["stream_url"]
-            stream.reset()
+            current_pipeline_cfg = build_pipeline_config(cfg)
+            pipeline_runtime.start(current_pipeline_cfg)
+            auto_resync_interval_seconds = float(current_pipeline_cfg.get("stream_auto_resync_interval_seconds", 0))
             last_stream_resync = time.time()
             last_track_results = None
             last_visual_detections = []
             last_operator_preview = None
             last_operator_preview_at = 0.0
             frame_count = 0
+            last_raw_seq = 0
             fps_frame_count = 0
             fps_start_ts = time.time()
             logger.info(
@@ -1834,20 +2435,22 @@ def main():
                 cfg["stream_url"],
             )
 
+        if not pipeline_runtime.is_running():
+            time.sleep(0.05)
+            continue
+
         if reset_stream_requested:
-            stream.reset()
+            pipeline_runtime.request_capture_reset()
             reset_stream_requested = False
             last_stream_resync = time.time()
             if editor is not None:
                 editor.message = "Stream resetado manualmente"
 
-        ret, frame = stream.read()
-        if not ret:
+        last_raw_seq, frame, captured_at = pipeline_runtime.wait_for_raw_frame(last_raw_seq, timeout=0.5)
+        if frame is None or captured_at is None:
             if frame_count == 0:
                 logger.warning("Nenhum frame recebido ainda do stream...")
             continue
-        captured_at = time.time()
-        runtime_stats.record_capture(captured_at)
 
         frame_count += 1
 
@@ -2161,7 +2764,7 @@ def main():
                 operator_stream = last_operator_preview
 
         runtime_stats.record_processed_frame(total)
-        streamer.update(browser_stream)
+        pipeline_runtime.push_annotated_frame(browser_stream)
         runtime_stats.record_pipeline_ms((time.time() - captured_at) * 1000)
 
         if cfg.get("show_window", True):

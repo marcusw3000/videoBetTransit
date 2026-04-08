@@ -25,6 +25,7 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
         var request = new CreateStreamRequest
         {
             Name = "Test Cam",
+            CameraId = "cam_001",
             SourceUrl = "rtsp://192.168.1.1:554/stream",
             SourceProtocol = "rtsp",
             CountLine = new CountLineRequest { X1 = 0, Y1 = 400, X2 = 1280, Y2 = 400 },
@@ -43,6 +44,7 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
         var request = new CreateStreamRequest
         {
             Name = "Bad Cam",
+            CameraId = "cam_bad",
             SourceUrl = "https://www.youtube.com/watch?v=abc",
             SourceProtocol = "hls",
             CountLine = new CountLineRequest { X1 = 0, Y1 = 400, X2 = 1280, Y2 = 400 },
@@ -71,6 +73,9 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
         var body = await response.Content.ReadFromJsonAsync<StreamSessionResponse>();
         Assert.Equal(session.Id, body!.Id);
         Assert.Equal("Created", body.Status);
+        Assert.Equal("cam_001", body.CameraId);
+        Assert.Equal("raw/cam_001", body.RawStreamPath);
+        Assert.Equal("processed/cam_001", body.ProcessedStreamPath);
     }
 
     [Fact]
@@ -92,6 +97,7 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
         var request = new CreateStreamRequest
         {
             Name = "Cam",
+            CameraId = "cam_unauthorized",
             SourceUrl = "rtsp://192.168.1.1/stream",
             SourceProtocol = "rtsp",
             CountLine = new CountLineRequest(),
@@ -107,6 +113,7 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
         var request = new CreateStreamRequest
         {
             Name = "Integration Cam",
+            CameraId = "cam_001",
             SourceUrl = "rtsp://10.0.0.1:554/live",
             SourceProtocol = "rtsp",
             CountLine = new CountLineRequest { X1 = 0, Y1 = 400, X2 = 1280, Y2 = 400 },

@@ -48,9 +48,7 @@ public class CrossingEventService
         if (session is null || session.Status is not SessionStatus.Running and not SessionStatus.Degraded)
             return false;
 
-        var cameraId = string.IsNullOrWhiteSpace(session.CameraSource?.Name)
-            ? "default"
-            : session.CameraSource.Name.Trim();
+        var cameraId = StreamPathNaming.ExtractCameraId(session);
 
         // Find previous event for hash chaining
         var previousEvent = await db.VehicleCrossingEvents

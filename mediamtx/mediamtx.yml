@@ -1,45 +1,31 @@
-###############################################
-# MediaMTX configuration for TrafficCounter MVP
-###############################################
-
-# Log level
 logLevel: info
+logDestinations: [stdout]
 
-# API REST (for backend path management)
-api: yes
+api: true
 apiAddress: :9997
+apiAllowOrigins: ['*']
 
-# RTSP server
-rtspAddress: :8554
-rtspEncryption: no
-
-# WebRTC (browser delivery)
-webrtcAddress: :8889
-webrtcAdditionalHosts: []
-
-# HLS (fallback)
+hls: true
 hlsAddress: :8888
+hlsAllowOrigins: ['*']
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
 
-# Recording — paths can override this
-record: no
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: [127.0.0.1, localhost]
 
-# Default path settings (can be overridden per path below)
 pathDefaults:
-  # Allow any publisher (vision worker will publish to /processed/*)
-  publishUser: ""
-  publishPass: ""
-  readUser: ""
-  readPass: ""
+  record: false
 
-  # Record raw and processed streams to /recordings/
-  record: no
-  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
-  recordFormat: fmp4
-  recordSegmentDuration: 1m
-
-# Named paths can be added dynamically via the REST API
-# The backend will call POST /v3/config/paths/add/{name}
 paths:
-  # Leave empty — paths are managed dynamically by the backend
-  ~.*:
-    record: no
+  ~^raw/.+$:
+    source: publisher
+  ~^processed/.+$:
+    source: publisher

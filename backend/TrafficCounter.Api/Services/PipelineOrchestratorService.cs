@@ -59,8 +59,9 @@ public class PipelineOrchestratorService
 
             await sessionService.TransitionStatusAsync(sessionId, SessionStatus.Starting);
 
-            var rawPath = $"raw/{sessionId:N}";
-            var processedPath = $"processed/{sessionId:N}";
+            var cameraId = StreamPathNaming.ExtractCameraId(session);
+            var rawPath = StreamPathNaming.BuildRawPath(cameraId);
+            var processedPath = StreamPathNaming.BuildProcessedPath(cameraId);
 
             // Tell MediaMTX to pull the raw stream
             var added = await _mediaMtx.AddPathAsync(rawPath, session.SourceUrl, ct);
@@ -134,6 +135,8 @@ public class PipelineOrchestratorService
             var body = new
             {
                 sessionId = sessionId.ToString(),
+                cameraId = StreamPathNaming.ExtractCameraId(session),
+                sourceUrl = session.SourceUrl,
                 rawStreamPath = rawPath,
                 processedStreamPath = processedPath,
                 countLine = new

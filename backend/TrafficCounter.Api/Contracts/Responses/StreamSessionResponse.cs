@@ -5,6 +5,7 @@ public class StreamSessionResponse
     public Guid Id { get; set; }
     public string Status { get; set; } = string.Empty;
     public string CameraName { get; set; } = string.Empty;
+    public string CameraId { get; set; } = string.Empty;
     public string SourceUrl { get; set; } = string.Empty;
     public string SourceProtocol { get; set; } = string.Empty;
     public int TotalCount { get; set; }

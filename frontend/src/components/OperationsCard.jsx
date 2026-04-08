@@ -45,9 +45,12 @@ export default function OperationsCard({
 }) {
   const health = operations?.health ?? null
   const backend = health?.backend ?? {}
-  const cameraOnline = Boolean(health?.streamConnected)
+  const captureOnline = Boolean(health?.streamConnected)
   const backendOnline = !operations?.backendError && !backend?.lastError
-  const feedOnline = streamState === 'online'
+  const publisherOnline = Boolean(health?.publisherHealthy)
+  const transportMode = String(health?.activeTransport || 'mjpeg').toUpperCase()
+  const frontendOnline = streamState === 'online'
+  const fallbackActive = transportMode !== 'WEBRTC'
   const estimatedLatencyMs = (health?.avgInferenceMs ?? 0) + (health?.avgJpegEncodeMs ?? 0)
 
   return (
@@ -64,29 +67,43 @@ export default function OperationsCard({
 
       <div className="operations-pills">
         <StatusPill
-          label="Câmera"
-          status={cameraOnline ? 'Online' : 'Sem stream'}
-          tone={cameraOnline ? 'ok' : 'warn'}
+          label="Captura"
+          status={captureOnline ? 'Online' : 'Sem stream'}
+          tone={captureOnline ? 'ok' : 'warn'}
         />
         <StatusPill
-          label="Backend"
-          status={backendOnline ? 'Online' : 'Degradado'}
-          tone={backendOnline ? 'ok' : 'warn'}
+          label="Publisher RTSP"
+          status={publisherOnline ? 'Publicando' : 'Parado'}
+          tone={publisherOnline ? 'ok' : 'warn'}
         />
         <StatusPill
-          label="Feed MJPEG"
-          status={feedOnline ? 'Transmitindo' : streamState === 'error' ? 'Falhou' : 'Conectando'}
-          tone={feedOnline ? 'ok' : streamState === 'error' ? 'error' : 'warn'}
+          label="Frontend"
+          status={frontendOnline ? 'Transmitindo' : streamState === 'error' ? 'Falhou' : 'Conectando'}
+          tone={frontendOnline ? 'ok' : streamState === 'error' ? 'error' : 'warn'}
+        />
+        <StatusPill
+          label="Transporte"
+          status={fallbackActive ? `${transportMode} (fallback)` : transportMode}
+          tone={fallbackActive ? 'warn' : 'ok'}
         />
       </div>
 
       <div className="operations-grid">
-        <Metric label="FPS médio" value={formatNumber(health?.fpsAverage)} />
-        <Metric label="FPS instantâneo" value={formatNumber(health?.fpsInstant)} />
+        <Metric label="FPS captura" value={formatNumber(health?.captureFps)} />
+        <Metric label="FPS inferência" value={formatNumber(health?.inferenceFps ?? health?.fpsAverage)} />
+        <Metric label="FPS publicação" value={formatNumber(health?.publishFps)} />
         <Metric label="Latência estimada" value={formatNumber(estimatedLatencyMs, ' ms')} />
+        <Metric label="Idade frame bruto" value={formatNumber(health?.rawFrameAgeMs, ' ms')} />
+        <Metric label="Idade frame anotado" value={formatNumber(health?.annotatedFrameAgeMs, ' ms')} />
+      </div>
+
+      <div className="operations-grid">
         <Metric label="Clientes MJPEG" value={health?.mjpegClients ?? 0} />
         <Metric label="Frames processados" value={health?.framesProcessed ?? 0} />
-        <Metric label="Total contado" value={health?.totalCount ?? 0} />
+        <Metric label="Reinícios publisher" value={health?.publisherRestartCount ?? 0} />
+        <Metric label="Backend" value={backendOnline ? 'Online' : 'Degradado'} />
+        <Metric label="Contagem worker" value={health?.totalCount ?? 0} />
+        <Metric label="Último publish" value={formatDateTime(health?.lastPublishAt)} />
       </div>
 
       <div className="operations-footer">

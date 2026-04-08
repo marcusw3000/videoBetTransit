@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Hls from 'hls.js'
 
+const WEBRTC_BOOT_TIMEOUT_MS = 3500
+const WRAPPER_SOURCE = 'videobettransit-webrtc-wrapper'
+
 function buildReloadedSrc(src, reloadToken) {
   if (!src) return ''
   const separator = src.includes('?') ? '&' : '?'
@@ -16,7 +19,7 @@ function getPreferredMode(webrtcSrc, primarySrc, fallbackSrc) {
 
 export default function VideoPlayer({
   webrtcSrc = '',
-  src,
+  src = '',
   fallbackSrc = '',
   title = 'Ao Vivo',
   countValue = 0,
@@ -25,17 +28,14 @@ export default function VideoPlayer({
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
   const syncIntervalRef = useRef(null)
-  const [hasError, setHasError] = useState(false)
   const [mode, setMode] = useState(() => getPreferredMode(webrtcSrc, src, fallbackSrc))
+  const [hasError, setHasError] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
-  const [iframeLoaded, setIframeLoaded] = useState(false)
+  const [webrtcReady, setWebrtcReady] = useState(false)
 
-  const reloadedWebRtcSrc = useMemo(() => buildReloadedSrc(webrtcSrc, reloadToken), [webrtcSrc, reloadToken])
-  const primarySrc = useMemo(() => buildReloadedSrc(src, reloadToken), [src, reloadToken])
-  const mjpegFallbackSrc = useMemo(
-    () => buildReloadedSrc(fallbackSrc, reloadToken),
-    [fallbackSrc, reloadToken],
-  )
+  const reloadedWebRtcSrc = useMemo(() => buildReloadedSrc(webrtcSrc, reloadToken), [reloadToken, webrtcSrc])
+  const primarySrc = useMemo(() => buildReloadedSrc(src, reloadToken), [reloadToken, src])
+  const mjpegFallbackSrc = useMemo(() => buildReloadedSrc(fallbackSrc, reloadToken), [fallbackSrc, reloadToken])
 
   const notifyStatus = useCallback((status) => {
     onStreamStatusChange?.(status)
@@ -55,6 +55,7 @@ export default function VideoPlayer({
 
   const switchToFallback = useCallback(() => {
     clearHlsResources()
+    setWebrtcReady(false)
 
     if (!mjpegFallbackSrc) {
       setHasError(true)
@@ -74,30 +75,63 @@ export default function VideoPlayer({
     }
 
     clearHlsResources()
+    setWebrtcReady(false)
     setMode('hls')
     setHasError(false)
-    notifyStatus('fallback')
+    notifyStatus('connecting')
   }, [clearHlsResources, notifyStatus, primarySrc, switchToFallback])
 
   const handleReset = useCallback(() => {
     setHasError(false)
-    setIframeLoaded(false)
+    setWebrtcReady(false)
     setMode(getPreferredMode(webrtcSrc, src, fallbackSrc))
     setReloadToken(Date.now())
     notifyStatus('reconnecting')
   }, [fallbackSrc, notifyStatus, src, webrtcSrc])
 
   useEffect(() => {
+    setMode(getPreferredMode(webrtcSrc, src, fallbackSrc))
+    setHasError(false)
+    setWebrtcReady(false)
+  }, [fallbackSrc, src, webrtcSrc])
+
+  useEffect(() => {
     if (!reloadedWebRtcSrc || mode !== 'webrtc') return undefined
 
-    const timerId = setTimeout(() => {
-      if (!iframeLoaded) {
+    setWebrtcReady(false)
+    notifyStatus('connecting')
+
+    const handleMessage = (event) => {
+      const payload = event.data
+      if (!payload || payload.source !== WRAPPER_SOURCE) return
+
+      if (payload.type === 'first-frame' || payload.type === 'playing') {
+        setWebrtcReady(true)
+        setHasError(false)
+        notifyStatus('online')
+        return
+      }
+
+      if (payload.type === 'stalled' || payload.type === 'error') {
         switchToHls()
       }
-    }, 4000)
+    }
 
-    return () => clearTimeout(timerId)
-  }, [iframeLoaded, mode, reloadedWebRtcSrc, switchToHls])
+    window.addEventListener('message', handleMessage)
+    const timerId = window.setTimeout(() => {
+      setWebrtcReady((ready) => {
+        if (!ready) {
+          switchToHls()
+        }
+        return ready
+      })
+    }, WEBRTC_BOOT_TIMEOUT_MS)
+
+    return () => {
+      window.clearTimeout(timerId)
+      window.removeEventListener('message', handleMessage)
+    }
+  }, [mode, notifyStatus, reloadedWebRtcSrc, switchToHls])
 
   useEffect(() => {
     const video = videoRef.current
@@ -110,16 +144,25 @@ export default function VideoPlayer({
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = primarySrc
+      const handleLoaded = () => {
+        setHasError(false)
+        notifyStatus('online')
+      }
+      const handleNativeError = () => switchToFallback()
+
+      video.addEventListener('loadeddata', handleLoaded)
+      video.addEventListener('error', handleNativeError)
       void video.play().catch(() => {})
-      notifyStatus('online')
-      return undefined
+
+      return () => {
+        video.removeEventListener('loadeddata', handleLoaded)
+        video.removeEventListener('error', handleNativeError)
+      }
     }
 
     if (!Hls.isSupported()) {
-      const fallbackTimerId = setTimeout(() => {
-        switchToFallback()
-      }, 0)
-      return () => clearTimeout(fallbackTimerId)
+      const fallbackTimerId = window.setTimeout(() => switchToFallback(), 0)
+      return () => window.clearTimeout(fallbackTimerId)
     }
 
     const hls = new Hls({
@@ -127,7 +170,7 @@ export default function VideoPlayer({
       liveSyncDurationCount: 1,
       liveMaxLatencyDurationCount: 3,
       maxLiveSyncPlaybackRate: 1.2,
-      backBufferLength: 8,
+      backBufferLength: 6,
       enableWorker: true,
     })
 
@@ -135,12 +178,13 @@ export default function VideoPlayer({
     hls.loadSource(primarySrc)
     hls.attachMedia(video)
 
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    const handleLoaded = () => {
       setHasError(false)
       notifyStatus('online')
       void video.play().catch(() => {})
-    })
+    }
 
+    hls.on(Hls.Events.MANIFEST_PARSED, handleLoaded)
     hls.on(Hls.Events.ERROR, (_, data) => {
       if (!data.fatal) return
 
@@ -157,16 +201,16 @@ export default function VideoPlayer({
       switchToFallback()
     })
 
-    syncIntervalRef.current = setInterval(() => {
+    syncIntervalRef.current = window.setInterval(() => {
       const media = videoRef.current
       const currentHls = hlsRef.current
       if (!media || !currentHls || !Number.isFinite(media.currentTime)) return
 
       const liveSyncPosition = currentHls.liveSyncPosition
-      if (Number.isFinite(liveSyncPosition) && media.currentTime < liveSyncPosition - 1.5) {
+      if (Number.isFinite(liveSyncPosition) && media.currentTime < liveSyncPosition - 1.25) {
         media.currentTime = liveSyncPosition
       }
-    }, 3000)
+    }, 2500)
 
     return () => {
       clearHlsResources()
@@ -174,12 +218,6 @@ export default function VideoPlayer({
   }, [clearHlsResources, mode, notifyStatus, primarySrc, switchToFallback])
 
   useEffect(() => () => clearHlsResources(), [clearHlsResources])
-
-  function handleIframeLoad() {
-    setIframeLoaded(true)
-    setHasError(false)
-    notifyStatus('online')
-  }
 
   function handleFallbackLoad() {
     setHasError(false)
@@ -228,7 +266,7 @@ export default function VideoPlayer({
             <div className="video-overlay-stack">
               <span>Falha ao carregar a transmissão.</span>
               <button type="button" className="secondary-button" onClick={handleReset}>
-                Tentar Novamente
+                Tentar novamente
               </button>
             </div>
           </div>
@@ -236,12 +274,10 @@ export default function VideoPlayer({
 
         {!hasError && mode === 'webrtc' && reloadedWebRtcSrc && (
           <iframe
-            id={`webrtc-frame-${reloadToken}`}
             key={reloadedWebRtcSrc}
             src={reloadedWebRtcSrc}
             title={title}
             className="video-element"
-            onLoad={handleIframeLoad}
             allow="autoplay; fullscreen"
           />
         )}
@@ -266,7 +302,6 @@ export default function VideoPlayer({
             className="video-element"
             onLoad={handleFallbackLoad}
             onError={handleFallbackError}
-            draggable={false}
           />
         )}
       </div>

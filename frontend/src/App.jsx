@@ -7,7 +7,7 @@ import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds, parseTimestampMs } from './utils/time'
-import { WEBRTC_URL, HLS_URL, MJPEG_URL } from './config'
+import { buildHlsUrl, buildMjpegUrl, buildWebRtcWrapperUrl } from './config'
 import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } from './embed'
 
 const RECENT_HISTORY_LIMIT = 6
@@ -103,6 +103,9 @@ function MarketPage() {
 
   const overMarket = useMemo(() => markets.find((m) => m.marketType?.toLowerCase() === 'over') || null, [markets])
   const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
+  const webrtcSrc = useMemo(() => buildWebRtcWrapperUrl(embedConfig.cameraId), [embedConfig.cameraId])
+  const hlsSrc = useMemo(() => buildHlsUrl(embedConfig.cameraId), [embedConfig.cameraId])
+  const mjpegSrc = useMemo(() => buildMjpegUrl(), [])
 
   const gameTitle = useMemo(() => {
     const name = getDisplayName(round)
@@ -367,9 +370,9 @@ function MarketPage() {
             <div className="video-wrapper">
               <VideoPlayer
                 key={round?.roundId || 'live-player'}
-                webrtcSrc={WEBRTC_URL}
-                src={HLS_URL}
-                fallbackSrc={MJPEG_URL}
+                webrtcSrc={webrtcSrc}
+                src={hlsSrc}
+                fallbackSrc={mjpegSrc}
                 title={embedConfig.cameraLabel || 'Transmissão ao vivo'}
                 countValue={displayCount}
               />

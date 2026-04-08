@@ -25,7 +25,7 @@ echo  TrafficCounter MVP - Inicializando sistema (modo dev)
 echo  Backend : %BACKEND_URL%
 echo  Frontend: %FRONTEND_URL%
 echo  OBS: Em modo dev o backend usa SQLite local.
-echo       MediaMTX deve estar rodando separadamente.
+echo       MediaMTX sera validado/iniciado automaticamente.
 echo ============================================================
 echo.
 
@@ -68,6 +68,14 @@ if not exist "%D%backend\TrafficCounter.Api\TrafficCounter.Api.csproj" (
     pause & exit /b 1
 )
 
+if not exist "%D%tools\mediamtx\mediamtx.exe" (
+    where docker >nul 2>&1
+    if errorlevel 1 (
+        echo [ERRO] MediaMTX local nao encontrado e docker indisponivel.
+        pause & exit /b 1
+    )
+)
+
 echo [OK] Pre-requisitos encontrados.
 echo.
 
@@ -79,6 +87,24 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 echo [OK] Dependencias Python prontas.
+echo.
+
+echo Garantindo MediaMTX...
+powershell -NoProfile -Command "if(Get-NetTCPConnection -LocalPort 9997 -State Listen -ErrorAction SilentlyContinue){ exit 0 } else { exit 1 }"
+if errorlevel 1 (
+    if exist "%D%tools\mediamtx\mediamtx.exe" (
+        echo [INFO] MediaMTX nao esta ativo. Subindo binario local...
+        start cmd /k "cd /d %D%tools\mediamtx && title [MEDIAMTX] :9997/:8554/:8888/:8889 && mediamtx.exe %D%mediamtx\mediamtx.yml"
+    ) else (
+        echo [INFO] MediaMTX nao esta ativo. Subindo via Docker Compose...
+        docker compose -f "%D%infra\docker-compose.yml" up -d mediamtx
+        if errorlevel 1 (
+            echo [ERRO] Falha ao iniciar o MediaMTX.
+            pause & exit /b 1
+        )
+    )
+)
+echo [OK] MediaMTX pronto.
 echo.
 
 echo Verificando porta %BACKEND_PORT%...
@@ -114,11 +140,11 @@ echo ============================================================
 echo  Sistema iniciado! 3 janelas abertas.
 echo  Frontend : %FRONTEND_URL%
 echo  Backend  : %BACKEND_URL%
+echo  MediaMTX : http://localhost:9997
 echo  Docs API : %BACKEND_URL%/streams
 echo.
-echo  Certifique-se que MediaMTX esteja rodando.
 echo  Para Supabase, use: start.bat supabase
-echo  Para stack local Docker: cd infra ^&^& docker compose up postgres mediamtx
+echo  Para stack local Docker: cd infra ^&^& docker compose up postgres mediamtx backend vision-worker frontend
 echo  Para encerrar: feche as 3 janelas do terminal.
 echo ============================================================
 pause

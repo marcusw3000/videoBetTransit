@@ -9,7 +9,7 @@ import SessionStatus from './SessionStatus'
 import TimerCard from './TimerCard'
 import VideoPlayer from './VideoPlayer'
 import { getEmbedConfig } from '../embed'
-import { HLS_URL, MJPEG_URL, WEBRTC_URL } from '../config'
+import { buildHlsUrl, buildMjpegUrl, buildWebRtcWrapperUrl } from '../config'
 import { voidRound } from '../services/adminApi'
 import { startMetricsConnection, stopMetricsConnection } from '../services/metricsSignalr'
 import { getOperationsHealth } from '../services/operationsApi'
@@ -53,11 +53,15 @@ export default function AdminDashboard() {
   const [error, setError] = useState('')
   const [isStopping, setIsStopping] = useState(false)
   const [isVoiding, setIsVoiding] = useState(false)
+  const [frontendTransportState, setFrontendTransportState] = useState('connecting')
 
   const activeSession = getActiveSession(sessions, selectedSessionId)
   const roundPhase = getRoundPhase(round)
-  const streamState = operations?.streamConnected ? 'online' : 'connecting'
+  const streamState = frontendTransportState
   const roundTimerLabel = roundPhase === 'open' ? 'Fechamento das Apostas' : 'Tempo Restante da Rodada'
+  const webrtcSrc = useMemo(() => buildWebRtcWrapperUrl(embedConfig.cameraId), [embedConfig.cameraId])
+  const hlsSrc = useMemo(() => buildHlsUrl(embedConfig.cameraId), [embedConfig.cameraId])
+  const mjpegSrc = useMemo(() => buildMjpegUrl(), [])
 
   const loadSessions = useCallback(async () => {
     const { data } = await listSessions(false)
@@ -288,11 +292,12 @@ export default function AdminDashboard() {
 
             <div className="admin-video-wrapper">
               <VideoPlayer
-                webrtcSrc={WEBRTC_URL}
-                src={HLS_URL}
-                fallbackSrc={MJPEG_URL}
+                webrtcSrc={webrtcSrc}
+                src={hlsSrc}
+                fallbackSrc={mjpegSrc}
                 title={activeSession?.cameraName || embedConfig.cameraLabel || 'Câmera ativa'}
                 countValue={round?.currentCount ?? operations?.totalCount ?? operations?.health?.totalCount ?? 0}
+                onStreamStatusChange={setFrontendTransportState}
               />
             </div>
           </div>
