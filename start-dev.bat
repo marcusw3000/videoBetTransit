@@ -9,6 +9,7 @@ echo  TrafficCounter MVP - Inicializando sistema (start-dev)
 echo  Backend : http://localhost:%BACKEND_PORT%
 echo  Frontend: http://localhost:%FRONTEND_PORT%
 echo  MediaMTX: http://localhost:9997
+echo  Worker oficial: vision-worker\app.py
 echo ============================================================
 echo.
 

@@ -24,6 +24,7 @@ echo ============================================================
 echo  TrafficCounter MVP - Inicializando sistema (modo dev)
 echo  Backend : %BACKEND_URL%
 echo  Frontend: %FRONTEND_URL%
+echo  Worker oficial: vision-worker\app.py
 echo  OBS: Em modo dev o backend usa SQLite local.
 echo       MediaMTX sera validado/iniciado automaticamente.
 echo ============================================================
