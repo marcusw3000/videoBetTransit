@@ -1564,7 +1564,6 @@ def main():
     last_live_send = 0.0
     last_config_poll = 0.0
     last_round_sync = 0.0
-    last_stream_resync = time.time()
     last_track_results = None
 
     roi = cfg["roi"]
@@ -1578,7 +1577,6 @@ def main():
     browser_stream_max_width = int(cfg.get("browser_stream_max_width", 960))
     operator_preview_max_width = int(cfg.get("operator_preview_max_width", 1280))
     operator_preview_fps_limit = float(cfg.get("operator_preview_fps_limit", 12))
-    auto_resync_interval_seconds = float(cfg.get("stream_auto_resync_interval_seconds", 0))
     editor = None
     control_panel = None
     reset_stream_requested = False
@@ -1793,7 +1791,6 @@ def main():
             count_direction = profile["count_direction"]
             stream.url = cfg["stream_url"]
             stream.reset()
-            last_stream_resync = time.time()
             last_track_results = None
             last_visual_detections = []
             last_operator_preview = None
@@ -1810,7 +1807,6 @@ def main():
         if reset_stream_requested:
             stream.reset()
             reset_stream_requested = False
-            last_stream_resync = time.time()
             if editor is not None:
                 editor.message = "Stream resetado manualmente"
 
@@ -1850,17 +1846,6 @@ def main():
                 request_stream_reset()
             else:
                 current_round_id = next_round_id
-
-        if (
-            auto_resync_interval_seconds > 0
-            and (now_ts - last_stream_resync) >= auto_resync_interval_seconds
-        ):
-            logger.info(
-                "Auto-resync do stream apos %.1fs para manter a live mais proxima do ao vivo.",
-                auto_resync_interval_seconds,
-            )
-            request_stream_reset()
-            last_stream_resync = now_ts
 
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
             last_config_poll = now_ts

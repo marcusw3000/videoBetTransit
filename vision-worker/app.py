@@ -1308,7 +1308,6 @@ def build_pipeline_config(cfg: dict, *, source_url: str | None = None, camera_id
     pipeline_cfg["publisher_rtsp_url"] = f"{rtsp_base}/{processed_path}"
     pipeline_cfg.setdefault("publisher_fps", 10)
     pipeline_cfg.setdefault("publisher_ffmpeg_bin", "ffmpeg")
-    pipeline_cfg.setdefault("stream_auto_resync_interval_seconds", 0)
     return pipeline_cfg
 
 
@@ -2140,7 +2139,6 @@ def main():
     last_live_send = 0.0
     last_config_poll = 0.0
     last_round_sync = 0.0
-    last_stream_resync = time.time()
     last_track_results = None
 
     roi = cfg["roi"]
@@ -2154,7 +2152,6 @@ def main():
     browser_stream_max_width = int(cfg.get("browser_stream_max_width", 960))
     operator_preview_max_width = int(cfg.get("operator_preview_max_width", 1280))
     operator_preview_fps_limit = float(cfg.get("operator_preview_fps_limit", 12))
-    auto_resync_interval_seconds = float(current_pipeline_cfg.get("stream_auto_resync_interval_seconds", 0))
     editor = None
     control_panel = None
     reset_stream_requested = False
@@ -2384,7 +2381,6 @@ def main():
                 processed_stream_path=next_pipeline_start.processed_stream_path or None,
             )
             pipeline_runtime.start(current_pipeline_cfg)
-            auto_resync_interval_seconds = float(current_pipeline_cfg.get("stream_auto_resync_interval_seconds", 0))
             reset_tracking_state()
             last_track_results = None
             last_visual_detections = []
@@ -2419,8 +2415,6 @@ def main():
             count_direction = profile["count_direction"]
             current_pipeline_cfg = build_pipeline_config(cfg)
             pipeline_runtime.start(current_pipeline_cfg)
-            auto_resync_interval_seconds = float(current_pipeline_cfg.get("stream_auto_resync_interval_seconds", 0))
-            last_stream_resync = time.time()
             last_track_results = None
             last_visual_detections = []
             last_operator_preview = None
@@ -2442,7 +2436,6 @@ def main():
         if reset_stream_requested:
             pipeline_runtime.request_capture_reset()
             reset_stream_requested = False
-            last_stream_resync = time.time()
             if editor is not None:
                 editor.message = "Stream resetado manualmente"
 
@@ -2480,17 +2473,6 @@ def main():
                 request_stream_reset()
             else:
                 current_round_id = next_round_id
-
-        if (
-            auto_resync_interval_seconds > 0
-            and (now_ts - last_stream_resync) >= auto_resync_interval_seconds
-        ):
-            logger.info(
-                "Auto-resync do stream apos %.1fs para manter a live mais proxima do ao vivo.",
-                auto_resync_interval_seconds,
-            )
-            request_stream_reset()
-            last_stream_resync = now_ts
 
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
             last_config_poll = now_ts
