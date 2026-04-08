@@ -30,7 +30,7 @@ if not exist "%D%traffic-counter-front\package.json" (
 )
 
 echo [1/4] Validando sintaxe Python...
-"%D%.venv\Scripts\python.exe" -m py_compile app.py backend_client.py manual_detection_smoke.py review_calibration_cases.py tests\test_engine_logic.py tests\test_backend_client.py
+"%D%.venv\Scripts\python.exe" -m py_compile app.py backend_client.py supabase_sync.py vision-worker\app.py vision-worker\backend_client.py vision-worker\supabase_sync.py manual_detection_smoke.py review_calibration_cases.py tests\test_engine_logic.py tests\test_backend_client.py
 if errorlevel 1 (
     echo [ERRO] Falha na validacao de sintaxe Python.
     exit /b 1

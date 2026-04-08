@@ -126,8 +126,8 @@ def main():
     )
     parser.add_argument(
         "--config",
-        default="config.json",
-        help="Caminho do config.json atual.",
+        default=os.path.join("vision-worker", "config.json"),
+        help="Caminho do config.json oficial do worker.",
     )
     args = parser.parse_args()
 

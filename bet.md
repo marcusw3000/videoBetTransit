@@ -518,7 +518,53 @@ Se o objetivo for executar o plano no codigo atual, a sequencia imediata recomen
 9. adicionar autenticacao, auditoria e RBAC
 10. fechar reconciliacao, rollout e pacote regulatorio
 
-## 16. Criticos de Produto
+## 16. Leitura do Estado Atual do Repositorio
+
+Analisando a estrutura atual do codigo, o projeto parece estar entre a Fase 0 e a Fase 1:
+
+- ja existem `rounds` e `round_markets` no backend
+- ja existe lifecycle basico de round com `open`, `closing`, `settled` e `void`
+- ja existem endpoints internos para contagem e anulacao
+- o `start.bat` ja assume `vision-worker\app.py` como worker oficial
+- ainda existe duplicidade relevante entre `app.py` na raiz e `vision-worker\app.py`
+- ainda nao estao formalizados no backend os eventos soberanos esperados para `crossing_events` e `round_events`
+- o endpoint `GET /rounds/{roundId}/count-events` ainda esta em stub
+
+Conclusao pratica:
+
+- a Fase 1 foi iniciada antes de a Fase 0 estar completamente fechada
+- o maior risco imediato continua sendo `split-brain` entre entrypoints, configuracao e fluxo oficial do worker
+- por isso, o proximo passo recomendado nao e abrir novas integracoes de operadora ainda
+
+## 17. Proximo Passo Recomendado Agora
+
+O proximo passo deve ser concluir de forma explicita a Fase 0, congelando um unico fluxo operacional oficial antes de expandir o provider core.
+
+### Objetivo imediato
+
+Eliminar ambiguidade entre worker raiz, worker oficial, configuracao e ponto de execucao.
+
+### Escopo do proximo passo
+
+- declarar `vision-worker\app.py` como unico entrypoint Python suportado
+- remover ou aposentar o `app.py` da raiz como fluxo operacional concorrente
+- garantir que `config.json`, profiles e sync operacional apontem para um unico caminho de execucao
+- revisar `start.bat`, scripts auxiliares e documentacao para refletir somente esse fluxo
+- validar que health, troca de stream, reaplicacao de ROI/line e envio de eventos continuam funcionando no worker oficial
+
+### Entregavel esperado
+
+Um baseline operacional sem duplicidade de entrypoint, pronto para a proxima etapa de persistencia formal de eventos do round.
+
+### Depois disso
+
+Com a Fase 0 realmente encerrada, o passo seguinte passa a ser:
+
+1. modelar e persistir `crossing_events` com vinculacao a `round_id`
+2. criar `round_events` para transicoes oficiais do lifecycle
+3. substituir o endpoint stub de `count-events` por consulta real auditavel
+
+## 18. Criticos de Produto
 
 Pontos que nao devem ser adiados nas fases finais:
 
@@ -530,7 +576,7 @@ Pontos que nao devem ser adiados nas fases finais:
 - trilha de auditoria administrativa
 - idempotencia no contrato com operadora
 
-## 17. Definicao de Pronto do Programa
+## 19. Definicao de Pronto do Programa
 
 O programa sera considerado concluido quando:
 
@@ -542,7 +588,7 @@ O programa sera considerado concluido quando:
 - seguranca, RBAC e trilha administrativa estiverem ativos
 - houver pacote minimo para auditoria, homologacao e certificacao
 
-## 18. Referencias Operacionais
+## 20. Referencias Operacionais
 
 Referencias que continuam validas para orientar a execucao:
 
@@ -560,7 +606,7 @@ Essas referencias nao substituem implementacao, mas devem orientar:
 - monitoracao
 - readiness regulatoria
 
-## 19. Backlog Operacional por Epicos
+## 21. Backlog Operacional por Epicos
 
 Este backlog traduz o plano em blocos executaveis. A ideia e usar cada epico como unidade de planejamento e cada task como item concreto de implementacao.
 
@@ -578,7 +624,7 @@ Prioridades sugeridas:
 - `P2` necessario para operacao e escala
 - `P3` evolucao e refinamento
 
-## 20. Epicos e Tasks
+## 22. Epicos e Tasks
 
 ### EP01 - Consolidacao do Vision Worker
 
@@ -602,6 +648,7 @@ Tasks:
 - [ ] remover ou isolar fluxos antigos que gerem ambiguidade operacional
 - [ ] revisar `start.bat` para refletir apenas o fluxo oficial
 - [ ] padronizar local de configuracao do worker
+- [ ] manter compatibilidade legada da raiz apenas como shim para o worker oficial
 - [ ] validar a esteira de streams no fluxo de startup completo
 - [ ] validar sincronizacao local e remota de `stream_profiles`
 
@@ -609,6 +656,16 @@ Criterio de aceite:
 
 - o time sobe sempre o mesmo worker
 - nao existe duvida entre app raiz e worker oficial
+
+Status atual:
+
+- [x] documentar o `vision-worker` como entrypoint oficial
+- [x] remover ou isolar fluxos antigos que gerem ambiguidade operacional
+- [x] revisar `start.bat` para refletir apenas o fluxo oficial
+- [x] padronizar local de configuracao do worker
+- [x] manter compatibilidade legada da raiz apenas como shim para o worker oficial
+- [ ] validar a esteira de streams no fluxo de startup completo
+- [ ] validar sincronizacao local e remota de `stream_profiles`
 
 ### EP02 - Persistencia do Core de Rounds
 
@@ -1018,7 +1075,7 @@ Criterio de aceite:
 
 - o produto pode ser habilitado de forma controlada por operador e ambiente
 
-## 21. Sequencia Recomendada de Ataque
+## 23. Sequencia Recomendada de Ataque
 
 Se formos executar agora, a ordem mais eficiente e:
 
@@ -1038,7 +1095,7 @@ Se formos executar agora, a ordem mais eficiente e:
 14. `EP14` LGPD, Retencao e Pacote Regulatorio
 15. `EP15` Embed, Front Comercial e Rollout
 
-## 22. Proxima Sprint Recomendada
+## 24. Proxima Sprint Recomendada
 
 Sprint tecnica inicial sugerida:
 

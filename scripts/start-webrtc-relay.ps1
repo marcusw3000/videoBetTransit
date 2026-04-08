@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$configPath = Join-Path $repoRoot "config.json"
+$configPath = Join-Path $repoRoot "vision-worker\\config.json"
 $mediamtxDir = Join-Path $repoRoot "tools\\mediamtx"
 $mediamtxExe = Join-Path $mediamtxDir "mediamtx.exe"
 $generatedConfigPath = Join-Path $mediamtxDir "mediamtx.generated.yml"
@@ -12,14 +12,14 @@ if (-not (Test-Path $mediamtxExe)) {
 }
 
 if (-not (Test-Path $configPath)) {
-  throw "config.json nao encontrado em $configPath"
+  throw "config.json oficial do worker nao encontrado em $configPath"
 }
 
 $appConfig = Get-Content $configPath -Raw | ConvertFrom-Json
 $streamUrl = [string]$appConfig.stream_url
 
 if ([string]::IsNullOrWhiteSpace($streamUrl)) {
-  throw "stream_url nao configurada em config.json"
+  throw "stream_url nao configurada em $configPath"
 }
 
 $generatedConfig = @"

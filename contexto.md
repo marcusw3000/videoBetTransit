@@ -1,11 +1,11 @@
 # contexto.md - videoBetTransit
 
-Sistema de contagem de veiculos em tempo real com mercado de apostas por faixas de contagem. O projeto roda em tres processos principais: engine Python, backend .NET e frontend React.
+Sistema de contagem de veiculos em tempo real com mercado de apostas por faixas de contagem. O projeto roda em tres processos principais: worker Python, backend .NET e frontend React.
 
 ## Arquitetura Geral
 
 ```text
-Python app.py
+Python vision-worker/app.py
   - consome o stream de camera
   - roda YOLO + tracking + contagem
   - envia eventos HTTP para o backend
@@ -25,7 +25,7 @@ Frontend React
 ```
 
 Fluxo resumido:
-1. `app.py` le o stream configurado em `config.json`.
+1. `vision-worker/app.py` le o stream configurado em `vision-worker/config.json`.
 2. A engine detecta e rastreia veiculos dentro da ROI.
 3. Quando um veiculo cruza a linha, a engine envia `POST /api/rounds/count-events` para o backend.
 4. O backend atualiza o round e faz broadcast via SignalR.
@@ -48,7 +48,8 @@ dotnet run
 cd traffic-counter-front
 npm run dev
 
-# Engine Python
+# Worker Python oficial
+cd vision-worker
 python app.py
 ```
 
@@ -60,21 +61,22 @@ Para validar o projeto inteiro de uma vez, use `validate.bat` na raiz.
 
 ```text
 videoBetTransit/
-|-- app.py
-|-- backend_client.py
-|-- config.json
-|-- requirements.txt
+|-- vision-worker/
+|   |-- app.py
+|   |-- backend_client.py
+|   |-- config.json
+|   |-- requirements.txt
+|   |-- snapshots/
 |-- start.bat
-|-- snapshots/
-|-- TrafficCounter.Api/
-|-- traffic-counter-front/
+|-- backend/
+|-- frontend/
 ```
 
 Arquivos importantes:
-- `app.py`: engine de deteccao, contagem e servidor MJPEG.
-- `backend_client.py`: cliente HTTP usado pela engine para falar com o backend.
-- `config.json`: stream, ROI, linha de contagem, modelo, MJPEG host e porta.
-- `start.bat`: inicializacao automatica do backend, frontend e engine.
+- `vision-worker/app.py`: worker oficial de deteccao, contagem e servidor MJPEG.
+- `vision-worker/backend_client.py`: cliente HTTP usado pelo worker para falar com o backend.
+- `vision-worker/config.json`: stream, ROI, linha de contagem, modelo, MJPEG host e porta.
+- `start.bat`: inicializacao automatica do backend, frontend e worker oficial.
 - `validate.bat`: validacao unica com sintaxe Python, testes Python, testes .NET e build do frontend.
 - `traffic-counter-front/src/App.jsx`: orquestra tela principal.
 - `traffic-counter-front/src/components/VideoPlayer.jsx`: exibe o feed MJPEG anotado.
@@ -91,7 +93,7 @@ Responsabilidades principais:
 - enviar `count-events` e `live-detections`
 - servir `/health` e `/video_feed` via Flask, publicados por `waitress`
 
-Configuracoes relevantes em `config.json`:
+Configuracoes relevantes em `vision-worker/config.json`:
 - `stream_url`: URL do stream da camera
 - `ffmpeg_capture_options`: opcoes de captura do FFmpeg via OpenCV, usadas para tentar reduzir buffer
 - `stream_buffer_size`: tamanho do buffer da captura OpenCV
@@ -121,7 +123,7 @@ Observacao importante:
 - o feed MJPEG pode exigir `token` na query string
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
-- a esteira de streams continua salva localmente em `config.json` para garantir boot offline
+- a esteira de streams continua salva localmente em `vision-worker/config.json` para garantir boot offline
 - quando `supabase_url` e `supabase_service_key` estao configurados, a engine sincroniza a esteira com o Supabase
 - no primeiro boot com Supabase, se a tabela remota estiver vazia, a configuracao local e publicada
 - se ja existirem perfis remotos, eles passam a popular a esteira local
@@ -217,7 +219,7 @@ Observacao:
 
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
 - Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
-- se quiser sincronizar a esteira no Supabase, crie a tabela usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `config.json`
+- se quiser sincronizar a esteira no Supabase, crie a tabela usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `vision-worker/config.json`
 - O uso do proxy `/proxy/video-feed` reduz o problema de mixed content e evita expor o token do MJPEG no browser por padrao.
-- A `.venv` precisa estar atualizada com `requirements.txt`.
+- A `.venv` precisa estar atualizada com `vision-worker/requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.
