@@ -21,10 +21,7 @@
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
-    "car": 2,
-    "motorcycle": 3,
-    "bus": 5,
-    "truck": 7
+    "car": 2
   },
   "conf": 0.2,
   "imgsz": 256,

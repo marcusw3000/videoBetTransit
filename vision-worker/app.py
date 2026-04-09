@@ -1398,6 +1398,10 @@ def build_class_names(allowed_classes: dict) -> dict[int, str]:
     return {v: k for k, v in allowed_classes.items()}
 
 
+def is_countable_vehicle(vehicle_name: str) -> bool:
+    return str(vehicle_name or "").strip().lower() == "car"
+
+
 def bbox_area(x1: int, y1: int, x2: int, y2: int) -> int:
     return max(0, x2 - x1) * max(0, y2 - y1)
 
@@ -2584,6 +2588,8 @@ def main():
                     continue
 
                 vehicle_name = class_names.get(cls_id, str(cls_id))
+                if not is_countable_vehicle(vehicle_name):
+                    continue
                 cx, cy = anchor_point(x1, y1, x2, y2)
 
                 if inference_is_fresh:

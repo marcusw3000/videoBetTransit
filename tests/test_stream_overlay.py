@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from app import annotate_frame
+from app import annotate_frame, is_countable_vehicle
 
 
 class AnnotateFrameTests(unittest.TestCase):
@@ -49,6 +49,15 @@ class AnnotateFrameTests(unittest.TestCase):
         )
 
         self.assertTrue(np.any(annotated[10, 10] != 0))
+
+
+class VehicleFilterTests(unittest.TestCase):
+    def test_only_car_is_countable(self):
+        self.assertTrue(is_countable_vehicle("car"))
+        self.assertTrue(is_countable_vehicle("CAR"))
+        self.assertFalse(is_countable_vehicle("truck"))
+        self.assertFalse(is_countable_vehicle("bus"))
+        self.assertFalse(is_countable_vehicle("motorcycle"))
 
 
 if __name__ == "__main__":
