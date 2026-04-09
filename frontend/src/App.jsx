@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AdminDashboard from './components/AdminDashboard'
 import BettingPanel from './components/BettingPanel'
+import CrossingEventsCard from './components/CrossingEventsCard'
 import DetectionsList from './components/DetectionsList'
 import LastResults from './components/LastResults'
+import RoundSummaryCard from './components/RoundSummaryCard'
+import RoundTimeline from './components/RoundTimeline'
 import VideoPlayer from './components/VideoPlayer'
-import { getCurrentRound, getRoundCountEvents, getRoundHistory } from './services/roundApi'
+import { getCurrentRound, getRoundCountEvents, getRoundHistory, getRoundTimeline } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds, parseTimestampMs } from './utils/time'
@@ -106,6 +109,7 @@ function MarketPage() {
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
   const [workerHealth, setWorkerHealth] = useState(null)
   const [recentDetections, setRecentDetections] = useState([])
+  const [roundTimeline, setRoundTimeline] = useState([])
   const roundIdRef = useRef('')
 
   const roundPhase = getRoundPhase(round)
@@ -146,22 +150,33 @@ function MarketPage() {
     setRound(nextRound)
   }, [])
 
+  const loadRoundArtifacts = useCallback(async (roundId) => {
+    if (!roundId) {
+      setRecentDetections([])
+      setRoundTimeline([])
+      return
+    }
+
+    const [events, timeline] = await Promise.all([
+      getRoundCountEvents(roundId),
+      getRoundTimeline(roundId),
+    ])
+
+    setRecentDetections(events)
+    setRoundTimeline(timeline)
+  }, [])
+
   const loadCurrentRound = useCallback(async () => {
     try {
       const data = await getCurrentRound(embedConfig.cameraId)
       updateRound(data)
-      if (data?.roundId) {
-        const events = await getRoundCountEvents(data.roundId)
-        setRecentDetections(events)
-      } else {
-        setRecentDetections([])
-      }
+      await loadRoundArtifacts(data?.roundId)
       setError('')
     } catch (err) {
       console.error(err)
       setError('Falha ao carregar o round atual.')
     }
-  }, [embedConfig.cameraId, updateRound])
+  }, [embedConfig.cameraId, loadRoundArtifacts, updateRound])
 
   const loadHistory = useCallback(async () => {
     try {
@@ -211,6 +226,7 @@ function MarketPage() {
         ])
         if (!active) return
         updateRound(currentRound)
+        await loadRoundArtifacts(currentRound?.roundId)
         setHistory(roundHistory)
         setError('')
       } catch (err) {
@@ -232,15 +248,16 @@ function MarketPage() {
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
         updateRound(data)
         if (data?.roundId) {
-          void getRoundCountEvents(data.roundId).then((events) => {
-            if (active) setRecentDetections(events)
-          }).catch(console.error)
+          void loadRoundArtifacts(data.roundId).catch(console.error)
         }
       },
       onRoundUpdated: (data) => {
         if (!active) return
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
         updateRound(data)
+        if (data?.roundId) {
+          void loadRoundArtifacts(data.roundId).catch(console.error)
+        }
       },
       onRoundSettled: async (data) => {
         if (!active) return
@@ -269,7 +286,7 @@ function MarketPage() {
       clearInterval(pollId)
       stopRoundConnection().catch(console.error)
     }
-  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, updateRound])
+  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, loadRoundArtifacts, updateRound])
 
   useEffect(() => {
     let active = true
@@ -425,6 +442,24 @@ function MarketPage() {
                 countValue={displayCount}
               />
             </div>
+
+            <div className="market-official-grid">
+              <RoundSummaryCard
+                round={round}
+                title="Estado Oficial"
+                locale={embedConfig.locale}
+                timezone={embedConfig.timezone}
+                compact
+              />
+              <RoundTimeline
+                items={roundTimeline}
+                title="Timeline Oficial"
+                locale={embedConfig.locale}
+                timezone={embedConfig.timezone}
+                limit={6}
+                compact
+              />
+            </div>
           </div>
 
           <div className="right-panel">
@@ -441,6 +476,14 @@ function MarketPage() {
               currency={embedConfig.currency}
               balance={0}
               isSuspended={round?.isSuspended}
+            />
+            <CrossingEventsCard
+              events={recentDetections}
+              title="Crossing Events"
+              locale={embedConfig.locale}
+              timezone={embedConfig.timezone}
+              limit={6}
+              compact
             />
             <DetectionsList detections={recentDetections} />
           </div>

@@ -32,7 +32,7 @@ export function getRoundPhase(round) {
   if (!round) return 'loading'
 
   const status = (round.status || '').toLowerCase()
-  if (status === 'settled' || status === 'void') return status
+  if (['open', 'closing', 'settling', 'settled', 'void'].includes(status)) return status
 
   const now = Date.now()
   const end = round.endsAt ? parseTimestampMs(round.endsAt) : 0

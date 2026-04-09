@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import CounterCard from './CounterCard'
+import CrossingEventsCard from './CrossingEventsCard'
 import CreateSessionPanel from './CreateSessionPanel'
 import EventsFeed from './EventsFeed'
 import HistoryCard from './HistoryCard'
 import MetricsPanel from './MetricsPanel'
 import OperationsCard from './OperationsCard'
+import RoundSummaryCard from './RoundSummaryCard'
+import RoundTimeline from './RoundTimeline'
 import SessionStatus from './SessionStatus'
 import TimerCard from './TimerCard'
 import VideoPlayer from './VideoPlayer'
@@ -13,7 +16,15 @@ import { buildHlsUrl, buildMjpegUrl, buildWebRtcWrapperUrl } from '../config'
 import { voidRound } from '../services/adminApi'
 import { startMetricsConnection, stopMetricsConnection } from '../services/metricsSignalr'
 import { getOperationsHealth } from '../services/operationsApi'
-import { getCurrentRound, getRoundHistory } from '../services/roundApi'
+import {
+  getCurrentRound,
+  getRecentRounds,
+  getRoundById,
+  getRoundCountEvents,
+  getRoundHistory,
+  getRoundTimeline,
+} from '../services/roundApi'
+import { startRoundConnection, stopRoundConnection } from '../services/roundSignalr'
 import { getEvents, getMetrics, getSession, listSessions, stopSession } from '../services/streamApi'
 import { getRoundPhase, getTimeLeftInSeconds } from '../utils/time'
 
@@ -39,6 +50,52 @@ function getActiveSession(sessions, sessionId) {
     || sessions[0]
 }
 
+function mergeRounds(...groups) {
+  const map = new Map()
+
+  groups.flat().filter(Boolean).forEach((round) => {
+    if (!round?.roundId) return
+    if (!map.has(round.roundId)) {
+      map.set(round.roundId, round)
+    }
+  })
+
+  return Array.from(map.values()).sort((a, b) => {
+    const left = new Date(b?.createdAt || 0).getTime()
+    const right = new Date(a?.createdAt || 0).getTime()
+    return left - right
+  })
+}
+
+function getRoundStatusLabel(round) {
+  const status = String(round?.status || 'desconhecido').toLowerCase()
+
+  switch (status) {
+    case 'open':
+      return 'Aberto'
+    case 'closing':
+      return 'Fechado para apostas'
+    case 'settling':
+      return 'Em apuracao'
+    case 'settled':
+      return 'Liquidado'
+    case 'void':
+      return 'Anulado'
+    default:
+      return status || '--'
+  }
+}
+
+function getRoundButtonLabel(round) {
+  if (!round) return 'Round sem dados'
+  return `${getRoundStatusLabel(round)} • count ${round.finalCount ?? round.currentCount ?? 0}`
+}
+
+function isVoidable(round) {
+  const status = String(round?.status || '').toLowerCase()
+  return Boolean(round?.roundId) && status !== 'settled' && status !== 'void'
+}
+
 export default function AdminDashboard() {
   const embedConfig = useMemo(() => getEmbedConfig(), [])
   const [sessions, setSessions] = useState([])
@@ -47,21 +104,35 @@ export default function AdminDashboard() {
   const [metrics, setMetrics] = useState(null)
   const [events, setEvents] = useState([])
   const [operations, setOperations] = useState(null)
-  const [round, setRound] = useState(null)
+  const [currentRound, setCurrentRound] = useState(null)
+  const [inspectedRound, setInspectedRound] = useState(null)
   const [history, setHistory] = useState([])
+  const [recentRounds, setRecentRounds] = useState([])
+  const [roundEvents, setRoundEvents] = useState([])
+  const [roundTimeline, setRoundTimeline] = useState([])
+  const [selectedRoundId, setSelectedRoundId] = useState('')
+  const [roundLookup, setRoundLookup] = useState('')
+  const [timelineFilter, setTimelineFilter] = useState('all')
   const [timerSeconds, setTimerSeconds] = useState(0)
   const [error, setError] = useState('')
   const [isStopping, setIsStopping] = useState(false)
   const [isVoiding, setIsVoiding] = useState(false)
+  const [isLoadingRoundDetail, setIsLoadingRoundDetail] = useState(false)
   const [frontendTransportState, setFrontendTransportState] = useState('connecting')
 
   const activeSession = getActiveSession(sessions, selectedSessionId)
-  const roundPhase = getRoundPhase(round)
+  const roundPhase = getRoundPhase(currentRound)
   const streamState = frontendTransportState
   const roundTimerLabel = roundPhase === 'open' ? 'Fechamento das Apostas' : 'Tempo Restante da Rodada'
   const webrtcSrc = useMemo(() => buildWebRtcWrapperUrl(embedConfig.cameraId), [embedConfig.cameraId])
   const hlsSrc = useMemo(() => buildHlsUrl(embedConfig.cameraId), [embedConfig.cameraId])
   const mjpegSrc = useMemo(() => buildMjpegUrl(), [])
+
+  const evidenceEvents = useMemo(
+    () => roundEvents.filter((item) => Boolean(item?.snapshotUrl)).slice(0, 6),
+    [roundEvents],
+  )
+  const selectedRoundMarkets = inspectedRound?.markets || []
 
   const loadSessions = useCallback(async () => {
     const { data } = await listSessions(false)
@@ -98,14 +169,63 @@ export default function AdminDashboard() {
     setOperations(data)
   }, [])
 
-  const loadRounds = useCallback(async () => {
-    const [currentRound, roundHistory] = await Promise.all([
+  const loadRoundArtifacts = useCallback(async (roundId) => {
+    if (!roundId) {
+      setRoundEvents([])
+      setRoundTimeline([])
+      return
+    }
+
+    const [crossingEvents, timeline] = await Promise.all([
+      getRoundCountEvents(roundId),
+      getRoundTimeline(roundId),
+    ])
+
+    setRoundEvents(Array.isArray(crossingEvents) ? crossingEvents : [])
+    setRoundTimeline(Array.isArray(timeline) ? timeline : [])
+  }, [])
+
+  const loadRoundDetail = useCallback(async (roundId, fallbackRound = null) => {
+    if (!roundId) {
+      setSelectedRoundId('')
+      setRoundLookup('')
+      setInspectedRound(null)
+      await loadRoundArtifacts('')
+      return
+    }
+
+    setIsLoadingRoundDetail(true)
+    try {
+      const round = fallbackRound && fallbackRound.roundId === roundId
+        ? fallbackRound
+        : await getRoundById(roundId)
+
+      setSelectedRoundId(roundId)
+      setRoundLookup(roundId)
+      setInspectedRound(round)
+      await loadRoundArtifacts(roundId)
+    } finally {
+      setIsLoadingRoundDetail(false)
+    }
+  }, [loadRoundArtifacts])
+
+  const loadRounds = useCallback(async (preferredRoundId = '') => {
+    const [nextCurrentRound, roundHistory, nextRecentRounds] = await Promise.all([
       getCurrentRound(embedConfig.cameraId),
       getRoundHistory(embedConfig.cameraId),
+      getRecentRounds(embedConfig.cameraId, 12),
     ])
-    setRound(currentRound)
+
+    setCurrentRound(nextCurrentRound)
     setHistory(Array.isArray(roundHistory) ? roundHistory : [])
-  }, [embedConfig.cameraId])
+
+    const mergedRecentRounds = mergeRounds(nextCurrentRound, nextRecentRounds, roundHistory)
+    setRecentRounds(mergedRecentRounds)
+
+    const targetRoundId = preferredRoundId || selectedRoundId || nextCurrentRound?.roundId || ''
+    const fallbackRound = mergedRecentRounds.find((item) => item.roundId === targetRoundId) || null
+    await loadRoundDetail(targetRoundId, fallbackRound)
+  }, [embedConfig.cameraId, loadRoundDetail, selectedRoundId])
 
   useEffect(() => {
     let active = true
@@ -134,11 +254,11 @@ export default function AdminDashboard() {
       const operationsFailed = failed.some(({ index }) => index === 1)
 
       if (backendFailed && operationsFailed) {
-        setError('Backend e worker estão indisponíveis no momento.')
+        setError('Backend e worker estao indisponiveis no momento.')
       } else if (backendFailed) {
-        setError('Backend indisponível. O painel operacional segue com dados do worker.')
+        setError('Backend indisponivel. O painel operacional segue com dados do worker.')
       } else {
-        setError('Worker indisponível. Os controles administrativos seguem disponíveis.')
+        setError('Worker indisponivel. Os controles administrativos seguem disponiveis.')
       }
     }
 
@@ -146,7 +266,7 @@ export default function AdminDashboard() {
 
     const intervalId = setInterval(() => {
       void loadOperations().catch(console.error)
-      void loadRounds().catch(console.error)
+      void loadRounds(selectedRoundId).catch(console.error)
       void loadSessions().catch(console.error)
     }, 5000)
 
@@ -154,12 +274,12 @@ export default function AdminDashboard() {
       active = false
       clearInterval(intervalId)
     }
-  }, [loadOperations, loadRounds, loadSessions])
+  }, [loadOperations, loadRounds, loadSessions, selectedRoundId])
 
   useEffect(() => {
     void loadSessionDetails(selectedSessionId).catch((err) => {
       console.error(err)
-      setError('Falha ao carregar os detalhes da sessão.')
+      setError('Falha ao carregar os detalhes da sessao.')
     })
   }, [loadSessionDetails, selectedSessionId])
 
@@ -189,21 +309,67 @@ export default function AdminDashboard() {
   }, [selectedSessionId])
 
   useEffect(() => {
+    let active = true
+
+    startRoundConnection({
+      onCountUpdated: async (payload) => {
+        if (!active) return
+        if (payload?.cameraId !== embedConfig.cameraId) return
+        setCurrentRound(payload)
+        setRecentRounds((prev) => mergeRounds(payload, prev))
+        if (!selectedRoundId || payload?.roundId === selectedRoundId) {
+          setInspectedRound(payload)
+          await loadRoundArtifacts(payload?.roundId)
+        }
+      },
+      onRoundUpdated: async (payload) => {
+        if (!active) return
+        if (payload?.cameraId !== embedConfig.cameraId) return
+        setCurrentRound(payload)
+        setRecentRounds((prev) => mergeRounds(payload, prev))
+        if (!selectedRoundId || payload?.roundId === selectedRoundId) {
+          setInspectedRound(payload)
+          await loadRoundArtifacts(payload?.roundId)
+        }
+      },
+      onRoundSettled: async (payload) => {
+        if (!active) return
+        if (payload?.cameraId !== embedConfig.cameraId) return
+        setCurrentRound(payload)
+        await loadRounds(selectedRoundId || payload?.roundId)
+      },
+      onRoundVoided: async (payload) => {
+        if (!active) return
+        if (payload?.cameraId !== embedConfig.cameraId) return
+        setCurrentRound(payload)
+        await loadRounds(selectedRoundId || payload?.roundId)
+      },
+    }).catch((err) => {
+      console.error(err)
+    })
+
+    return () => {
+      active = false
+      stopRoundConnection().catch(console.error)
+    }
+  }, [embedConfig.cameraId, loadRoundArtifacts, loadRounds, selectedRoundId])
+
+  useEffect(() => {
     const intervalId = setInterval(() => {
-      if (!round) {
+      if (!currentRound) {
         setTimerSeconds(0)
         return
       }
 
       const nextSeconds = roundPhase === 'open'
-        ? getTimeLeftInSeconds(round.betCloseAt)
-        : getTimeLeftInSeconds(round.endsAt)
+        ? getTimeLeftInSeconds(currentRound.betCloseAt)
+        : getTimeLeftInSeconds(currentRound.endsAt)
 
       setTimerSeconds(nextSeconds)
     }, 1000)
 
     return () => clearInterval(intervalId)
-  }, [round, roundPhase])
+  }, [currentRound, roundPhase])
 
   async function handleSessionCreated(sessionId) {
     sessionStorage.setItem('sessionId', sessionId)
@@ -222,24 +388,50 @@ export default function AdminDashboard() {
       await loadSessionDetails(session.id)
     } catch (err) {
       console.error(err)
-      setError('Não foi possível parar a sessão selecionada.')
+      setError('Nao foi possivel parar a sessao selecionada.')
     } finally {
       setIsStopping(false)
     }
   }
 
   async function handleVoidRound() {
-    if (!round?.roundId) return
+    if (!inspectedRound?.roundId) return
     setIsVoiding(true)
     setError('')
     try {
-      await voidRound(round.roundId)
-      await loadRounds()
+      await voidRound(inspectedRound.roundId)
+      await loadRounds(inspectedRound.roundId)
     } catch (err) {
       console.error(err)
-      setError('Não foi possível anular o round atual.')
+      setError('Nao foi possivel anular o round selecionado.')
     } finally {
       setIsVoiding(false)
+    }
+  }
+
+  async function handleRoundLookupSubmit(event) {
+    event.preventDefault()
+    const roundId = roundLookup.trim()
+    if (!roundId) return
+
+    setError('')
+    try {
+      await loadRoundDetail(roundId)
+    } catch (err) {
+      console.error(err)
+      setError('Nao foi possivel localizar o round informado.')
+    }
+  }
+
+  async function handleRoundSelection(roundId) {
+    if (!roundId) return
+    setError('')
+    try {
+      const fallbackRound = recentRounds.find((item) => item.roundId === roundId) || null
+      await loadRoundDetail(roundId, fallbackRound)
+    } catch (err) {
+      console.error(err)
+      setError('Falha ao carregar o round selecionado.')
     }
   }
 
@@ -248,9 +440,9 @@ export default function AdminDashboard() {
       <div className="admin-header">
         <div>
           <span className="admin-kicker">Painel Administrativo</span>
-          <h1>Controle operacional do Traffic Counter</h1>
+          <h1>Backoffice operacional do Traffic Counter</h1>
           <p>
-            Administre sessões, acompanhe a saúde do worker e monitore o round oficial da câmera{' '}
+            Investigue rounds oficiais, confira crossings persistidos e acompanhe a saude operacional da camera{' '}
             <strong>{embedConfig.cameraId}</strong>.
           </p>
         </div>
@@ -263,9 +455,9 @@ export default function AdminDashboard() {
             type="button"
             className="admin-danger-btn"
             onClick={handleVoidRound}
-            disabled={!round?.roundId || isVoiding}
+            disabled={!isVoidable(inspectedRound) || isVoiding}
           >
-            {isVoiding ? 'Anulando round...' : 'Anular Round Atual'}
+            {isVoiding ? 'Anulando round...' : 'Anular Round Selecionado'}
           </button>
         </div>
       </div>
@@ -277,12 +469,12 @@ export default function AdminDashboard() {
           <div className="card admin-video-card">
             <div className="admin-section-head">
               <div>
-                <span className="label">Transmissão</span>
+                <span className="label">Transmissao</span>
                 <h2>Monitor ao vivo</h2>
               </div>
               <div className="admin-inline-stats">
                 <span className="admin-inline-stat">
-                  Round: <strong>{round?.currentCount ?? 0}</strong>
+                  Round atual: <strong>{currentRound?.currentCount ?? 0}</strong>
                 </span>
                 <span className="admin-inline-stat">
                   Worker: <strong>{operations?.totalCount ?? operations?.health?.totalCount ?? 0}</strong>
@@ -295,15 +487,15 @@ export default function AdminDashboard() {
                 webrtcSrc={webrtcSrc}
                 src={hlsSrc}
                 fallbackSrc={mjpegSrc}
-                title={activeSession?.cameraName || embedConfig.cameraLabel || 'Câmera ativa'}
-                countValue={round?.currentCount ?? operations?.totalCount ?? operations?.health?.totalCount ?? 0}
+                title={activeSession?.cameraName || embedConfig.cameraLabel || 'Camera ativa'}
+                countValue={currentRound?.currentCount ?? operations?.totalCount ?? operations?.health?.totalCount ?? 0}
                 onStreamStatusChange={setFrontendTransportState}
               />
             </div>
           </div>
 
           <div className="admin-stats-grid">
-            <CounterCard value={round?.currentCount ?? 0} />
+            <CounterCard value={currentRound?.currentCount ?? 0} />
             <TimerCard seconds={timerSeconds} label={roundTimerLabel} tone={roundPhase === 'closing' ? 'warning' : 'default'} />
             <MetricsPanel totalCount={metrics?.totalCount ?? session?.totalCount ?? 0} lastMinuteCount={metrics?.lastMinuteCount ?? 0} />
           </div>
@@ -325,34 +517,200 @@ export default function AdminDashboard() {
             <div className="card admin-round-card">
               <div className="admin-section-head">
                 <div>
-                  <span className="label">Round Oficial</span>
-                  <h3>{round?.displayName || 'Rodada Turbo'}</h3>
+                  <span className="label">Backoffice de rounds</span>
+                  <h3>Investigacao oficial da camera</h3>
                 </div>
-                <span className={`admin-round-status admin-round-status-${roundPhase}`}>
-                  {roundPhase.toUpperCase()}
-                </span>
+                <button
+                  type="button"
+                  className="load-btn"
+                  onClick={() => { void loadRounds(selectedRoundId) }}
+                >
+                  Recarregar rounds
+                </button>
               </div>
 
-              <div className="admin-round-meta">
-                <div>
-                  <span className="label">Criado em</span>
-                  <strong>{fmtDate(round?.createdAt)}</strong>
+              <div className="round-investigation-grid">
+                <div className="card round-search-card">
+                  <div className="admin-section-head">
+                    <div>
+                      <span className="label">Busca</span>
+                      <h3>Localizar round</h3>
+                    </div>
+                  </div>
+
+                  <form className="round-search-form" onSubmit={handleRoundLookupSubmit}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Cole um roundId"
+                      value={roundLookup}
+                      onChange={(event) => setRoundLookup(event.target.value)}
+                    />
+                    <button type="submit" className="load-btn" disabled={!roundLookup.trim() || isLoadingRoundDetail}>
+                      {isLoadingRoundDetail ? 'Buscando...' : 'Buscar'}
+                    </button>
+                    <button
+                      type="button"
+                      className="load-btn"
+                      onClick={() => {
+                        if (currentRound?.roundId) {
+                          void handleRoundSelection(currentRound.roundId)
+                        }
+                      }}
+                      disabled={!currentRound?.roundId}
+                    >
+                      Round atual
+                    </button>
+                  </form>
+
+                  <div className="round-search-summary">
+                    <span>Selecionado</span>
+                    <strong>{inspectedRound?.roundId || '--'}</strong>
+                    <span>{getRoundStatusLabel(inspectedRound)}</span>
+                  </div>
                 </div>
-                <div>
-                  <span className="label">Fecha apostas</span>
-                  <strong>{fmtDate(round?.betCloseAt)}</strong>
-                </div>
-                <div>
-                  <span className="label">Encerra em</span>
-                  <strong>{fmtDate(round?.endsAt)}</strong>
-                </div>
-                <div>
-                  <span className="label">Contagem</span>
-                  <strong>{round?.currentCount ?? 0}</strong>
+
+                <div className="card round-recent-card">
+                  <div className="admin-section-head">
+                    <div>
+                      <span className="label">Rounds recentes</span>
+                      <h3>Navegacao por camera</h3>
+                    </div>
+                  </div>
+
+                  <div className="round-recent-list">
+                    {recentRounds.length === 0 && (
+                      <div className="admin-empty">Nenhum round encontrado para a camera.</div>
+                    )}
+
+                    {recentRounds.map((item) => (
+                      <button
+                        key={item.roundId}
+                        type="button"
+                        className={`round-recent-row${item.roundId === selectedRoundId ? ' is-active' : ''}`}
+                        onClick={() => { void handleRoundSelection(item.roundId) }}
+                      >
+                        <div>
+                          <strong>{item.roundId}</strong>
+                          <span>{getRoundButtonLabel(item)}</span>
+                        </div>
+                        <span>{fmtDate(item.createdAt)}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="admin-history-list">
+              <RoundSummaryCard
+                round={inspectedRound}
+                title="Round Selecionado"
+                locale={embedConfig.locale}
+                timezone={embedConfig.timezone}
+              />
+
+              <div className="admin-round-detail-grid">
+                <div className="card round-markets-card">
+                  <div className="admin-section-head">
+                    <div>
+                      <span className="label">Mercados</span>
+                      <h3>Resultado oficial</h3>
+                    </div>
+                  </div>
+
+                  {selectedRoundMarkets.length === 0 ? (
+                    <div className="empty-state">Nenhum mercado associado ao round selecionado.</div>
+                  ) : (
+                    <div className="round-market-list">
+                      {selectedRoundMarkets.map((market) => (
+                        <div
+                          key={market.marketId || market.id}
+                          className={`round-market-row${market.isWinner ? ' is-winner' : ''}`}
+                        >
+                          <div>
+                            <strong>{market.label || market.marketType}</strong>
+                            <span>Tipo: {market.marketType || '--'}</span>
+                          </div>
+                          <div>
+                            <strong>{market.targetValue ?? '--'}</strong>
+                            <span>{market.isWinner == null ? 'Pendente' : market.isWinner ? 'Vencedor' : 'Nao vencedor'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="card round-evidence-card">
+                  <div className="admin-section-head">
+                    <div>
+                      <span className="label">Evidencias</span>
+                      <h3>Trilha persistida do round</h3>
+                    </div>
+                  </div>
+
+                  <div className="round-evidence-grid">
+                    <div className="round-evidence-stat">
+                      <span>Crossings com snapshot</span>
+                      <strong>{evidenceEvents.length}</strong>
+                    </div>
+                    <div className="round-evidence-stat">
+                      <span>Status</span>
+                      <strong>{getRoundStatusLabel(inspectedRound)}</strong>
+                    </div>
+                    <div className="round-evidence-stat">
+                      <span>Contagem final</span>
+                      <strong>{inspectedRound?.finalCount ?? inspectedRound?.currentCount ?? '--'}</strong>
+                    </div>
+                  </div>
+
+                  {inspectedRound?.voidReason && (
+                    <div className="round-summary-void">
+                      <span className="label">Motivo do void</span>
+                      <strong>{inspectedRound.voidReason}</strong>
+                    </div>
+                  )}
+
+                  {evidenceEvents.length === 0 ? (
+                    <div className="empty-state">Nenhum snapshot persistido para este round.</div>
+                  ) : (
+                    <div className="round-evidence-list">
+                      {evidenceEvents.map((eventItem) => (
+                        <a
+                          key={eventItem.id || eventItem.eventHash}
+                          href={eventItem.snapshotUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="round-evidence-link"
+                        >
+                          <strong>{eventItem.objectClass || 'veiculo'} #{eventItem.trackId}</strong>
+                          <span>{fmtDate(eventItem.timestampUtc)}</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <CrossingEventsCard
+                events={roundEvents}
+                title="Crossing Events Oficiais"
+                locale={embedConfig.locale}
+                timezone={embedConfig.timezone}
+                limit={20}
+                emptyMessage="Nenhum crossing persistido para o round selecionado."
+              />
+
+              <RoundTimeline
+                items={roundTimeline}
+                title="Timeline Investigativa"
+                locale={embedConfig.locale}
+                timezone={embedConfig.timezone}
+                limit={40}
+                filter={timelineFilter}
+                onFilterChange={setTimelineFilter}
+              />
+
+              <div className="admin-history-list official-history-list">
                 {history.slice(0, 4).map((item) => (
                   <HistoryCard
                     key={item.roundId || item.id}
@@ -375,14 +733,14 @@ export default function AdminDashboard() {
           <div className="card admin-sessions-card">
             <div className="admin-section-head">
               <div>
-                <span className="label">Sessões</span>
+                <span className="label">Sessoes</span>
                 <h3>Pipelines cadastrados</h3>
               </div>
             </div>
 
             <div className="admin-session-list">
               {sessions.length === 0 && (
-                <div className="admin-empty">Nenhuma sessão encontrada.</div>
+                <div className="admin-empty">Nenhuma sessao encontrada.</div>
               )}
 
               {sessions.map((item) => (
@@ -396,7 +754,7 @@ export default function AdminDashboard() {
                   }}
                 >
                   <div>
-                    <strong>{item.cameraName || 'Câmera sem nome'}</strong>
+                    <strong>{item.cameraName || 'Camera sem nome'}</strong>
                     <span>{item.status}</span>
                   </div>
                   <span>{item.totalCount ?? 0}</span>

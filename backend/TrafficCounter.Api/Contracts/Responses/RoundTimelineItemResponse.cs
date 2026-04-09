@@ -17,5 +17,8 @@ public class RoundTimelineItemResponse
     public string? LineId { get; set; }
     public string? SnapshotUrl { get; set; }
     public double? Confidence { get; set; }
+    public string? StreamProfileId { get; set; }
+    public int? CountBefore { get; set; }
+    public int? CountAfter { get; set; }
     public string? EventHash { get; set; }
 }

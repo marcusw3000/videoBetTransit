@@ -290,6 +290,74 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
+    public async Task GetRoundById_returns_requested_round()
+    {
+        var dto = new RoundCountEventDto
+        {
+            CameraId = "cam_round_lookup",
+            TrackId = "901",
+            VehicleType = "car",
+            CrossedAt = DateTime.UtcNow,
+            TotalCount = 1,
+        };
+
+        (await _client.PostAsJsonAsync("/internal/round-count-event", dto)).EnsureSuccessStatusCode();
+
+        var currentRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_lookup");
+        Assert.NotNull(currentRound);
+
+        var byId = await _client.GetFromJsonAsync<RoundResponse>($"/rounds/{currentRound!.RoundId}");
+
+        Assert.NotNull(byId);
+        Assert.Equal(currentRound.RoundId, byId!.RoundId);
+        Assert.Equal("cam_round_lookup", byId.CameraId);
+        Assert.Equal(1, byId.CurrentCount);
+    }
+
+    [Fact]
+    public async Task GetRecentRounds_returns_active_and_closed_rounds_for_camera()
+    {
+        var dto = new RoundCountEventDto
+        {
+            CameraId = "cam_recent_rounds",
+            TrackId = "700",
+            VehicleType = "car",
+            CrossedAt = DateTime.UtcNow,
+            TotalCount = 1,
+        };
+
+        (await _client.PostAsJsonAsync("/internal/round-count-event", dto)).EnsureSuccessStatusCode();
+
+        var currentRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_recent_rounds");
+        Assert.NotNull(currentRound);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+
+            var persistedRound = await db.Rounds.FirstAsync(r => r.RoundId == Guid.Parse(currentRound!.RoundId));
+            persistedRound.Status = Domain.Enums.RoundStatus.Settled;
+            persistedRound.SettledAt = DateTime.UtcNow;
+            persistedRound.FinalCount = persistedRound.CurrentCount;
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+            await roundService.EnsureActiveRoundAsync("cam_recent_rounds");
+        }
+
+        var recentRounds = await _client.GetFromJsonAsync<List<RoundResponse>>("/rounds/recent?cameraId=cam_recent_rounds&limit=10");
+
+        Assert.NotNull(recentRounds);
+        Assert.True(recentRounds!.Count >= 2);
+        Assert.Contains(recentRounds, item => item.Status == "settled");
+        Assert.Contains(recentRounds, item => item.Status == "open");
+    }
+
+    [Fact]
     public async Task RoundTimeline_returns_round_and_crossing_events()
     {
         var dto = new RoundCountEventDto

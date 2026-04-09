@@ -32,6 +32,27 @@ public class RoundsController : ControllerBase
         return Ok(ToResponse(round));
     }
 
+    [HttpGet("recent")]
+    public async Task<IActionResult> GetRecent([FromQuery] int limit = 20, [FromQuery] string? cameraId = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var effectiveCameraId = string.IsNullOrWhiteSpace(cameraId) ? null : cameraId.Trim();
+
+        var query = db.Rounds
+            .Include(r => r.Markets)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(effectiveCameraId))
+            query = query.Where(r => r.CameraId == effectiveCameraId);
+
+        var rounds = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(Math.Clamp(limit, 1, 100))
+            .ToListAsync();
+
+        return Ok(rounds.Select(ToResponse));
+    }
+
     [HttpGet("history")]
     public async Task<IActionResult> GetHistory([FromQuery] int limit = 20, [FromQuery] string? cameraId = null)
     {
@@ -52,6 +73,21 @@ public class RoundsController : ControllerBase
             .ToListAsync();
 
         return Ok(rounds.Select(ToResponse));
+    }
+
+    [HttpGet("{roundId:guid}")]
+    public async Task<IActionResult> GetById(Guid roundId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var round = await db.Rounds
+            .Include(r => r.Markets)
+            .FirstOrDefaultAsync(r => r.RoundId == roundId);
+
+        if (round is null)
+            return NotFound(new { error = $"Round '{roundId}' nao encontrado." });
+
+        return Ok(ToResponse(round));
     }
 
     [HttpGet("{roundId:guid}/count-events")]
@@ -126,6 +162,9 @@ public class RoundsController : ControllerBase
                 SnapshotUrl = e.SnapshotUrl,
                 Confidence = e.Confidence,
                 Source = e.Source,
+                StreamProfileId = e.StreamProfileId,
+                CountBefore = e.CountBefore,
+                CountAfter = e.CountAfter,
                 EventHash = e.EventHash,
             })
             .ToListAsync();
