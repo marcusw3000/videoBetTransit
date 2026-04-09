@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AdminDashboard from './components/AdminDashboard'
 import BettingPanel from './components/BettingPanel'
-import CrossingEventsCard from './components/CrossingEventsCard'
 import DetectionsList from './components/DetectionsList'
+import HistoryDropdown from './components/HistoryDropdown'
 import LastResults from './components/LastResults'
-import RoundSummaryCard from './components/RoundSummaryCard'
-import RoundTimeline from './components/RoundTimeline'
 import VideoPlayer from './components/VideoPlayer'
-import { getCurrentRound, getRoundCountEvents, getRoundHistory, getRoundTimeline } from './services/roundApi'
+import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds, parseTimestampMs } from './utils/time'
@@ -108,11 +106,10 @@ function MarketPage() {
   const [selectedMarketId, setSelectedMarketId] = useState('')
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
   const [workerHealth, setWorkerHealth] = useState(null)
-  const [recentDetections, setRecentDetections] = useState([])
-  const [roundTimeline, setRoundTimeline] = useState([])
   const roundIdRef = useRef('')
 
   const roundPhase = getRoundPhase(round)
+  const isTurboRound = String(round?.roundMode || 'normal').toLowerCase() === 'turbo'
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
   const markets = round?.markets || []
@@ -150,33 +147,16 @@ function MarketPage() {
     setRound(nextRound)
   }, [])
 
-  const loadRoundArtifacts = useCallback(async (roundId) => {
-    if (!roundId) {
-      setRecentDetections([])
-      setRoundTimeline([])
-      return
-    }
-
-    const [events, timeline] = await Promise.all([
-      getRoundCountEvents(roundId),
-      getRoundTimeline(roundId),
-    ])
-
-    setRecentDetections(events)
-    setRoundTimeline(timeline)
-  }, [])
-
   const loadCurrentRound = useCallback(async () => {
     try {
       const data = await getCurrentRound(embedConfig.cameraId)
       updateRound(data)
-      await loadRoundArtifacts(data?.roundId)
       setError('')
     } catch (err) {
       console.error(err)
       setError('Falha ao carregar o round atual.')
     }
-  }, [embedConfig.cameraId, loadRoundArtifacts, updateRound])
+  }, [embedConfig.cameraId, updateRound])
 
   const loadHistory = useCallback(async () => {
     try {
@@ -226,7 +206,6 @@ function MarketPage() {
         ])
         if (!active) return
         updateRound(currentRound)
-        await loadRoundArtifacts(currentRound?.roundId)
         setHistory(roundHistory)
         setError('')
       } catch (err) {
@@ -247,17 +226,11 @@ function MarketPage() {
         if (!active) return
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
         updateRound(data)
-        if (data?.roundId) {
-          void loadRoundArtifacts(data.roundId).catch(console.error)
-        }
       },
       onRoundUpdated: (data) => {
         if (!active) return
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
         updateRound(data)
-        if (data?.roundId) {
-          void loadRoundArtifacts(data.roundId).catch(console.error)
-        }
       },
       onRoundSettled: async (data) => {
         if (!active) return
@@ -286,7 +259,7 @@ function MarketPage() {
       clearInterval(pollId)
       stopRoundConnection().catch(console.error)
     }
-  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, loadRoundArtifacts, updateRound])
+  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, updateRound])
 
   useEffect(() => {
     let active = true
@@ -387,11 +360,12 @@ function MarketPage() {
     <div className="page">
       <div className="page-inner">
         {/* Header */}
-        <header className="exchange-header">
+        <header className={`exchange-header${isTurboRound ? ' header-turbo' : ''}`}>
           <div className="header-left">
             <div className="header-brand-icon" aria-label="brand icon">🚗</div>
             <div className="header-title-block">
-              <span className="header-game-title">{gameTitle}</span>
+              <span className={`header-game-title${isTurboRound ? ' header-game-title-turbo' : ''}`}>{gameTitle}</span>
+              {isTurboRound && <span className="turbo-badge">TURBO</span>}
               <LiveBadge phase={roundPhase} workerOnline={workerOnline} />
             </div>
           </div>
@@ -443,23 +417,11 @@ function MarketPage() {
               />
             </div>
 
-            <div className="market-official-grid">
-              <RoundSummaryCard
-                round={round}
-                title="Estado Oficial"
-                locale={embedConfig.locale}
-                timezone={embedConfig.timezone}
-                compact
-              />
-              <RoundTimeline
-                items={roundTimeline}
-                title="Timeline Oficial"
-                locale={embedConfig.locale}
-                timezone={embedConfig.timezone}
-                limit={6}
-                compact
-              />
-            </div>
+            <HistoryDropdown
+              history={history}
+              locale={embedConfig.locale}
+              timezone={embedConfig.timezone}
+            />
           </div>
 
           <div className="right-panel">
@@ -477,15 +439,7 @@ function MarketPage() {
               balance={0}
               isSuspended={round?.isSuspended}
             />
-            <CrossingEventsCard
-              events={recentDetections}
-              title="Crossing Events"
-              locale={embedConfig.locale}
-              timezone={embedConfig.timezone}
-              limit={6}
-              compact
-            />
-            <DetectionsList detections={recentDetections} />
+            <DetectionsList detections={[]} />
           </div>
         </div>
 
