@@ -10,7 +10,7 @@ cd /d "%FRONTEND_DIR%"
 echo ============================================================
 echo  TrafficCounter Frontend
 echo  Diretorio: %FRONTEND_DIR%
-echo  URL      : http://localhost:5173
+echo  URL      : http://127.0.0.1:5173
 echo ============================================================
 echo.
 
@@ -30,7 +30,8 @@ if not exist "%FRONTEND_DIR%\node_modules" (
   )
 )
 
-npm run dev
+echo [INFO] Iniciando Vite com config loader native para contornar erro local do Rolldown no Windows...
+npm run dev -- --host 127.0.0.1 --configLoader native
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.

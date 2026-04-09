@@ -30,8 +30,8 @@ Fluxo resumido:
 3. Quando um veiculo cruza a linha, a engine envia `POST /api/rounds/count-events` para o backend.
 4. O backend atualiza o round e faz broadcast via SignalR.
 5. O frontend atualiza contador, timer, historico e lista de deteccoes.
-6. O video mostrado no browser pode vir do proxy `http://localhost:5000/proxy/video-feed`, que encaminha para o MJPEG Python ja anotado.
-7. O painel operacional consulta `http://localhost:5000/proxy/health` para mostrar estado da camera, backend e metricas.
+6. O video mostrado no browser pode vir do backend local em `http://127.0.0.1:8080` ou diretamente do MJPEG Python em `http://127.0.0.1:8090/video_feed`, dependendo do ambiente.
+7. O painel operacional consulta o backend local e o `/health` do worker Python para mostrar estado da camera, backend e metricas.
 8. A UI gera alertas quando stream, backend, frames ou contagem entram em estado suspeito.
 9. A secao de historico permite filtrar por camera, periodo e ID do round, alem de exportar CSV de rounds e count-events.
 
@@ -41,20 +41,16 @@ Todos os comandos partem da raiz do repositorio.
 
 ```bash
 # Backend .NET
-cd TrafficCounter.Api
-dotnet run
+backend-dev.bat
 
 # Frontend React
-cd traffic-counter-front
-npm run dev
+frontend-dev.bat
 
 # Worker Python oficial
-cd vision-worker
-python app.py
+vision-worker-dev.bat
 ```
 
-No Windows, `start.bat` sobe tudo e ainda garante a instalacao das dependencias Python antes de iniciar a engine.
-No ambiente local, o `start.bat` tambem sobe o backend com `ASPNETCORE_ENVIRONMENT=Development`.
+No Windows, `start-dev.bat` e `start.bat dev` sobem backend, frontend e worker usando launchers dedicados.
 Para validar o projeto inteiro de uma vez, use `validate.bat` na raiz.
 
 ## Estrutura de Pastas
@@ -68,6 +64,10 @@ videoBetTransit/
 |   |-- requirements.txt
 |   |-- snapshots/
 |-- start.bat
+|-- start-dev.bat
+|-- backend-dev.bat
+|-- frontend-dev.bat
+|-- vision-worker-dev.bat
 |-- backend/
 |-- frontend/
 ```
@@ -76,10 +76,14 @@ Arquivos importantes:
 - `vision-worker/app.py`: worker oficial de deteccao, contagem e servidor MJPEG.
 - `vision-worker/backend_client.py`: cliente HTTP usado pelo worker para falar com o backend.
 - `vision-worker/config.json`: stream, ROI, linha de contagem, modelo, MJPEG host e porta.
-- `start.bat`: inicializacao automatica do backend, frontend e worker oficial.
+- `backend-dev.bat`: launcher canonico do backend local.
+- `frontend-dev.bat`: launcher canonico do frontend local.
+- `vision-worker-dev.bat`: launcher canonico do worker local.
+- `start.bat`: orquestrador principal da stack local.
+- `start-dev.bat`: orquestrador simplificado para bootstrap local no Windows.
 - `validate.bat`: validacao unica com sintaxe Python, testes Python, testes .NET e build do frontend.
-- `traffic-counter-front/src/App.jsx`: orquestra tela principal.
-- `traffic-counter-front/src/components/VideoPlayer.jsx`: exibe o feed MJPEG anotado.
+- `frontend/src/App.jsx`: orquestra tela principal.
+- `frontend/src/components/VideoPlayer.jsx`: exibe o feed MJPEG anotado.
 
 ## Engine Python
 
@@ -92,6 +96,7 @@ Responsabilidades principais:
 - salvar snapshots opcionais
 - enviar `count-events` e `live-detections`
 - servir `/health` e `/video_feed` via Flask, publicados por `waitress`
+- contar apenas a classe `car`, ignorando `motorcycle`, `bus` e `truck`
 
 Configuracoes relevantes em `vision-worker/config.json`:
 - `stream_url`: URL do stream da camera
@@ -174,11 +179,11 @@ Fluxo atual:
 
 Observacao:
 - `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
-- `OperationsCard.jsx` mostra saude operacional usando o health proxied do backend
+- `OperationsCard.jsx` mostra saude operacional via backend e health do worker
 - `AlertsPanel.jsx` mostra alertas para stream indisponivel, backend com falha, frames parados e contagem zerada suspeita
 - o historico usa `GET /api/rounds/history` e `GET /api/rounds/{roundId}/count-events` para filtros, tendencia e exportacao CSV
-- por padrao, `VITE_MJPEG_URL` aponta para o proxy do backend
-- por padrao, `VITE_MJPEG_HEALTH_URL` aponta para `http://localhost:5000/proxy/health`
+- por padrao, os endpoints locais do frontend apontam para `127.0.0.1`
+- no Windows atual, o launcher `frontend-dev.bat` sobe o Vite com `--configLoader native` para contornar o erro local `spawn EPERM` do loader padrao
 - o frontend nao possui mais tela de configuracao de ROI/linha
 - `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL` e `VITE_MJPEG_URL` devem ser definidos por ambiente
 - `hls.js` foi removido do fluxo principal
@@ -208,10 +213,8 @@ Observacao:
 
 ## Portas e Endpoints Locais
 
-- Backend .NET: `http://localhost:5000`
-- Frontend Vite: `http://localhost:5173`
-- Proxy MJPEG .NET: `http://localhost:5000/proxy/video-feed`
-- Proxy Health .NET: `http://localhost:5000/proxy/health`
+- Backend .NET: `http://127.0.0.1:8080`
+- Frontend Vite: `http://127.0.0.1:5173`
 - MJPEG Python: `http://127.0.0.1:8090/video_feed`
 - Health Python: `http://127.0.0.1:8090/health`
 
@@ -220,6 +223,6 @@ Observacao:
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
 - Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
 - se quiser sincronizar a esteira no Supabase, crie a tabela usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `vision-worker/config.json`
-- O uso do proxy `/proxy/video-feed` reduz o problema de mixed content e evita expor o token do MJPEG no browser por padrao.
+- No ambiente Windows atual, `127.0.0.1` e o host confiavel; `localhost` pode falhar por resolver em `::1`.
 - A `.venv` precisa estar atualizada com `vision-worker/requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.

@@ -526,14 +526,21 @@ Analisando a estrutura atual do codigo, o projeto parece estar entre a Fase 0 e 
 - ja existe lifecycle basico de round com `open`, `closing`, `settled` e `void`
 - ja existem endpoints internos para contagem e anulacao
 - o `start.bat` ja assume `vision-worker\app.py` como worker oficial
-- ainda existe duplicidade relevante entre `app.py` na raiz e `vision-worker\app.py`
-- ainda nao estao formalizados no backend os eventos soberanos esperados para `crossing_events` e `round_events`
-- o endpoint `GET /rounds/{roundId}/count-events` ainda esta em stub
+- `backend-dev.bat`, `vision-worker-dev.bat` e `frontend-dev.bat` ja existem como launchers dedicados
+- `start-dev.bat` e `start.bat` ja atuam como orquestradores finos com checks de readiness via subrotinas
+- o backend ja responde corretamente em `http://127.0.0.1:8080/rounds/current?cameraId=cam_001`
+- o worker ja responde corretamente em `http://127.0.0.1:8090/health` quando iniciado isoladamente
+- o frontend local ja sobe em `http://127.0.0.1:5173` pelo launcher canonico
+- o launcher do frontend precisou usar `vite --configLoader native` para contornar o erro local `spawn EPERM` do loader padrao no Windows
+- o worker foi restringido operacionalmente para contar apenas `car`
+- `motorcycle`, `bus` e `truck` foram excluidos da configuracao e do filtro explicito do pipeline
+- a maior fragilidade imediata deixou de ser `split-brain` de entrypoint e passou a ser a validacao ponta a ponta da contagem no fluxo completo
 
 Conclusao pratica:
 
-- a Fase 1 foi iniciada antes de a Fase 0 estar completamente fechada
-- o maior risco imediato continua sendo `split-brain` entre entrypoints, configuracao e fluxo oficial do worker
+- a Fase 1 foi iniciada antes de a Fase 0 estar completamente estavel em desenvolvimento local
+- `EP01` esta consolidado estruturalmente, mas ainda nao esta encerrado operacionalmente
+- o principal bloqueio atual para ver contagem no front nao e mais schema ou `round_id`, e sim subida local consistente de backend, frontend e worker
 - por isso, o proximo passo recomendado nao e abrir novas integracoes de operadora ainda
 
 ## 17. Proximo Passo Recomendado Agora
@@ -563,6 +570,13 @@ Com a Fase 0 realmente encerrada, o passo seguinte passa a ser:
 1. modelar e persistir `crossing_events` com vinculacao a `round_id`
 2. criar `round_events` para transicoes oficiais do lifecycle
 3. substituir o endpoint stub de `count-events` por consulta real auditavel
+
+### Nota operacional atual
+
+- no ambiente Windows atual, `127.0.0.1` e o host confiavel para bootstrap local
+- `localhost` estava gerando falso negativo nos checks por resolucao em `::1`
+- o backend ja responde por camera em `cam_001`
+- backend, frontend e worker ja respondem isoladamente em `127.0.0.1`
 
 ## 18. Criticos de Produto
 
@@ -649,8 +663,11 @@ Tasks:
 - [ ] revisar `start.bat` para refletir apenas o fluxo oficial
 - [ ] padronizar local de configuracao do worker
 - [ ] manter compatibilidade legada da raiz apenas como shim para o worker oficial
+- [ ] estabilizar o bootstrap Windows com launchers dedicados e readiness checks confiaveis
 - [ ] validar a esteira de streams no fluxo de startup completo
 - [ ] validar sincronizacao local e remota de `stream_profiles`
+- [x] fechar bootstrap local do frontend (`frontend-dev.bat`) sem erro `spawn EPERM`
+- [ ] registrar formalmente a politica operacional de contagem apenas para `car`
 
 Criterio de aceite:
 
@@ -664,8 +681,23 @@ Status atual:
 - [x] revisar `start.bat` para refletir apenas o fluxo oficial
 - [x] padronizar local de configuracao do worker
 - [x] manter compatibilidade legada da raiz apenas como shim para o worker oficial
+- [x] criar launchers dedicados `backend-dev.bat`, `vision-worker-dev.bat` e `frontend-dev.bat`
+- [x] mover os checks de readiness do bootstrap para subrotinas nos orquestradores
+- [x] alinhar bootstrap local para `127.0.0.1` no Windows atual
+- [x] restringir o worker para contar apenas `car`
+- [ ] estabilizar o bootstrap Windows no fluxo completo
 - [ ] validar a esteira de streams no fluxo de startup completo
 - [ ] validar sincronizacao local e remota de `stream_profiles`
+- [x] remover erro local do frontend `spawn EPERM`
+
+Estado operacional de `EP01`:
+
+- consolidado estruturalmente
+- launchers canonicos validados isoladamente
+- backend validado em `127.0.0.1:8080`
+- worker validado em `127.0.0.1:8090` quando iniciado isoladamente
+- frontend validado em `127.0.0.1:5173`
+- pendente de validacao ponta a ponta da contagem no fluxo completo
 
 ### EP02 - Persistencia do Core de Rounds
 
@@ -696,6 +728,12 @@ Tasks:
 Criterio de aceite:
 
 - existe schema minimo para operar e auditar um round do inicio ao fim
+
+Estado atual de `EP02`:
+
+- o round engine e a persistencia ja avancaram materialmente no backend
+- o backend ja responde round atual por camera (`cam_001`)
+- o maior bloqueio para validacao visual ponta a ponta deixou de ser `round_id` e passou a ser o bootstrap local consistente dos processos
 
 ### EP03 - Round Engine
 
@@ -1079,34 +1117,38 @@ Criterio de aceite:
 
 Se formos executar agora, a ordem mais eficiente e:
 
-1. `EP01` Consolidacao do Vision Worker
-2. `EP02` Persistencia do Core de Rounds
-3. `EP03` Round Engine
-4. `EP04` Integracao Worker x Round Engine
-5. `EP05` Regras de Jogo e Mercados
-6. `EP06` Freeze Operacional por Round
-7. `EP07` Provider API
-8. `EP08` Webhooks e Entrega Assincrona
-9. `EP09` Wallet e Contrato Financeiro
-10. `EP10` Backoffice Operacional
-11. `EP11` Incidentes, Alertas e Runbooks
-12. `EP12` Evidencias, Replay e Reprocessamento
-13. `EP13` Seguranca, RBAC e Auditoria Administrativa
-14. `EP14` LGPD, Retencao e Pacote Regulatorio
-15. `EP15` Embed, Front Comercial e Rollout
+1. validar o fluxo ponta a ponta local com backend + frontend + worker
+2. alinhar documentacao operacional para launchers canonicos, `127.0.0.1` e `vite --configLoader native`
+3. revisar se existe qualquer caminho residual que exponha classes nao `car`
+4. retomar `EP02` Persistencia do Core de Rounds
+5. seguir com `EP03` Round Engine
+6. seguir com `EP03` Round Engine
+7. seguir com `EP04` Integracao Worker x Round Engine
+8. seguir com `EP05` Regras de Jogo e Mercados
+9. seguir com `EP06` Freeze Operacional por Round
+10. seguir com `EP07` Provider API
+11. seguir com `EP08` Webhooks e Entrega Assincrona
+12. seguir com `EP09` Wallet e Contrato Financeiro
+13. seguir com `EP10` Backoffice Operacional
+14. seguir com `EP11` Incidentes, Alertas e Runbooks
+15. seguir com `EP12` Evidencias, Replay e Reprocessamento
+16. seguir com `EP13` Seguranca, RBAC e Auditoria Administrativa
+17. seguir com `EP14` LGPD, Retencao e Pacote Regulatorio
+18. seguir com `EP15` Embed, Front Comercial e Rollout
 
 ## 24. Proxima Sprint Recomendada
 
 Sprint tecnica inicial sugerida:
 
-- `EP01` fechar entrypoint, startup e configuracao operacional
-- `EP02` modelar schema inicial de rounds e eventos
-- `EP03` implementar lifecycle basico do round
-- `EP04` padronizar envio de `count-events` com `round_id`
+- validar `start-dev.bat` com backend + frontend + worker subindo de forma previsivel
+- alinhar documentacao local para `127.0.0.1` e launchers dedicados
+- registrar o uso de `vite --configLoader native` como workaround oficial do Windows atual
+- revisar qualquer caminho residual de deteccao/overlay/payload que nao seja `car`
+- retomar `EP02` e `EP03` assim que o bootstrap local estiver confiavel
 
 Resultado esperado da primeira sprint:
 
-- round persistido
-- eventos persistidos
-- worker apontando para um backend que ja entende lifecycle
-- base pronta para comecar `Provider API`
+- backend, frontend e worker sobem de forma previsivel no Windows local
+- o front deixa de exibir `--` e acompanha `currentCount` do round atual
+- o worker opera apenas com `car` como classe contavel
+- base local volta a ficar confiavel para continuar `EP02` e `EP03`
