@@ -545,7 +545,7 @@ class PipelineRuntime:
         with self._lock:
             stream = self._stream
         if stream is not None:
-            stream.request_reset()
+            stream.request_refresh_latest()
 
     def wait_for_raw_frame(self, last_seq: int, timeout: float = 0.25):
         return self.raw_frames.wait_for_new(last_seq, timeout)
@@ -588,30 +588,41 @@ pipeline_runtime = PipelineRuntime(runtime_stats, streamer)
 pipeline_request_lock = threading.Lock()
 pending_pipeline_start: PipelineStartRequest | None = None
 pending_pipeline_stop = False
+pending_pipeline_refresh = False
 
 
 def queue_pipeline_start(request_data: PipelineStartRequest):
-    global pending_pipeline_start, pending_pipeline_stop
+    global pending_pipeline_start, pending_pipeline_stop, pending_pipeline_refresh
     with pipeline_request_lock:
         pending_pipeline_start = request_data
         pending_pipeline_stop = False
+        pending_pipeline_refresh = False
 
 
 def queue_pipeline_stop():
-    global pending_pipeline_start, pending_pipeline_stop
+    global pending_pipeline_start, pending_pipeline_stop, pending_pipeline_refresh
     with pipeline_request_lock:
         pending_pipeline_stop = True
         pending_pipeline_start = None
+        pending_pipeline_refresh = False
+
+
+def queue_pipeline_refresh():
+    global pending_pipeline_refresh
+    with pipeline_request_lock:
+        pending_pipeline_refresh = True
 
 
 def consume_pipeline_commands():
-    global pending_pipeline_start, pending_pipeline_stop
+    global pending_pipeline_start, pending_pipeline_stop, pending_pipeline_refresh
     with pipeline_request_lock:
         next_start = pending_pipeline_start
         next_stop = pending_pipeline_stop
+        next_refresh = pending_pipeline_refresh
         pending_pipeline_start = None
         pending_pipeline_stop = False
-    return next_start, next_stop
+        pending_pipeline_refresh = False
+    return next_start, next_stop, next_refresh
 
 def is_mjpeg_request_authorized() -> bool:
     if not mjpeg_token_ref:
@@ -1282,6 +1293,36 @@ def ensure_mediamtx_source_path(cfg: dict, path_name: str, source_url: str) -> b
         return False
     except Exception as exc:
         logger.warning("Falha ao configurar source path no MediaMTX: %s", exc)
+        return False
+
+
+def remove_mediamtx_source_path(cfg: dict, path_name: str) -> bool:
+    api_base = str(cfg.get("mediamtx_api_url") or "").strip().rstrip("/")
+    if not api_base or not path_name:
+        return False
+
+    try:
+        response = requests.delete(
+            f"{api_base}/v3/config/paths/remove/{path_name}",
+            timeout=5,
+        )
+        if response.ok or response.status_code == 404:
+            logger.info(
+                "Path MediaMTX removido para refresh: %s (status=%s)",
+                path_name,
+                response.status_code,
+            )
+            return True
+
+        logger.warning(
+            "Falha ao remover path MediaMTX %s (HTTP %d): %s",
+            path_name,
+            response.status_code,
+            response.text[:200],
+        )
+        return False
+    except Exception as exc:
+        logger.warning("Falha ao remover path MediaMTX %s: %s", path_name, exc)
         return False
 
 
@@ -1968,6 +2009,9 @@ class EditorControlPanel:
 # ---------------------------------------------------------------------------
 class StreamCapture:
     MAX_FAILURES = 30
+    LIVE_EDGE_DRAIN_SECONDS = 1.25
+    LIVE_EDGE_MAX_FRAMES = 60
+    LIVE_EDGE_SLOW_READ_MS = 120.0
 
     def __init__(
         self,
@@ -1991,6 +2035,7 @@ class StreamCapture:
         self.target_fps = max(0.0, float(target_fps))
         self._effective_fps = 0.0
         self._reset_requested = False
+        self._refresh_latest_requested = False
         self._connect()
 
     def _connect(self):
@@ -2045,6 +2090,12 @@ class StreamCapture:
             logger.warning("Falha ao abrir stream na conexão inicial.")
 
     def read(self):
+        if self._refresh_latest_requested:
+            self._refresh_latest_requested = False
+            self._reset_requested = False
+            self._connect()
+            return self._read_most_recent_frame()
+
         if self._reset_requested:
             self._reset_requested = False
             self._connect()
@@ -2066,9 +2117,51 @@ class StreamCapture:
             self.stats.set_stream_status(True, self._fail_count)
         return True, frame
 
+    def _read_most_recent_frame(self):
+        if self.cap is None:
+            return False, None
+
+        deadline = time.perf_counter() + self.LIVE_EDGE_DRAIN_SECONDS
+        last_frame = None
+        drained_frames = 0
+
+        while drained_frames < self.LIVE_EDGE_MAX_FRAMES and time.perf_counter() < deadline:
+            read_started = time.perf_counter()
+            ret, frame = self.cap.read()
+            read_elapsed_ms = (time.perf_counter() - read_started) * 1000.0
+
+            if not ret:
+                break
+
+            last_frame = frame
+            drained_frames += 1
+
+            # Reads that stay "fast" usually indicate buffered backlog.
+            # Once the read starts blocking, we are likely near the live edge.
+            if read_elapsed_ms >= self.LIVE_EDGE_SLOW_READ_MS:
+                break
+
+        if last_frame is not None:
+            logger.info(
+                "Atualizacao para frame mais atual concluida | frames descartados: %s",
+                max(0, drained_frames - 1),
+            )
+            self._fail_count = 0
+            if self.stats is not None:
+                self.stats.set_stream_status(True, self._fail_count)
+            return True, last_frame
+
+        if self.stats is not None:
+            self.stats.set_stream_status(False, self._fail_count)
+        return False, None
+
     def request_reset(self):
         logger.info("Reset manual do stream solicitado.")
         self._reset_requested = True
+
+    def request_refresh_latest(self):
+        logger.info("Atualizacao manual para o frame mais atual solicitada.")
+        self._refresh_latest_requested = True
 
     def release(self):
         if self.cap:
@@ -2163,8 +2256,8 @@ def main():
     operator_preview_fps_limit = float(cfg.get("operator_preview_fps_limit", 12))
     editor = None
     control_panel = None
-    reset_stream_requested = False
     pending_stream_profile = None
+    pending_stream_refresh_started_at = None
     current_round_id = str(cfg.get("round_id", "")).strip()
     last_visual_detections: list[dict] = []
     last_operator_preview = None
@@ -2231,11 +2324,9 @@ def main():
             editor.message = "Saved locally, but backend sync failed"
 
     def request_stream_reset():
-        nonlocal reset_stream_requested
-
-        reset_stream_requested = True
+        queue_pipeline_refresh()
         if editor is not None:
-            editor.message = "Manual stream reset requested"
+            editor.message = "Recriando ingestao da source..."
 
     def queue_stream_profile(profile: dict, *, message: str):
         nonlocal pending_stream_profile, roi, line, count_direction
@@ -2353,7 +2444,7 @@ def main():
     fps_start_ts = time.time()
 
     while True:
-        next_pipeline_start, should_stop_pipeline = consume_pipeline_commands()
+        next_pipeline_start, should_stop_pipeline, should_refresh_pipeline = consume_pipeline_commands()
 
         if should_stop_pipeline:
             pipeline_runtime.stop()
@@ -2361,6 +2452,81 @@ def main():
             last_raw_seq = 0
             if editor is not None:
                 editor.message = "Pipeline parada pelo orquestrador"
+
+        if should_refresh_pipeline:
+            active_pipeline_cfg = pipeline_runtime.get_config() or current_pipeline_cfg
+            refresh_source_url = str(active_pipeline_cfg.get("stream_url") or cfg.get("stream_url") or "").strip()
+            refresh_camera_id = str(active_pipeline_cfg.get("camera_id") or cfg.get("camera_id") or "").strip()
+            refresh_raw_path = str(active_pipeline_cfg.get("raw_stream_path") or "").strip()
+            refresh_processed_path = str(active_pipeline_cfg.get("processed_stream_path") or "").strip()
+            recreate_raw_path = bool(active_pipeline_cfg.get("reset_stream_recreate_raw_path", True))
+            refresh_started_at = time.perf_counter()
+
+            logger.info(
+                "Refresh upstream solicitado | source=%s | raw_path=%s | recreate_raw=%s",
+                refresh_source_url or "<none>",
+                refresh_raw_path or "<none>",
+                recreate_raw_path,
+            )
+
+            pipeline_runtime.stop()
+            streamer.clear()
+            last_raw_seq = 0
+            reset_tracking_state()
+            last_track_results = None
+            last_visual_detections = []
+            last_operator_preview = None
+            last_operator_preview_at = 0.0
+            frame_count = 0
+            fps_frame_count = 0
+            fps_start_ts = time.time()
+
+            if editor is not None:
+                editor.message = "Recriando ingestao da source..."
+
+            refresh_ready = True
+            if recreate_raw_path:
+                remove_ok = remove_mediamtx_source_path(cfg, refresh_raw_path)
+                if editor is not None:
+                    editor.message = "Reconectando captura..."
+                add_ok = ensure_mediamtx_source_path(cfg, refresh_raw_path, refresh_source_url)
+                refresh_ready = add_ok
+                logger.info(
+                    "Refresh upstream MediaMTX | raw_path=%s | remove_ok=%s | add_ok=%s",
+                    refresh_raw_path or "<none>",
+                    remove_ok,
+                    add_ok,
+                )
+
+            if refresh_ready:
+                current_pipeline_cfg = build_pipeline_config(
+                    cfg,
+                    source_url=refresh_source_url or cfg.get("stream_url"),
+                    camera_id=refresh_camera_id or cfg.get("camera_id"),
+                    raw_stream_path=refresh_raw_path or None,
+                    processed_stream_path=refresh_processed_path or None,
+                )
+                pipeline_runtime.start(current_pipeline_cfg)
+                pending_stream_refresh_started_at = time.time()
+                elapsed_ms = (time.perf_counter() - refresh_started_at) * 1000.0
+                logger.info(
+                    "Refresh upstream concluido | source=%s | raw_path=%s | duracao=%.1f ms",
+                    refresh_source_url or "<none>",
+                    refresh_raw_path or "<none>",
+                    elapsed_ms,
+                )
+                if editor is not None:
+                    editor.message = "Stream reposicionada no ponto mais atual disponivel"
+            else:
+                elapsed_ms = (time.perf_counter() - refresh_started_at) * 1000.0
+                logger.warning(
+                    "Refresh upstream falhou | source=%s | raw_path=%s | duracao=%.1f ms",
+                    refresh_source_url or "<none>",
+                    refresh_raw_path or "<none>",
+                    elapsed_ms,
+                )
+                if editor is not None:
+                    editor.message = "Falha ao recriar ingestao da source"
 
         if next_pipeline_start is not None:
             if next_pipeline_start.source_url:
@@ -2446,12 +2612,6 @@ def main():
             time.sleep(0.05)
             continue
 
-        if reset_stream_requested:
-            pipeline_runtime.request_capture_reset()
-            reset_stream_requested = False
-            if editor is not None:
-                editor.message = "Stream resetado manualmente"
-
         last_raw_seq, frame, captured_at = pipeline_runtime.wait_for_raw_frame(last_raw_seq, timeout=0.5)
         if frame is None or captured_at is None:
             if frame_count == 0:
@@ -2459,6 +2619,13 @@ def main():
             continue
 
         frame_count += 1
+
+        if frame_count == 1 and pending_stream_refresh_started_at is not None:
+            logger.info(
+                "Primeiro frame recebido apos refresh upstream em %.1f ms",
+                (time.time() - pending_stream_refresh_started_at) * 1000.0,
+            )
+            pending_stream_refresh_started_at = None
 
         if frame_count == 1:
             h0, w0 = frame.shape[:2]
