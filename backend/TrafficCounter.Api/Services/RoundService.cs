@@ -19,17 +19,23 @@ public class RoundService
     private readonly IHubContext<RoundHub> _hub;
     private readonly ILogger<RoundService> _logger;
     private readonly RoundOptions _options;
+    private readonly IRandomSource _randomSource;
+    private readonly BetService _betService;
 
     public RoundService(
         IDbContextFactory<AppDbContext> dbFactory,
         IHubContext<RoundHub> hub,
         ILogger<RoundService> logger,
-        IOptions<RoundOptions> options)
+        IOptions<RoundOptions> options,
+        IRandomSource randomSource,
+        BetService betService)
     {
         _dbFactory = dbFactory;
         _hub = hub;
         _logger = logger;
         _options = options.Value;
+        _randomSource = randomSource;
+        _betService = betService;
     }
 
     public async Task<bool> EnsureActiveRoundAsync(string cameraId = "default")
@@ -114,6 +120,9 @@ public class RoundService
 
         foreach (var round in settledRounds)
         {
+            if (round.FinalCount.HasValue && round.SettledAt.HasValue)
+                await _betService.SettleAcceptedBetsForRoundAsync(round.RoundId, round.FinalCount.Value, round.SettledAt.Value);
+
             await BroadcastAsync("round_settled", round);
             await using var db2 = await _dbFactory.CreateDbContextAsync();
             await CreateNewRoundAsync(db2, round.CameraId);
@@ -273,6 +282,9 @@ public class RoundService
         await db.SaveChangesAsync();
         _logger.LogInformation("[Round {Id}] Anulado. Motivo: {Reason}", round.RoundId, reason);
 
+        if (round.VoidedAt.HasValue)
+            await _betService.VoidAcceptedBetsForRoundAsync(round.RoundId, round.VoidedAt.Value);
+
         await BroadcastAsync("round_voided", round);
 
         await using var db2 = await _dbFactory.CreateDbContextAsync();
@@ -281,22 +293,46 @@ public class RoundService
         return true;
     }
 
+    public async Task NotifyStreamProfileActivatedAsync(string cameraId, string? streamProfileId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var normalizedCameraId = NormalizeCameraId(cameraId);
+        var normalizedProfileId = NormalizeOptional(streamProfileId);
+        var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+
+        if (string.Equals(state.ActiveStreamProfileId, normalizedProfileId, StringComparison.Ordinal))
+            return;
+
+        state.ActiveStreamProfileId = normalizedProfileId;
+        state.RoundsSinceProfileSwitch = 0;
+        state.LastProfileChangedAt = DateTime.UtcNow;
+        state.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+    }
+
     private async Task CreateNewRoundAsync(AppDbContext db, string cameraId)
     {
         var now = DateTime.UtcNow;
+        var normalizedCameraId = NormalizeCameraId(cameraId);
+        var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+        var selection = SelectRoundMode(state);
+        var timing = GetTiming(selection.RoundMode);
         var round = new Round
         {
             RoundId = Guid.NewGuid(),
-            CameraId = NormalizeCameraId(cameraId),
+            CameraId = normalizedCameraId,
+            RoundMode = selection.RoundMode,
             Status = RoundStatus.Open,
-            DisplayName = "Rodada Turbo",
+            DisplayName = GetDisplayName(selection.RoundMode),
             CreatedAt = now,
-            BetCloseAt = now.AddSeconds(_options.BetWindowSeconds),
-            EndsAt = now.AddSeconds(_options.DurationSeconds),
+            BetCloseAt = now.AddSeconds(timing.BetWindowSeconds),
+            EndsAt = now.AddSeconds(timing.DurationSeconds),
             CurrentCount = 0,
         };
 
-        var markets = _options.Markets.Select((t, i) => new RoundMarket
+        var markets = GetMarketTemplates(selection.RoundMode).Select((t, i) => new RoundMarket
         {
             MarketId = Guid.NewGuid(),
             RoundId = round.RoundId,
@@ -311,15 +347,26 @@ public class RoundService
             SortOrder = i,
         }).ToList();
 
+        state.RoundsSinceProfileSwitch += 1;
+        state.UpdatedAt = now;
+
         db.Rounds.Add(round);
         db.RoundMarkets.AddRange(markets);
+        db.RoundEvents.Add(CreateRoundEvent(
+            round,
+            "round_mode_selected",
+            now,
+            0,
+            $"roundMode={selection.RoundMode.ToString().ToLowerInvariant()};eligible={selection.WasEligibleForTurbo.ToString().ToLowerInvariant()};streamProfileId={state.ActiveStreamProfileId ?? "none"};roundsSinceSwitchBeforeCreate={selection.RoundsSinceProfileSwitch}",
+            "round_manager"));
         db.RoundEvents.Add(CreateRoundEvent(round, "opened", now, 0, source: "round_manager"));
         await db.SaveChangesAsync();
 
         _logger.LogInformation(
-            "[Round {Id}] Iniciado para camera {CameraId} com {Count} mercado(s). Encerra as {EndsAt:HH:mm:ss} UTC.",
+            "[Round {Id}] Iniciado para camera {CameraId} no modo {RoundMode} com {Count} mercado(s). Encerra as {EndsAt:HH:mm:ss} UTC.",
             round.RoundId,
             round.CameraId,
+            round.RoundMode,
             markets.Count,
             round.EndsAt);
     }
@@ -428,6 +475,12 @@ public class RoundService
         return string.IsNullOrWhiteSpace(cameraId) ? "default" : cameraId.Trim();
     }
 
+    private static string? NormalizeOptional(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
     private static string NormalizeVehicleType(string vehicleType)
     {
         return string.IsNullOrWhiteSpace(vehicleType) ? "unknown" : vehicleType.Trim();
@@ -438,6 +491,7 @@ public class RoundService
         RoundId = r.RoundId.ToString(),
         CameraId = r.CameraId,
         CameraIds = string.IsNullOrWhiteSpace(r.CameraId) ? [] : [r.CameraId],
+        RoundMode = r.RoundMode.ToString().ToLowerInvariant(),
         DisplayName = r.DisplayName,
         Status = r.Status.ToString().ToLowerInvariant(),
         IsSuspended = r.Status != RoundStatus.Open,
@@ -466,4 +520,79 @@ public class RoundService
         Max = m.Max,
         IsWinner = m.IsWinner,
     };
+
+    private async Task<CameraRoundState> GetOrCreateCameraRoundStateAsync(AppDbContext db, string cameraId)
+    {
+        var state = await db.CameraRoundStates.FirstOrDefaultAsync(x => x.CameraId == cameraId);
+        if (state is not null)
+            return state;
+
+        state = new CameraRoundState
+        {
+            CameraId = cameraId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            RoundsSinceProfileSwitch = 0,
+        };
+
+        db.CameraRoundStates.Add(state);
+        return state;
+    }
+
+    private RoundModeSelection SelectRoundMode(CameraRoundState state)
+    {
+        var warmupRounds = Math.Max(0, _options.Turbo.WarmupRoundsAfterProfileSwitch);
+        var roundsSinceProfileSwitch = Math.Max(0, state.RoundsSinceProfileSwitch);
+        var eligibleForTurbo = _options.Turbo.Enabled
+            && roundsSinceProfileSwitch >= warmupRounds
+            && GetMarketTemplates(RoundMode.Turbo).Count > 0;
+
+        var selectedMode = eligibleForTurbo && _randomSource.NextDouble() < Math.Clamp(_options.Turbo.Probability, 0.0, 1.0)
+            ? RoundMode.Turbo
+            : RoundMode.Normal;
+
+        return new RoundModeSelection(selectedMode, eligibleForTurbo, roundsSinceProfileSwitch);
+    }
+
+    private List<MarketTemplate> GetMarketTemplates(RoundMode roundMode)
+    {
+        var preferred = roundMode == RoundMode.Turbo
+            ? _options.MarketSets.Turbo
+            : _options.MarketSets.Normal;
+
+        if (preferred is { Count: > 0 })
+            return preferred;
+
+        if (_options.Markets.Count > 0)
+            return _options.Markets;
+
+        return [];
+    }
+
+    private static string GetDisplayName(RoundMode roundMode) => roundMode switch
+    {
+        RoundMode.Turbo => "Rodada Turbo",
+        _ => "Rodada Normal",
+    };
+
+    private RoundModeTimingOptions GetTiming(RoundMode roundMode)
+    {
+        var configured = roundMode == RoundMode.Turbo
+            ? _options.Timing.Turbo
+            : _options.Timing.Normal;
+
+        if (configured.DurationSeconds > 0 && configured.BetWindowSeconds > 0)
+            return configured;
+
+        return new RoundModeTimingOptions
+        {
+            DurationSeconds = Math.Max(1, _options.DurationSeconds),
+            BetWindowSeconds = Math.Max(1, _options.BetWindowSeconds),
+        };
+    }
+
+    private readonly record struct RoundModeSelection(
+        RoundMode RoundMode,
+        bool WasEligibleForTurbo,
+        int RoundsSinceProfileSwitch);
 }

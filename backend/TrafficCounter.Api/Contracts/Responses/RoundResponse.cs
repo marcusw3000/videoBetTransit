@@ -17,6 +17,7 @@ public class RoundResponse
     public string RoundId { get; set; } = string.Empty;
     public string CameraId { get; set; } = string.Empty;
     public List<string> CameraIds { get; set; } = [];
+    public string RoundMode { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public bool IsSuspended { get; set; }

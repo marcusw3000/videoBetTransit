@@ -22,6 +22,9 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         _factory = factory;
         _client = factory.CreateClient();
         _client.DefaultRequestHeaders.Add("X-API-Key", "CHANGE_ME");
+
+        using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<FakeRandomSource>().Reset();
     }
 
     [Fact]
@@ -285,8 +288,124 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         Assert.NotNull(round);
         Assert.Equal("cam_001", round!.CameraId);
+        Assert.Equal("normal", round.RoundMode);
         Assert.Equal("open", round.Status);
         Assert.NotEmpty(round.RoundId);
+    }
+
+    [Fact]
+    public async Task RoundResponse_exposes_normal_mode_by_default()
+    {
+        var dto = new RoundCountEventDto
+        {
+            CameraId = "cam_round_mode_default",
+            TrackId = "10",
+            VehicleType = "car",
+            CrossedAt = DateTime.UtcNow,
+            TotalCount = 1,
+        };
+
+        (await _client.PostAsJsonAsync("/internal/round-count-event", dto)).EnsureSuccessStatusCode();
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_mode_default");
+
+        Assert.NotNull(round);
+        Assert.Equal("normal", round!.RoundMode);
+        Assert.Equal("Rodada Normal", round.DisplayName);
+        Assert.Equal(180, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
+        Assert.Equal(70, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
+    }
+
+    [Fact]
+    public async Task Turbo_round_is_not_selected_before_warmup_rounds()
+    {
+        using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<FakeRandomSource>().Enqueue(0.0);
+
+        await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_turbo_warmup",
+            StreamProfileId = "profile-a",
+        });
+
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        await roundService.EnsureActiveRoundAsync("cam_turbo_warmup");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_turbo_warmup");
+
+        Assert.NotNull(round);
+        Assert.Equal("normal", round!.RoundMode);
+    }
+
+    [Fact]
+    public async Task Turbo_round_is_selected_after_warmup_when_probability_hits()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var random = scope.ServiceProvider.GetRequiredService<FakeRandomSource>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_turbo_enabled",
+            StreamProfileId = "profile-a",
+        })).EnsureSuccessStatusCode();
+
+        for (var index = 0; index < 5; index++)
+        {
+            await roundService.EnsureActiveRoundAsync("cam_turbo_enabled");
+            await ForceSettleCurrentRoundAsync(dbFactory, "cam_turbo_enabled");
+        }
+
+        random.Enqueue(0.0);
+        await roundService.EnsureActiveRoundAsync("cam_turbo_enabled");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_turbo_enabled");
+
+        Assert.NotNull(round);
+        Assert.Equal("turbo", round!.RoundMode);
+        Assert.Equal("Rodada Turbo", round.DisplayName);
+        Assert.Equal(120, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
+        Assert.Equal(30, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
+    }
+
+    [Fact]
+    public async Task Stream_profile_change_resets_turbo_warmup()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var random = scope.ServiceProvider.GetRequiredService<FakeRandomSource>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_turbo_reset",
+            StreamProfileId = "profile-a",
+        })).EnsureSuccessStatusCode();
+
+        for (var index = 0; index < 5; index++)
+        {
+            await roundService.EnsureActiveRoundAsync("cam_turbo_reset");
+            await ForceSettleCurrentRoundAsync(dbFactory, "cam_turbo_reset");
+        }
+
+        random.Enqueue(0.0);
+        await roundService.EnsureActiveRoundAsync("cam_turbo_reset");
+        await ForceSettleCurrentRoundAsync(dbFactory, "cam_turbo_reset");
+
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_turbo_reset",
+            StreamProfileId = "profile-b",
+        })).EnsureSuccessStatusCode();
+
+        random.Enqueue(0.0);
+        await roundService.EnsureActiveRoundAsync("cam_turbo_reset");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_turbo_reset");
+
+        Assert.NotNull(round);
+        Assert.Equal("normal", round!.RoundMode);
     }
 
     [Fact]
@@ -425,5 +544,271 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var settledRound = await db3.Rounds.FirstAsync(r => r.RoundId == persistedRound.RoundId);
         Assert.Equal(Domain.Enums.RoundStatus.Settled, settledRound.Status);
         Assert.NotNull(settledRound.SettledAt);
+    }
+
+    [Fact]
+    public async Task CreateBet_accepts_market_purchase_for_open_round()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_create");
+        Assert.NotNull(round);
+        var market = Assert.Single(round!.Markets, m => m.MarketType == "exact");
+
+        var response = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-bet-create-001",
+            GameSessionId = "session-bet-create-001",
+            RoundId = round.RoundId,
+            MarketId = market.MarketId,
+            StakeAmount = 12.50m,
+            Currency = "BRL",
+            PlayerRef = "player-123",
+            OperatorRef = "brand-a",
+        });
+
+        response.EnsureSuccessStatusCode();
+        var bet = await response.Content.ReadFromJsonAsync<BetResponse>();
+
+        Assert.NotNull(bet);
+        Assert.Equal(round.RoundId, bet!.RoundId);
+        Assert.Equal(market.MarketId, bet.MarketId);
+        Assert.Equal("accepted", bet.Status);
+        Assert.Equal("BRL", bet.Currency);
+        Assert.Equal(market.Odds, bet.Odds);
+        Assert.Equal(12.50m, bet.StakeAmount);
+        Assert.Equal(decimal.Round(12.50m * market.Odds, 2, MidpointRounding.AwayFromZero), bet.PotentialPayout);
+        Assert.Equal("player-123", bet.PlayerRef);
+    }
+
+    [Fact]
+    public async Task CreateBet_is_idempotent_for_duplicate_transaction_id()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_idempotent");
+        Assert.NotNull(round);
+        var market = round!.Markets.First();
+
+        var payload = new CreateBetDto
+        {
+            TransactionId = "txn-bet-idempotent-001",
+            GameSessionId = "session-bet-idempotent-001",
+            RoundId = round.RoundId,
+            MarketId = market.MarketId,
+            StakeAmount = 20m,
+            Currency = "BRL",
+        };
+
+        var first = await _client.PostAsJsonAsync("/internal/bets", payload);
+        var second = await _client.PostAsJsonAsync("/internal/bets", payload);
+
+        first.EnsureSuccessStatusCode();
+        second.EnsureSuccessStatusCode();
+
+        var firstBet = await first.Content.ReadFromJsonAsync<BetResponse>();
+        var secondBet = await second.Content.ReadFromJsonAsync<BetResponse>();
+
+        Assert.NotNull(firstBet);
+        Assert.NotNull(secondBet);
+        Assert.Equal(firstBet!.Id, secondBet!.Id);
+        Assert.Equal(firstBet.ProviderBetId, secondBet.ProviderBetId);
+
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        Assert.Equal(1, await db.Bets.CountAsync(b => b.TransactionId == "txn-bet-idempotent-001"));
+    }
+
+    [Fact]
+    public async Task CreateBet_rejects_request_after_bet_close()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_closed");
+        Assert.NotNull(round);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var persistedRound = await db.Rounds.FirstAsync(r => r.RoundId == Guid.Parse(round!.RoundId));
+            persistedRound.BetCloseAt = DateTime.UtcNow.AddSeconds(-1);
+            await db.SaveChangesAsync();
+        }
+
+        var response = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-bet-closed-001",
+            GameSessionId = "session-bet-closed-001",
+            RoundId = round!.RoundId,
+            MarketId = round.Markets.First().MarketId,
+            StakeAmount = 10m,
+            Currency = "BRL",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateBet_rejects_unknown_market_for_round()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_market_validation");
+        Assert.NotNull(round);
+
+        var response = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-bet-market-miss-001",
+            GameSessionId = "session-bet-market-miss-001",
+            RoundId = round!.RoundId,
+            MarketId = Guid.NewGuid().ToString(),
+            StakeAmount = 15m,
+            Currency = "BRL",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetBetById_returns_frozen_market_snapshot()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_lookup");
+        Assert.NotNull(round);
+        var market = round!.Markets.First();
+
+        var createResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-bet-lookup-001",
+            GameSessionId = "session-bet-lookup-001",
+            RoundId = round.RoundId,
+            MarketId = market.MarketId,
+            StakeAmount = 7m,
+            Currency = "BRL",
+        });
+
+        createResponse.EnsureSuccessStatusCode();
+        var createdBet = await createResponse.Content.ReadFromJsonAsync<BetResponse>();
+        Assert.NotNull(createdBet);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var persistedMarket = await db.RoundMarkets.FirstAsync(m => m.MarketId == Guid.Parse(market.MarketId));
+            persistedMarket.Label = "Alterado depois";
+            persistedMarket.Odds = 9.99m;
+            await db.SaveChangesAsync();
+        }
+
+        var fetchedBet = await _client.GetFromJsonAsync<BetResponse>($"/bets/{createdBet!.Id}");
+
+        Assert.NotNull(fetchedBet);
+        Assert.Equal(market.Label, fetchedBet!.MarketLabel);
+        Assert.Equal(market.Odds, fetchedBet.Odds);
+    }
+
+    [Fact]
+    public async Task Settled_round_updates_accepted_bets_to_win_or_loss()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_settlement");
+        Assert.NotNull(round);
+
+        var winningMarket = round!.Markets.First(m => m.MarketType == "exact");
+        var losingMarket = round.Markets.First(m => m.MarketType == "under");
+
+        var winningResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-bet-win-001",
+            GameSessionId = "session-bet-settlement-001",
+            RoundId = round.RoundId,
+            MarketId = winningMarket.MarketId,
+            StakeAmount = 10m,
+            Currency = "BRL",
+        });
+        var losingResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-bet-loss-001",
+            GameSessionId = "session-bet-settlement-001",
+            RoundId = round.RoundId,
+            MarketId = losingMarket.MarketId,
+            StakeAmount = 10m,
+            Currency = "BRL",
+        });
+
+        winningResponse.EnsureSuccessStatusCode();
+        losingResponse.EnsureSuccessStatusCode();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var persistedRound = await db.Rounds.FirstAsync(r => r.RoundId == Guid.Parse(round.RoundId));
+            persistedRound.CurrentCount = winningMarket.TargetValue ?? winningMarket.Min ?? 0;
+            persistedRound.BetCloseAt = DateTime.UtcNow.AddSeconds(-120);
+            persistedRound.EndsAt = DateTime.UtcNow.AddSeconds(-120);
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+            await roundService.TickAsync();
+            await roundService.TickAsync();
+            await roundService.TickAsync();
+        }
+
+        var winningBet = await winningResponse.Content.ReadFromJsonAsync<BetResponse>();
+        var losingBet = await losingResponse.Content.ReadFromJsonAsync<BetResponse>();
+        var settledWinning = await _client.GetFromJsonAsync<BetResponse>($"/bets/{winningBet!.Id}");
+        var settledLosing = await _client.GetFromJsonAsync<BetResponse>($"/bets/{losingBet!.Id}");
+
+        Assert.NotNull(settledWinning);
+        Assert.NotNull(settledLosing);
+        Assert.Equal("settled_win", settledWinning!.Status);
+        Assert.Equal("settled_loss", settledLosing!.Status);
+        Assert.NotNull(settledWinning.SettledAt);
+        Assert.NotNull(settledLosing.SettledAt);
+    }
+
+    [Fact]
+    public async Task Void_round_voids_accepted_bets()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_void");
+        Assert.NotNull(round);
+
+        var createResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-bet-void-001",
+            GameSessionId = "session-bet-void-001",
+            RoundId = round!.RoundId,
+            MarketId = round.Markets.First().MarketId,
+            StakeAmount = 9m,
+            Currency = "BRL",
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var createdBet = await createResponse.Content.ReadFromJsonAsync<BetResponse>();
+
+        var voidResponse = await _client.PostAsJsonAsync($"/internal/rounds/{round.RoundId}/void", new VoidRoundRequest
+        {
+            Reason = "Operacao manual",
+        });
+        voidResponse.EnsureSuccessStatusCode();
+
+        var voidedBet = await _client.GetFromJsonAsync<BetResponse>($"/bets/{createdBet!.Id}");
+
+        Assert.NotNull(voidedBet);
+        Assert.Equal("void", voidedBet!.Status);
+        Assert.NotNull(voidedBet.VoidedAt);
+    }
+
+    private static async Task ForceSettleCurrentRoundAsync(IDbContextFactory<AppDbContext> dbFactory, string cameraId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var round = await db.Rounds
+            .Where(r => r.CameraId == cameraId)
+            .Where(r => r.Status == Domain.Enums.RoundStatus.Open
+                     || r.Status == Domain.Enums.RoundStatus.Closing
+                     || r.Status == Domain.Enums.RoundStatus.Settling)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstAsync();
+
+        round.Status = Domain.Enums.RoundStatus.Settled;
+        round.SettledAt = DateTime.UtcNow;
+        round.FinalCount = round.CurrentCount;
+        await db.SaveChangesAsync();
     }
 }

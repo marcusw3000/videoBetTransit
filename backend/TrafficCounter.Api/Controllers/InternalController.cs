@@ -21,19 +21,22 @@ public class InternalController : ControllerBase
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly HealthMonitorOptions _healthOptions;
     private readonly RoundService _roundService;
+    private readonly BetService _betService;
 
     public InternalController(
         CrossingEventService crossingEventService,
         StreamSessionService sessionService,
         IDbContextFactory<AppDbContext> dbFactory,
         IOptions<HealthMonitorOptions> healthOptions,
-        RoundService roundService)
+        RoundService roundService,
+        BetService betService)
     {
         _crossingEventService = crossingEventService;
         _sessionService = sessionService;
         _dbFactory = dbFactory;
         _healthOptions = healthOptions.Value;
         _roundService = roundService;
+        _betService = betService;
     }
 
     [HttpPost("crossing-events")]
@@ -65,6 +68,37 @@ public class InternalController : ControllerBase
             return Conflict(new { error = "Round não encontrado ou já encerrado/anulado." });
 
         return Ok(new { voided = true });
+    }
+
+    [HttpPost("rounds/profile-activated")]
+    public async Task<IActionResult> NotifyStreamProfileActivated([FromBody] StreamProfileActivatedDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.CameraId))
+            return BadRequest(new { error = "cameraId is required." });
+
+        await _roundService.NotifyStreamProfileActivatedAsync(dto.CameraId, dto.StreamProfileId);
+        return Ok(new { received = true });
+    }
+
+    [HttpPost("bets")]
+    public async Task<IActionResult> CreateBet([FromBody] CreateBetDto dto)
+    {
+        try
+        {
+            var bet = await _betService.PlaceBetAsync(dto);
+            return Ok(bet);
+        }
+        catch (InvalidOperationException ex)
+        {
+            var message = ex.Message ?? "Bet request rejected.";
+            var isValidationError = message.Contains("required", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("valid guid", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("greater than zero", StringComparison.OrdinalIgnoreCase);
+
+            return isValidationError
+                ? BadRequest(new { error = message })
+                : Conflict(new { error = message });
+        }
     }
 
     [HttpPost("health-report")]

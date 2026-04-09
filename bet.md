@@ -199,17 +199,19 @@ Transformar a contagem tecnica em um produto comercial jogavel e auditavel.
 
 ### Escopo
 
-- fixar a regra `RODADA TURBO` de 2 minutos
+- separar `round normal` de `rodada turbo`
+- decidir `rodada turbo` por regra oficial do backend
 - manter `bet_close_at` antes de `ends_at`
 - formalizar mercados `Under`, `Range`, `Over`, `Exact`
-- parametrizar target, ranges e odds por camera
+- parametrizar target, ranges e odds por modo de round
 - congelar configuracao por round
 
 ### Entregaveis
 
 - especificacao de round `v1`
-- composicao inicial de mercados `v1`
-- modelo de configuracao comercial por camera
+- composicao inicial de mercados `v1` por `round_mode`
+- regra de elegibilidade e sorteio da `rodada turbo`
+- modelo de configuracao comercial global `v1`
 - regra de `config freeze`
 - resultado final contendo mercados vencedores
 
@@ -227,14 +229,25 @@ Transformar a contagem tecnica em um produto comercial jogavel e auditavel.
 
 - simular rounds com contagens diferentes
 - validar vencedor por mercado
+- validar carencia de `turbo` apos troca de `stream profile`
+- validar sorteio de `turbo` somente quando elegivel
 - validar bloqueio de alteracao de perfil/ROI/line durante round
-- revisar configuracao comercial por camera
+- revisar configuracao comercial por modo de round
 
 ### Definicao de pronto
 
 - existe round comercial fechado
 - os mercados podem ser liquidados com base no resultado oficial
 - nenhuma configuracao critica muda em round aberto
+
+Estado atual da Fase 2:
+
+- `roundMode` ja existe no backend e na API como `normal` ou `turbo`
+- a `rodada turbo` ja e decidida pelo backend com carencia de 5 rounds apos troca de `stream profile`
+- o worker ja notifica o backend quando o `stream profile` ativo muda
+- os mercados ja nascem congelados no round conforme o modo selecionado
+- frontend, historico e admin ja exibem `roundMode` e nome comercial do round
+- as pendencias principais agora sao refinamento comercial, calibracao dos mercados e freeze operacional completo
 
 ## 8. Fase 3 - Contrato com Operadora
 
@@ -291,13 +304,15 @@ Fechar o fluxo financeiro entre jogo e operadora.
 
 ### Escopo
 
-- definir `balance`, `bet`, `settle`, `rollback`
+- consolidar `bet ledger` interno do provider
+- definir `balance`, `settle`, `rollback`
 - suportar `seamless wallet` e preparar `transfer wallet`
 - gerar reconciliacao diaria
 - garantir consistencia entre round, transacao e settlement
 
 ### Entregaveis
 
+- tabela `bets` soberana no backend com snapshot congelado do mercado comprado
 - contrato financeiro provider-operadora
 - suporte a `transaction_id`, `round_id`, `game_session_id`
 - relatorio de reconciliacao diaria
@@ -316,12 +331,14 @@ Fechar o fluxo financeiro entre jogo e operadora.
 
 ### Validacao
 
+- criacao idempotente de aposta por `transaction_id`
 - fluxo completo de aposta e settlement em ambiente de homologacao
 - teste de rollback
 - comparacao entre reconciliacao e eventos do dia
 
 ### Definicao de pronto
 
+- `bet ledger` existe e reconstrui a aposta sem depender de config viva
 - o contrato financeiro esta homologavel
 - settlement e rollback sao auditaveis
 - reconciliacao diaria fecha com os eventos persistidos
@@ -520,62 +537,61 @@ Se o objetivo for executar o plano no codigo atual, a sequencia imediata recomen
 
 ## 16. Leitura do Estado Atual do Repositorio
 
-Analisando a estrutura atual do codigo, o projeto parece estar entre a Fase 0 e a Fase 1:
+Analisando a estrutura atual do codigo, o projeto ja avancou materialmente pela Fase 1 e abriu a base da Fase 5:
 
-- ja existem `rounds` e `round_markets` no backend
-- ja existe lifecycle basico de round com `open`, `closing`, `settled` e `void`
-- ja existem endpoints internos para contagem e anulacao
-- o `start.bat` ja assume `vision-worker\app.py` como worker oficial
-- ainda existe duplicidade relevante entre `app.py` na raiz e `vision-worker\app.py`
-- ainda nao estao formalizados no backend os eventos soberanos esperados para `crossing_events` e `round_events`
-- o endpoint `GET /rounds/{roundId}/count-events` ainda esta em stub
-- os launchers locais evoluiram, mas essa camada continua sendo suporte operacional e nao deve dirigir o desenho do provider core
-- o stream atual precisa ser preservado como baseline estavel enquanto o contrato oficial de rounds e eventos e introduzido ao redor dele
+- `vision-worker\app.py` esta tratado como entrypoint operacional efetivo, com a raiz preservada como shim legado
+- ja existem `rounds`, `round_markets`, `crossing_events` e `round_events` persistidos no backend
+- o lifecycle oficial do round ja cobre `open`, `closing`, `settling`, `settled` e `void`
+- o worker ja envia `round_id`, `camera_id`, `stream_profile_id`, `count_before`, `count_after` e `event_hash`
+- o backend ja trata `round-count-event` com idempotencia e vinculo auditavel ao round oficial
+- os endpoints `GET /rounds/{roundId}/count-events` e `GET /rounds/{roundId}/timeline` ja respondem leitura real persistida
+- o frontend de mercado ja consome o lifecycle oficial do backend
+- o admin ja tem base de backoffice com resumo oficial, timeline, crossings e busca de rounds
+- o stream atual continua precisando ser preservado como baseline operacional congelado
 
 Conclusao pratica:
 
-- a Fase 1 foi iniciada antes de a Fase 0 estar completamente fechada
-- o maior risco imediato continua sendo `split-brain` entre entrypoints, configuracao e fluxo oficial do worker
-- o segundo risco imediato e acoplar mudancas de stream ao trabalho de provider, gerando regressao em um pipeline que deveria ficar congelado
-- por isso, o proximo passo recomendado nao e abrir novas integracoes de operadora ainda
+- a Fase 0 ainda tem pendencias operacionais, mas deixou de ser o gargalo principal de arquitetura
+- a Fase 1 esta funcionalmente estabelecida no backend e integrada ao worker
+- a Fase 5 foi iniciada antes de concluir freeze operacional, incidentes e evidencias exportaveis
+- o maior risco imediato deixou de ser "falta de round engine" e passou a ser "permitir contaminacao operacional do round ou operar sem guardrails suficientes"
 
 ## 17. Proximo Passo Recomendado Agora
 
-O proximo passo deve ser concluir de forma explicita a Fase 0, congelando um unico fluxo operacional oficial e isolando o provider core da esteira de stream atual.
+O proximo passo deve ser endurecer a operacao do round oficial, sem reabrir a frente do stream como eixo principal.
 
 ### Objetivo imediato
 
-Eliminar ambiguidade entre worker raiz, worker oficial, configuracao e ponto de execucao.
+Impedir que alteracoes operacionais contaminem rounds em andamento e preparar a operacao para resposta a incidente.
 
 ### Escopo do proximo passo
 
-- declarar `vision-worker\app.py` como unico entrypoint Python suportado
-- remover ou aposentar o `app.py` da raiz como fluxo operacional concorrente
-- garantir que `config.json`, profiles e sync operacional apontem para um unico caminho de execucao
-- revisar `start.bat`, scripts auxiliares e documentacao para refletir somente esse fluxo
-- congelar alteracoes no pipeline de stream, ROI, line e classes contaveis ate que o fluxo oficial esteja protegido
-- validar que health, troca de stream, reaplicacao de ROI/line e envio de eventos continuam funcionando no worker oficial
+- implementar `EP06` Freeze Operacional por Round
+- bloquear troca de `ROI`, `line`, `stream profile` e configuracao comercial com round `open`, `closing` ou `settling`
+- registrar tentativas administrativas bloqueadas
+- consolidar o stream como baseline congelado, com mudanca apenas por correcao de incidente
+- preparar a camada seguinte de `EP11` para incidente e runbook quando houver degradacao operacional
 
 ### Entregavel esperado
 
-Um baseline operacional sem duplicidade de entrypoint, pronto para a proxima etapa de persistencia formal de eventos do round.
+Um round oficial protegido contra contaminacao operacional em runtime, com comportamento previsivel para operacao e suporte.
 
 ### Abordagem recomendada
 
-Em vez de continuar mexendo no stream para fazer o provider aparecer no front, a abordagem recomendada passa a ser:
+Em vez de voltar a mexer no stream para explicar o jogo, a abordagem recomendada passa a ser:
 
 1. preservar a esteira atual como baseline operacional
-2. introduzir persistencia e contrato de eventos sem alterar a captura visual
-3. conectar frontend e backend ao lifecycle oficial de round antes de novas alteracoes no worker
+2. endurecer os bloqueios operacionais em torno do round oficial
+3. abrir incidentes e evidencias quando a operacao fugir do esperado
 4. tratar qualquer mudanca de stream como bugfix isolado, e nao como eixo da evolucao do produto
 
 ### Depois disso
 
-Com a Fase 0 realmente encerrada, o passo seguinte passa a ser:
+Com o freeze operacional protegido, o passo seguinte passa a ser:
 
-1. modelar e persistir `crossing_events` com vinculacao a `round_id`
-2. criar `round_events` para transicoes oficiais do lifecycle
-3. substituir o endpoint stub de `count-events` por consulta real auditavel
+1. seguir com `EP11` Incidentes, Alertas e Runbooks
+2. seguir com `EP12` Evidencias, Replay e Reprocessamento
+3. retomar `EP07` e `EP08` para contrato externo e distribuicao assincrona do provider
 
 ## 18. Criticos de Produto
 
@@ -724,9 +740,19 @@ Criterio de aceite:
 
 Estado atual de `EP02`:
 
-- o round engine e a persistencia ja avancaram materialmente no backend
-- o backend ja responde round atual por camera (`cam_001`)
-- o proximo ganho real vem de persistir eventos oficiais e reduzir dependencia do estado visual do stream para explicar o round
+- [x] modelar tabela `rounds`
+- [x] modelar tabela `crossing_events`
+- [x] modelar tabela `round_events`
+- [x] modelar tabela `markets`
+- [x] criar migracoes iniciais
+- [x] definir relacoes entre `rounds`, `markets` e `crossing_events`
+- [x] garantir persistencia de timestamps oficiais
+
+Estado operacional de `EP02`:
+
+- a base persistida do round ja existe e responde leitura auditavel
+- o backend ja reconstrui round por `round`, `count-events` e `timeline`
+- a pendencia principal deixou de ser modelagem e passou a ser protecao operacional e evidencia exportavel
 
 ### EP03 - Round Engine
 
@@ -745,17 +771,23 @@ Repositorio principal:
 
 Tasks:
 
-- [ ] extrair servico de `round engine`
-- [ ] implementar transicoes `open -> closing -> settling -> settled`
-- [ ] implementar transicao para `void`
-- [ ] persistir `created_at`, `bet_close_at`, `ends_at`, `settled_at`
-- [ ] padronizar uso de `round_id` entre servicos
-- [ ] suportar settlement automatico
-- [ ] suportar settlement manual auditado
+- [x] extrair servico de `round engine`
+- [x] implementar transicoes `open -> closing -> settling -> settled`
+- [x] implementar transicao para `void`
+- [x] persistir `created_at`, `bet_close_at`, `ends_at`, `settled_at`
+- [x] padronizar uso de `round_id` entre servicos
+- [x] suportar settlement automatico
+- [x] suportar settlement manual auditado
 
 Criterio de aceite:
 
 - o round tem lifecycle automatico, persistido e auditavel
+
+Estado operacional de `EP03`:
+
+- o backend ja e a fonte oficial do lifecycle e do resultado do round
+- SignalR e endpoints ja refletem o estado oficial para frontend e operacao
+- o que falta agora e endurecer guardrails em volta desse lifecycle
 
 ### EP04 - Integracao Worker x Round Engine
 
@@ -775,16 +807,21 @@ Repositorio principal:
 
 Tasks:
 
-- [ ] padronizar contrato de envio de `count-events`
-- [ ] anexar `round_id`, `camera_id` e `stream_profile_id` aos eventos
-- [ ] persistir `count_before` e `count_after`
-- [ ] garantir retry seguro sem dupla contagem
+- [x] padronizar contrato de envio de `count-events`
+- [x] anexar `round_id`, `camera_id` e `stream_profile_id` aos eventos
+- [x] persistir `count_before` e `count_after`
+- [x] garantir retry seguro sem dupla contagem
 - [ ] tratar backend indisponivel com degradacao controlada
 - [ ] registrar incidente quando integridade do envio for perdida
 
 Criterio de aceite:
 
 - o worker alimenta o backend de forma resiliente e sem duplicidade indevida
+
+Estado operacional de `EP04`:
+
+- o contrato worker x backend ja esta auditavel e idempotente
+- a integracao ainda precisa de contingencia operacional e incidente automatizado quando houver perda de integridade
 
 ### EP05 - Regras de Jogo e Mercados
 
@@ -804,17 +841,28 @@ Repositorio principal:
 
 Tasks:
 
-- [ ] formalizar `RODADA TURBO` de 2 minutos
-- [ ] formalizar fechamento de aposta antes do fim do round
-- [ ] implementar mercados `Under`, `Range`, `Over`, `Exact`
+- [x] separar `round normal` e `rodada turbo`
+- [x] formalizar fechamento de aposta antes do fim do round
+- [x] implementar mercados `Under`, `Range`, `Over`, `Exact`
+- [x] definir `rodada turbo` por sorteio oficial do backend
+- [x] reiniciar elegibilidade de `turbo` por troca de `stream profile`
+- [x] armazenar mercados vencedores no settlement
+- [x] definir copy comercial inicial dos mercados
+- [ ] calibrar probabilidade e janela comercial da `turbo`
 - [ ] parametrizar target e ranges por camera
-- [ ] armazenar mercados vencedores no settlement
-- [ ] definir copy comercial final dos mercados
 - [ ] validar composicao de mercados por camera
 
 Criterio de aceite:
 
 - o produto consegue abrir round, encerrar round e liquidar mercados com clareza comercial
+
+Estado operacional de `EP05`:
+
+- `EP05` esta iniciado e funcionalmente entregue no corte `global v1`
+- o backend ja cria rounds `normal` e `turbo` com mercados congelados por modo
+- `roundMode` ja chega ao frontend e ao admin como contrato oficial
+- a regra de carencia apos troca de `stream profile` ja protege o sorteio da `turbo`
+- a pendencia principal deixou de ser implementacao de base e passou a ser calibracao comercial por camera e integracao com `EP06`
 
 ### EP06 - Freeze Operacional por Round
 
@@ -917,12 +965,24 @@ Repositorio principal:
 Tasks:
 
 - [ ] definir `balance`
-- [ ] definir `bet`
+- [x] definir `bet` v1 como `ledger` interno com `1 linha por compra`
 - [ ] definir `settle`
 - [ ] definir `rollback`
-- [ ] padronizar `transaction_id`, `game_session_id` e `round_id`
+- [x] padronizar `transaction_id`, `game_session_id` e `round_id` na aposta v1
 - [ ] definir erros financeiros
 - [ ] suportar reconciliacao diaria
+
+Status atual:
+
+- [x] tabela `bets` persistida no backend
+- [x] `POST /internal/bets` para aceite idempotente da aposta
+- [x] `GET /bets/{betId}` para consulta operacional
+- [x] congelamento de `odds`, `market_type`, `label`, `threshold/min/max/target_value`
+- [x] liquidacao basica por resultado oficial do round (`settled_win` / `settled_loss`)
+- [x] anulacao automatica das apostas quando o round vira `void`
+- [ ] integrar `balance`, `debit` e `wallet` da operadora
+- [ ] formalizar `settle` / `rollback` como contrato externo
+- [ ] gerar reconciliacao diaria e codigos financeiros
 
 Criterio de aceite:
 
@@ -946,17 +1006,25 @@ Repositorio principal:
 
 Tasks:
 
-- [ ] criar timeline do round
-- [ ] exibir eventos de contagem
-- [ ] exibir stream profile usado no round
-- [ ] exibir snapshots e evidencias
+- [x] criar timeline do round
+- [x] exibir eventos de contagem
+- [x] exibir stream profile usado no round
+- [x] exibir snapshots e evidencias
 - [ ] suportar replay operacional
 - [ ] permitir reenvio de webhook
-- [ ] permitir `void` manual controlado
+- [x] permitir `void` manual controlado
 
 Criterio de aceite:
 
 - time operacional consegue investigar e agir sobre um round pelo painel
+
+Estado operacional de `EP10`:
+
+- o admin ja permite buscar round por `round_id`
+- o painel ja navega entre round atual e rounds recentes por camera
+- o detalhe do round ja mostra resumo oficial, mercados, timeline, crossings e snapshots persistidos
+- `EP10` esta funcionalmente iniciado e cobre investigacao sem acesso direto ao banco
+- as pendencias principais sao replay, export de evidencias e reenvio manual de webhook
 
 ### EP11 - Incidentes, Alertas e Runbooks
 
@@ -1111,16 +1179,16 @@ Criterio de aceite:
 Se formos executar agora, a ordem mais eficiente e:
 
 1. fechar `EP01` sem novas alteracoes de stream alem de correcao de incidente
-2. retomar `EP02` Persistencia do Core de Rounds
-3. seguir com `EP03` Round Engine
-4. seguir com `EP04` Integracao Worker x Round Engine
-5. validar o frontend contra o lifecycle oficial de round, e nao contra inferencias do stream
-6. seguir com `EP05` Regras de Jogo e Mercados
-7. seguir com `EP06` Freeze Operacional por Round
+2. considerar `EP02` Persistencia do Core de Rounds como baseline funcional
+3. considerar `EP03` Round Engine como baseline funcional
+4. endurecer `EP04` Integracao Worker x Round Engine
+5. manter o frontend consumindo o lifecycle oficial de round, e nao inferencias do stream
+6. seguir com `EP06` Freeze Operacional por Round
+7. seguir com `EP05` Regras de Jogo e Mercados
 8. seguir com `EP07` Provider API
 9. seguir com `EP08` Webhooks e Entrega Assincrona
 10. seguir com `EP09` Wallet e Contrato Financeiro
-11. seguir com `EP10` Backoffice Operacional
+11. evoluir `EP10` Backoffice Operacional com replay, export e acoes controladas
 12. seguir com `EP11` Incidentes, Alertas e Runbooks
 13. seguir com `EP12` Evidencias, Replay e Reprocessamento
 14. seguir com `EP13` Seguranca, RBAC e Auditoria Administrativa
@@ -1131,15 +1199,15 @@ Se formos executar agora, a ordem mais eficiente e:
 
 Sprint tecnica inicial sugerida:
 
-- fechar a declaracao de entrypoint oficial do worker e remover ambiguidade com a raiz
-- congelar mudancas na esteira de stream enquanto o contrato de eventos e rounds e introduzido
-- modelar `crossing_events` e `round_events` como fonte auditavel do round
-- padronizar o envio de `count-events` com `round_id` e metadados operacionais minimos
-- alinhar o frontend para consumir o lifecycle oficial do backend
+- fechar `EP06` Freeze Operacional por Round
+- endurecer contingencia de `EP04` quando backend ficar indisponivel
+- abrir a base de `EP11` para incidentes, alertas e runbooks
+- evoluir `EP10` com export minimo de evidencias e acoes operacionais futuras
+- preparar `EP07` e `EP08` sem reabrir mudanca estrutural no stream
 
 Resultado esperado da primeira sprint:
 
-- o stream para de sofrer mudancas laterais por causa do provider
-- o backend passa a explicar o round por eventos persistidos e nao apenas por estado atual
-- o frontend ganha uma base mais confiavel para refletir `currentCount` e lifecycle
-- a base fica pronta para continuar `EP02` e `EP03` sem pressionar o pipeline visual
+- o round deixa de aceitar contaminacao operacional durante sua janela oficial
+- worker e backend passam a ter comportamento mais previsivel em contingencia
+- operacao ganha base para tratar incidente sem banco e sem depender do stream
+- a plataforma fica pronta para abrir contrato externo e camada de evidencias com menos risco

@@ -6,8 +6,9 @@ public class Round
 {
     public Guid RoundId { get; set; }
     public string CameraId { get; set; } = "default";
+    public RoundMode RoundMode { get; set; } = RoundMode.Normal;
     public RoundStatus Status { get; set; }
-    public string DisplayName { get; set; } = "Rodada Turbo";
+    public string DisplayName { get; set; } = "Rodada Normal";
 
     public DateTime CreatedAt { get; set; }
     public DateTime BetCloseAt { get; set; }   // CreatedAt + 70s
@@ -22,4 +23,5 @@ public class Round
 
     public ICollection<RoundMarket> Markets { get; set; } = [];
     public ICollection<RoundEvent> Events { get; set; } = [];
+    public ICollection<Bet> Bets { get; set; } = [];
 }

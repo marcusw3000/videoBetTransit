@@ -183,6 +183,7 @@ public class RoundsController : ControllerBase
         RoundId = r.RoundId.ToString(),
         CameraId = r.CameraId,
         CameraIds = string.IsNullOrWhiteSpace(r.CameraId) ? [] : [r.CameraId],
+        RoundMode = r.RoundMode.ToString().ToLowerInvariant(),
         DisplayName = r.DisplayName,
         Status = r.Status.ToString().ToLowerInvariant(),
         IsSuspended = r.Status != RoundStatus.Open,

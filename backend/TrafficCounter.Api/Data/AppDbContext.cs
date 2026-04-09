@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<Round> Rounds => Set<Round>();
     public DbSet<RoundMarket> RoundMarkets => Set<RoundMarket>();
     public DbSet<RoundEvent> RoundEvents => Set<RoundEvent>();
+    public DbSet<CameraRoundState> CameraRoundStates => Set<CameraRoundState>();
+    public DbSet<Bet> Bets => Set<Bet>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

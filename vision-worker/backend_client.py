@@ -53,6 +53,7 @@ class BackendClient:
         self.count_events_url = normalize_crossing_events_url(base_url)
         self.round_count_url = f"{self.base_url}/internal/round-count-event"
         self.current_round_url = f"{self.base_url}/rounds/current"
+        self.profile_activation_url = f"{self.base_url}/internal/rounds/profile-activated"
         self.health_report_url = f"{self.base_url}/internal/health-report"
         self.api_key = api_key
         self.session_id = session_id
@@ -133,6 +134,42 @@ class BackendClient:
 
     def fetch_camera_config(self, _camera_id: str) -> dict | None:
         return None
+
+    def notify_stream_profile_activated(self, camera_id: str, stream_profile_id: str = "") -> bool:
+        payload = {
+            "cameraId": str(camera_id or "").strip(),
+            "streamProfileId": str(stream_profile_id or "").strip(),
+        }
+
+        if not payload["cameraId"]:
+            return False
+
+        try:
+            resp = self._session.post(
+                self.profile_activation_url,
+                json=payload,
+                headers=self._default_headers,
+                timeout=5,
+            )
+            if resp.status_code >= 400:
+                self._mark_error(f"profile activation HTTP {resp.status_code}: {resp.text[:200]}")
+                logger.warning("[BACKEND] Falha ao notificar stream profile (%s): %s", resp.status_code, resp.text[:200])
+                return False
+
+            self._mark_success()
+            return True
+        except requests.ConnectionError:
+            self._mark_error("connection error notifying stream profile activation")
+            logger.error("[BACKEND] Sem conexao ao notificar stream profile")
+            return False
+        except requests.Timeout:
+            self._mark_error("timeout notifying stream profile activation")
+            logger.error("[BACKEND] Timeout ao notificar stream profile")
+            return False
+        except Exception as exc:
+            self._mark_error(f"unexpected profile activation error: {exc}")
+            logger.error("[BACKEND] Erro ao notificar stream profile: %s", exc)
+            return False
 
     def save_camera_config(
         self,

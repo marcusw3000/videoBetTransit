@@ -545,7 +545,7 @@ class PipelineRuntime:
         with self._lock:
             stream = self._stream
         if stream is not None:
-            stream.reset()
+            stream.request_reset()
 
     def wait_for_raw_frame(self, last_seq: int, timeout: float = 0.25):
         return self.raw_frames.wait_for_new(last_seq, timeout)
@@ -1990,6 +1990,7 @@ class StreamCapture:
         self.read_timeout_ms = max(0, int(read_timeout_ms))
         self.target_fps = max(0.0, float(target_fps))
         self._effective_fps = 0.0
+        self._reset_requested = False
         self._connect()
 
     def _connect(self):
@@ -2044,6 +2045,10 @@ class StreamCapture:
             logger.warning("Falha ao abrir stream na conexão inicial.")
 
     def read(self):
+        if self._reset_requested:
+            self._reset_requested = False
+            self._connect()
+
         ret, frame = self.cap.read()
         if not ret:
             self._fail_count += 1
@@ -2061,9 +2066,9 @@ class StreamCapture:
             self.stats.set_stream_status(True, self._fail_count)
         return True, frame
 
-    def reset(self):
+    def request_reset(self):
         logger.info("Reset manual do stream solicitado.")
-        self._connect()
+        self._reset_requested = True
 
     def release(self):
         if self.cap:
@@ -2229,7 +2234,6 @@ def main():
         nonlocal reset_stream_requested
 
         reset_stream_requested = True
-        pipeline_runtime.request_capture_reset()
         if editor is not None:
             editor.message = "Manual stream reset requested"
 
@@ -2432,6 +2436,11 @@ def main():
                 format_stream_profile_label(profile),
                 cfg["stream_url"],
             )
+            if round_sync_enabled:
+                backend.notify_stream_profile_activated(
+                    cfg.get("camera_id", ""),
+                    profile.get("id", ""),
+                )
 
         if not pipeline_runtime.is_running():
             time.sleep(0.05)
