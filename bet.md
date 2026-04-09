@@ -1023,6 +1023,9 @@ Estado operacional de `EP10`:
 - o admin ja permite buscar round por `round_id`
 - o painel ja navega entre round atual e rounds recentes por camera
 - o detalhe do round ja mostra resumo oficial, mercados, timeline, crossings e snapshots persistidos
+- o front de cliente deixou de exibir `Estado Oficial`, `Timeline Oficial` e `Crossing Events`
+- o cliente agora usa um unico dropdown `HISTORICO` com rounds encerrados, resultado, modo e horario
+- a visao tecnica de timeline e crossings continua restrita ao admin/backoffice
 - `EP10` esta funcionalmente iniciado e cobre investigacao sem acesso direto ao banco
 - as pendencias principais sao replay, export de evidencias e reenvio manual de webhook
 
