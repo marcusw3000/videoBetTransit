@@ -2649,10 +2649,18 @@ def main():
                             {
                                 "cameraId": cfg["camera_id"],
                                 "roundId": current_round_id,
+                                "streamProfileId": cfg.get("selected_stream_profile_id", ""),
                                 "trackId": str(track_id),
                                 "vehicleType": vehicle_name,
+                                "direction": count_direction,
+                                "lineId": "main-line",
+                                "confidence": round(conf, 4),
+                                "frameNumber": frame_count,
                                 "crossedAt": now(),
                                 "snapshotUrl": path,
+                                "source": "vision_worker_round_count",
+                                "countBefore": total - 1,
+                                "countAfter": total,
                                 "totalCount": total,
                             }
                         )

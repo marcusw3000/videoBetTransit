@@ -8,7 +8,7 @@ let connectionPromise = null
 const MAX_RETRIES = 10
 const RETRY_DELAY_MS = 3000
 
-export async function startRoundConnection({ onCountUpdated, onRoundSettled }) {
+export async function startRoundConnection({ onCountUpdated, onRoundUpdated, onRoundSettled, onRoundVoided }) {
   // Se já existe uma conexão ativa, retorna ela.
   if (connection && connection.state === signalR.HubConnectionState.Connected) {
     return connection
@@ -22,7 +22,9 @@ export async function startRoundConnection({ onCountUpdated, onRoundSettled }) {
   // Limpa conexão anterior morta, por exemplo após cleanup do Strict Mode.
   if (connection) {
     connection.off('count_updated')
+    connection.off('round_updated')
     connection.off('round_settled')
+    connection.off('round_voided')
     connection = null
   }
 
@@ -35,8 +37,16 @@ export async function startRoundConnection({ onCountUpdated, onRoundSettled }) {
     onCountUpdated?.(normalizeRoundContract(data))
   })
 
+  conn.on('round_updated', (data) => {
+    onRoundUpdated?.(normalizeRoundContract(data))
+  })
+
   conn.on('round_settled', (data) => {
     onRoundSettled?.(normalizeRoundContract(data))
+  })
+
+  conn.on('round_voided', (data) => {
+    onRoundVoided?.(normalizeRoundContract(data))
   })
 
   connectionPromise = connectWithRetry(conn, 0)

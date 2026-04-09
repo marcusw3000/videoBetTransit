@@ -9,6 +9,7 @@ internal static class SqliteSchemaRepair
 {
     private const string MigrationRoundEvents = "20260408223627_AddRoundEventsAndOptionalSessionCrossingEvents";
     private const string MigrationCrossingAudit = "20260408224557_AddCrossingEventAuditFieldsAndTimelineSupport";
+    private const string MigrationRoundOperationalFields = "20260409152004_AddRoundCountEventOperationalFields";
 
     public static async Task TryRepairLegacySchemaAsync(AppDbContext db, ILogger logger, CancellationToken cancellationToken = default)
     {
@@ -31,11 +32,14 @@ internal static class SqliteSchemaRepair
             var crossingEventsNeedsRepair = await TableNeedsRepairAsync(
                 connection,
                 "VehicleCrossingEvents",
-                ["Id", "RoundId", "SessionId", "CameraId", "TimestampUtc", "TrackId", "ObjectClass", "Direction", "LineId", "FrameNumber", "Confidence", "SnapshotUrl", "Source", "PreviousEventHash", "EventHash"],
+                ["Id", "RoundId", "SessionId", "CameraId", "TimestampUtc", "TrackId", "ObjectClass", "Direction", "LineId", "FrameNumber", "Confidence", "SnapshotUrl", "Source", "StreamProfileId", "CountBefore", "CountAfter", "PreviousEventHash", "EventHash"],
                 cancellationToken);
 
             if (!roundEventsNeedsRepair && !crossingEventsNeedsRepair)
+            {
+                await EnsureOperationalFieldMigrationAsync(connection, logger, cancellationToken);
                 return;
+            }
 
             logger.LogWarning("Legacy SQLite schema detected. Applying local repair for round/count tables before migrations.");
 
@@ -64,13 +68,16 @@ internal static class SqliteSchemaRepair
                         Confidence REAL NOT NULL,
                         SnapshotUrl TEXT NULL,
                         Source TEXT NULL,
+                        StreamProfileId TEXT NULL,
+                        CountBefore INTEGER NULL,
+                        CountAfter INTEGER NULL,
                         PreviousEventHash TEXT NULL,
                         EventHash TEXT NOT NULL,
                         CONSTRAINT FK_VehicleCrossingEvents_Rounds_RoundId FOREIGN KEY (RoundId) REFERENCES Rounds (RoundId),
                         CONSTRAINT FK_VehicleCrossingEvents_StreamSessions_SessionId FOREIGN KEY (SessionId) REFERENCES StreamSessions (Id) ON DELETE CASCADE
                     );
                     INSERT INTO VehicleCrossingEvents (
-                        Id, RoundId, SessionId, CameraId, TimestampUtc, TrackId, ObjectClass, Direction, LineId, FrameNumber, Confidence, SnapshotUrl, Source, PreviousEventHash, EventHash
+                        Id, RoundId, SessionId, CameraId, TimestampUtc, TrackId, ObjectClass, Direction, LineId, FrameNumber, Confidence, SnapshotUrl, Source, StreamProfileId, CountBefore, CountAfter, PreviousEventHash, EventHash
                     )
                     SELECT
                         legacy.Id,
@@ -86,6 +93,9 @@ internal static class SqliteSchemaRepair
                         legacy.Confidence,
                         NULL,
                         'legacy_crossing_event',
+                        NULL,
+                        NULL,
+                        NULL,
                         legacy.PreviousEventHash,
                         legacy.EventHash
                     FROM VehicleCrossingEvents_legacy AS legacy
@@ -139,6 +149,8 @@ internal static class SqliteSchemaRepair
 
             await EnsureMigrationHistoryAsync(connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+
+            await EnsureOperationalFieldMigrationAsync(connection, logger, cancellationToken);
         }
         finally
         {
@@ -212,6 +224,41 @@ internal static class SqliteSchemaRepair
         var productVersion = await GetLatestProductVersionAsync(connection, transaction, cancellationToken) ?? "8.0.0";
         await EnsureMigrationRowAsync(connection, transaction, MigrationRoundEvents, productVersion, cancellationToken);
         await EnsureMigrationRowAsync(connection, transaction, MigrationCrossingAudit, productVersion, cancellationToken);
+    }
+
+    private static async Task EnsureOperationalFieldMigrationAsync(
+        SqliteConnection connection,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var existingColumns = await GetColumnNamesAsync(connection, "VehicleCrossingEvents", cancellationToken);
+        var requiredColumns = new[] { "CountAfter", "CountBefore", "StreamProfileId" };
+
+        if (!requiredColumns.Any(existingColumns.Contains))
+            return;
+
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        foreach (var column in requiredColumns.Where(column => !existingColumns.Contains(column)))
+        {
+            var columnSql = column switch
+            {
+                "CountAfter" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN CountAfter INTEGER NULL;""",
+                "CountBefore" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN CountBefore INTEGER NULL;""",
+                "StreamProfileId" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN StreamProfileId TEXT NULL;""",
+                _ => null,
+            };
+
+            if (columnSql is null)
+                continue;
+
+            logger.LogWarning("SQLite schema estava parcialmente atualizado. Adicionando coluna ausente {Column}.", column);
+            await ExecuteNonQueryAsync(connection, transaction, columnSql, cancellationToken);
+        }
+
+        var productVersion = await GetLatestProductVersionAsync(connection, transaction, cancellationToken) ?? "8.0.0";
+        await EnsureMigrationRowAsync(connection, transaction, MigrationRoundOperationalFields, productVersion, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static async Task<string?> GetLatestProductVersionAsync(

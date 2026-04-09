@@ -22,6 +22,32 @@ async function withRetry(fn, attempt = 0) {
   }
 }
 
+function normalizeCrossingEvent(event) {
+  if (!event) return null
+
+  return {
+    id: event.id || event.eventHash || '',
+    roundId: event.roundId || '',
+    cameraId: event.cameraId || '',
+    trackId: String(event.trackId ?? ''),
+    vehicleType: event.objectClass || event.vehicleType || 'unknown',
+    objectClass: event.objectClass || event.vehicleType || 'unknown',
+    direction: event.direction || 'unknown',
+    lineId: event.lineId || '',
+    confidence: Number(event.confidence ?? 0),
+    frameNumber: Number(event.frameNumber ?? 0),
+    snapshotUrl: event.snapshotUrl || null,
+    source: event.source || null,
+    streamProfileId: event.streamProfileId || null,
+    countBefore: event.countBefore ?? null,
+    countAfter: event.countAfter ?? null,
+    previousEventHash: event.previousEventHash || null,
+    eventHash: event.eventHash || '',
+    timestampUtc: event.timestampUtc || null,
+    counted: true,
+  }
+}
+
 export async function getCurrentRound(cameraId) {
   const params = cameraId ? { cameraId } : undefined
   const { data } = await withRetry(() => api.get('/rounds/current', { params }))
@@ -36,5 +62,10 @@ export async function getRoundHistory(cameraId) {
 
 export async function getRoundCountEvents(roundId) {
   const { data } = await withRetry(() => api.get(`/rounds/${roundId}/count-events`))
-  return data
+  return Array.isArray(data) ? data.map(normalizeCrossingEvent).filter(Boolean) : []
+}
+
+export async function getRoundTimeline(roundId) {
+  const { data } = await withRetry(() => api.get(`/rounds/${roundId}/timeline`))
+  return Array.isArray(data) ? data : []
 }

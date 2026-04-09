@@ -250,6 +250,35 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
+    public async Task RoundCountEvent_is_idempotent_for_duplicate_event_hash()
+    {
+        var dto = new RoundCountEventDto
+        {
+            CameraId = "cam_idempotent",
+            RoundId = null,
+            TrackId = "500",
+            VehicleType = "car",
+            CrossedAt = DateTime.UtcNow,
+            EventHash = "event-hash-idempotent-001",
+            CountBefore = 0,
+            CountAfter = 1,
+            TotalCount = 1,
+        };
+
+        (await _client.PostAsJsonAsync("/internal/round-count-event", dto)).EnsureSuccessStatusCode();
+        (await _client.PostAsJsonAsync("/internal/round-count-event", dto)).EnsureSuccessStatusCode();
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_idempotent");
+        Assert.NotNull(round);
+        Assert.Equal(1, round!.CurrentCount);
+
+        var events = await _client.GetFromJsonAsync<List<CrossingEventResponse>>($"/rounds/{round.RoundId}/count-events");
+        Assert.NotNull(events);
+        Assert.Single(events!);
+        Assert.Equal("event-hash-idempotent-001", events[0].EventHash);
+    }
+
+    [Fact]
     public async Task GetCurrentRound_creates_round_for_requested_camera()
     {
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_001");
@@ -284,5 +313,49 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.NotNull(timeline);
         Assert.Contains(timeline!, item => item.Kind == "round_event" && item.EventType == "opened");
         Assert.Contains(timeline!, item => item.Kind == "crossing_event" && item.TrackId == 21 && item.SnapshotUrl == "snapshots/timeline.jpg");
+    }
+
+    [Fact]
+    public async Task RoundLifecycle_transitions_through_settling_before_settled()
+    {
+        var dto = new RoundCountEventDto
+        {
+            CameraId = "cam_settling",
+            TrackId = "88",
+            VehicleType = "car",
+            CrossedAt = DateTime.UtcNow,
+            TotalCount = 1,
+        };
+
+        (await _client.PostAsJsonAsync("/internal/round-count-event", dto)).EnsureSuccessStatusCode();
+
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+
+        var round = await db.Rounds.FirstAsync(r => r.CameraId == "cam_settling" && r.Status == Domain.Enums.RoundStatus.Open);
+        round.BetCloseAt = DateTime.UtcNow.AddSeconds(-5);
+        round.EndsAt = DateTime.UtcNow.AddSeconds(-1);
+        await db.SaveChangesAsync();
+
+        await roundService.TickAsync();
+        await roundService.TickAsync();
+
+        var settlingRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_settling");
+        Assert.NotNull(settlingRound);
+        Assert.Equal("settling", settlingRound!.Status);
+
+        await using var db2 = await dbFactory.CreateDbContextAsync();
+        var persistedRound = await db2.Rounds.FirstAsync(r => r.RoundId == Guid.Parse(settlingRound.RoundId));
+        persistedRound.EndsAt = DateTime.UtcNow.AddSeconds(-10);
+        await db2.SaveChangesAsync();
+
+        await roundService.TickAsync();
+
+        await using var db3 = await dbFactory.CreateDbContextAsync();
+        var settledRound = await db3.Rounds.FirstAsync(r => r.RoundId == persistedRound.RoundId);
+        Assert.Equal(Domain.Enums.RoundStatus.Settled, settledRound.Status);
+        Assert.NotNull(settledRound.SettledAt);
     }
 }

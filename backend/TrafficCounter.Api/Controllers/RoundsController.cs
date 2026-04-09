@@ -78,6 +78,10 @@ public class RoundsController : ControllerBase
                 Confidence = e.Confidence,
                 SnapshotUrl = e.SnapshotUrl,
                 Source = e.Source,
+                StreamProfileId = e.StreamProfileId,
+                CountBefore = e.CountBefore,
+                CountAfter = e.CountAfter,
+                PreviousEventHash = e.PreviousEventHash,
                 EventHash = e.EventHash,
             })
             .ToListAsync();

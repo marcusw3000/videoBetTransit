@@ -4,6 +4,7 @@ public class RoundOptions
 {
     public int DurationSeconds { get; set; } = 180;
     public int BetWindowSeconds { get; set; } = 70;
+    public int SettleDelaySeconds { get; set; } = 2;
     public List<MarketTemplate> Markets { get; set; } = [];
 }
 

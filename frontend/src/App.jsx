@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AdminDashboard from './components/AdminDashboard'
 import BettingPanel from './components/BettingPanel'
+import DetectionsList from './components/DetectionsList'
 import LastResults from './components/LastResults'
 import VideoPlayer from './components/VideoPlayer'
-import { getCurrentRound, getRoundHistory } from './services/roundApi'
+import { getCurrentRound, getRoundCountEvents, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds, parseTimestampMs } from './utils/time'
@@ -104,6 +105,7 @@ function MarketPage() {
   const [selectedMarketId, setSelectedMarketId] = useState('')
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
   const [workerHealth, setWorkerHealth] = useState(null)
+  const [recentDetections, setRecentDetections] = useState([])
   const roundIdRef = useRef('')
 
   const roundPhase = getRoundPhase(round)
@@ -148,6 +150,12 @@ function MarketPage() {
     try {
       const data = await getCurrentRound(embedConfig.cameraId)
       updateRound(data)
+      if (data?.roundId) {
+        const events = await getRoundCountEvents(data.roundId)
+        setRecentDetections(events)
+      } else {
+        setRecentDetections([])
+      }
       setError('')
     } catch (err) {
       console.error(err)
@@ -223,12 +231,30 @@ function MarketPage() {
         if (!active) return
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
         updateRound(data)
+        if (data?.roundId) {
+          void getRoundCountEvents(data.roundId).then((events) => {
+            if (active) setRecentDetections(events)
+          }).catch(console.error)
+        }
+      },
+      onRoundUpdated: (data) => {
+        if (!active) return
+        if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        updateRound(data)
       },
       onRoundSettled: async (data) => {
         if (!active) return
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
         setSelectedMarketId('')
         showToast('Round encerrado! Novo round iniciado.')
+        await loadCurrentRound()
+        await loadHistory()
+      },
+      onRoundVoided: async (data) => {
+        if (!active) return
+        if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        setSelectedMarketId('')
+        showToast('Round anulado. Carregando proximo round oficial.')
         await loadCurrentRound()
         await loadHistory()
       },
@@ -416,6 +442,7 @@ function MarketPage() {
               balance={0}
               isSuspended={round?.isSuspended}
             />
+            <DetectionsList detections={recentDetections} />
           </div>
         </div>
 

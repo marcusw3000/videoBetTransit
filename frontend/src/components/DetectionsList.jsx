@@ -1,5 +1,7 @@
 export default function DetectionsList({ detections = [] }) {
-  const counted = detections.filter((d) => d.counted).slice(-8).reverse()
+  const counted = detections
+    .filter((d) => d && (d.counted || d.eventHash || d.trackId))
+    .slice(0, 8)
 
   if (counted.length === 0) {
     return (
@@ -15,10 +17,10 @@ export default function DetectionsList({ detections = [] }) {
       <span className="label">Ultimos Carros Contabilizados</span>
       <div className="detections-grid">
         {counted.map((det) => (
-          <div key={det.trackId} className="detection-item">
-            <span className="detection-type">{det.vehicleType}</span>
+          <div key={det.id || det.eventHash || det.trackId} className="detection-item">
+            <span className="detection-type">{det.vehicleType || det.objectClass}</span>
             <span className="detection-id">#{det.trackId}</span>
-            <span className="detection-conf">{Math.round(det.confidence * 100)}%</span>
+            <span className="detection-conf">{Math.round((det.confidence ?? 0) * 100)}%</span>
           </div>
         ))}
       </div>

@@ -148,13 +148,23 @@ class BackendClient:
             round_payload = {
                 "cameraId": payload.get("cameraId", ""),
                 "roundId": payload.get("roundId", ""),
+                "streamProfileId": payload.get("streamProfileId", ""),
                 "trackId": str(payload.get("trackId", "")),
                 "vehicleType": payload.get("vehicleType", "car"),
+                "direction": payload.get("direction", "unknown"),
+                "lineId": payload.get("lineId", self.line_id),
+                "confidence": float(payload.get("confidence", 1.0) or 1.0),
+                "frameNumber": int(payload.get("frameNumber", 0) or 0),
                 "crossedAt": payload.get(
                     "crossedAt",
                     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 ),
                 "snapshotUrl": payload.get("snapshotUrl", ""),
+                "source": payload.get("source", "vision_worker_round_count"),
+                "previousEventHash": payload.get("previousEventHash", ""),
+                "eventHash": payload.get("eventHash", ""),
+                "countBefore": payload.get("countBefore"),
+                "countAfter": payload.get("countAfter"),
                 "totalCount": int(payload.get("totalCount", 0) or 0),
             }
             if self._enqueue_payload(

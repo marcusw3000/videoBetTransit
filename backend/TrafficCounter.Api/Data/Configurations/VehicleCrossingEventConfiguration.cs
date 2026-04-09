@@ -15,6 +15,7 @@ public class VehicleCrossingEventConfiguration : IEntityTypeConfiguration<Vehicl
         builder.Property(e => e.LineId).HasMaxLength(64).IsRequired();
         builder.Property(e => e.SnapshotUrl).HasMaxLength(512);
         builder.Property(e => e.Source).HasMaxLength(64);
+        builder.Property(e => e.StreamProfileId).HasMaxLength(128);
         builder.Property(e => e.PreviousEventHash).HasMaxLength(128);
         builder.Property(e => e.EventHash).HasMaxLength(128).IsRequired();
 
