@@ -278,7 +278,7 @@ export default function VideoPlayer({
             src={reloadedWebRtcSrc}
             title={title}
             className="video-element"
-            allow="autoplay; fullscreen"
+            allow="autoplay"
           />
         )}
 

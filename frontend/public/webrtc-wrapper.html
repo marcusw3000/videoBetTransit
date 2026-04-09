@@ -19,11 +19,12 @@
         height: 100%;
         display: block;
         background: #000;
+        pointer-events: none;
       }
     </style>
   </head>
   <body>
-    <iframe id="player" title="WebRTC Player" allow="autoplay; fullscreen"></iframe>
+    <iframe id="player" title="WebRTC Player" allow="autoplay"></iframe>
     <script>
       (function () {
         const WRAPPER_SOURCE = 'videobettransit-webrtc-wrapper';
