@@ -1,10 +1,13 @@
 @echo off
+setlocal
 cd /d "%~dp0"
 set "D=%~dp0"
 set "BACKEND_PORT=8080"
 set "FRONTEND_PORT=5173"
-set "BACKEND_URL=http://localhost:%BACKEND_PORT%"
-set "FRONTEND_URL=http://localhost:%FRONTEND_PORT%"
+set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%"
+set "FRONTEND_URL=http://127.0.0.1:%FRONTEND_PORT%"
+set "BACKEND_HEALTH_URL=%BACKEND_URL%/rounds/current?cameraId=cam_001"
+set "WORKER_URL=http://127.0.0.1:8090/health"
 set "MODE=%~1"
 
 if /I "%MODE%"=="" set "MODE=dev"
@@ -69,6 +72,21 @@ if not exist "%D%backend\TrafficCounter.Api\TrafficCounter.Api.csproj" (
     pause & exit /b 1
 )
 
+if not exist "%D%backend-dev.bat" (
+    echo [ERRO] Launcher do backend nao encontrado em %D%backend-dev.bat
+    pause & exit /b 1
+)
+
+if not exist "%D%frontend-dev.bat" (
+    echo [ERRO] Launcher do frontend nao encontrado em %D%frontend-dev.bat
+    pause & exit /b 1
+)
+
+if not exist "%D%vision-worker-dev.bat" (
+    echo [ERRO] Launcher do worker nao encontrado em %D%vision-worker-dev.bat
+    pause & exit /b 1
+)
+
 if not exist "%D%tools\mediamtx\mediamtx.exe" (
     where docker >nul 2>&1
     if errorlevel 1 (
@@ -121,22 +139,8 @@ if not exist "%D%logs" mkdir "%D%logs"
 
 echo 1. Iniciando Backend .NET (porta %BACKEND_PORT%)...
 start cmd /k "cd /d %D% && call backend-dev.bat"
-
-echo 2. Aguardando backend responder em %BACKEND_URL%...
-set "BACKEND_READY="
-for /L %%I in (1,1,15) do (
-    powershell -NoProfile -Command ^
-        "try { $r = Invoke-WebRequest -UseBasicParsing '%BACKEND_URL%/rounds/current?cameraId=cam_001' -TimeoutSec 2; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }"
-    if not errorlevel 1 (
-        set "BACKEND_READY=1"
-        goto :backend_ready_run_dev
-    )
-    echo    [aguardando] tentativa %%I/15...
-    timeout /t 2 /nobreak >nul
-)
-
-:backend_ready_run_dev
-if not defined BACKEND_READY (
+call :wait_for_backend
+if errorlevel 1 (
     echo [ERRO] O backend nao respondeu em %BACKEND_URL%.
     echo Verifique a janela [BACKEND] antes de continuar.
     pause & exit /b 1
@@ -145,22 +149,25 @@ echo [OK] Backend respondeu com sucesso.
 echo.
 
 echo 3. Iniciando Frontend React (porta %FRONTEND_PORT%)...
-if exist "%D%frontend\node_modules" (
-    start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm run dev"
-) else (
-    echo    [INFO] node_modules ausente - instalando dependencias...
-    start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm install && npm run dev"
-)
+start cmd /k "cd /d %D% && call frontend-dev.bat"
 
 echo 4. Iniciando Vision Worker (Python)...
-start cmd /k "cd /d %D%vision-worker && title [VISION] Python Worker && call %D%.venv\Scripts\activate && python app.py"
+start cmd /k "cd /d %D% && call vision-worker-dev.bat"
+call :wait_for_worker
+if errorlevel 1 (
+    echo [ERRO] O worker nao respondeu em http://127.0.0.1:8090/health.
+    echo Verifique a janela [VISION] antes de continuar.
+    pause & exit /b 1
+)
+echo [OK] Worker respondeu com sucesso.
+echo.
 
 echo.
 echo ============================================================
 echo  Sistema iniciado! 3 janelas abertas.
 echo  Frontend : %FRONTEND_URL%
 echo  Backend  : %BACKEND_URL%
-echo  MediaMTX : http://localhost:9997
+echo  MediaMTX : http://127.0.0.1:9997
 echo  Docs API : %BACKEND_URL%/streams
 echo.
 echo  Para Supabase, use: start.bat supabase
@@ -169,6 +176,31 @@ echo  Para encerrar: feche as 3 janelas do terminal.
 echo ============================================================
 pause
 exit /b 0
+
+:wait_for_backend
+call :wait_for_url "%BACKEND_HEALTH_URL%" 60 BACKEND
+exit /b %ERRORLEVEL%
+
+:wait_for_worker
+call :wait_for_url "%WORKER_URL%" 60 VISION
+exit /b %ERRORLEVEL%
+
+:wait_for_url
+setlocal
+set "WAIT_URL=%~1"
+set "WAIT_ATTEMPTS=%~2"
+set "WAIT_LABEL=%~3"
+
+for /L %%I in (1,1,%WAIT_ATTEMPTS%) do (
+    powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing '%WAIT_URL%' -TimeoutSec 2; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }"
+    if not errorlevel 1 (
+        endlocal & exit /b 0
+    )
+    echo    [aguardando %WAIT_LABEL%] tentativa %%I/%WAIT_ATTEMPTS%...
+    timeout /t 2 /nobreak >nul
+)
+
+endlocal & exit /b 1
 
 :run_supabase
 echo ============================================================

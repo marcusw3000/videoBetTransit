@@ -1,14 +1,19 @@
 @echo off
+setlocal
+
 cd /d "%~dp0"
 set "D=%~dp0"
 set "BACKEND_PORT=8080"
 set "FRONTEND_PORT=5173"
+set "WORKER_PORT=8090"
+set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%/rounds/current?cameraId=cam_001"
+set "WORKER_URL=http://127.0.0.1:%WORKER_PORT%/health"
 
 echo ============================================================
 echo  TrafficCounter MVP - Inicializando sistema (start-dev)
-echo  Backend : http://localhost:%BACKEND_PORT%
-echo  Frontend: http://localhost:%FRONTEND_PORT%
-echo  MediaMTX: http://localhost:9997
+echo  Backend : http://127.0.0.1:%BACKEND_PORT%
+echo  Frontend: http://127.0.0.1:%FRONTEND_PORT%
+echo  MediaMTX: http://127.0.0.1:9997
 echo  Worker oficial: vision-worker\app.py
 echo ============================================================
 echo.
@@ -17,20 +22,26 @@ where dotnet >nul 2>&1 || (echo [ERRO] dotnet nao encontrado.& pause & exit /b 1
 where node >nul 2>&1 || (echo [ERRO] node nao encontrado.& pause & exit /b 1)
 where python >nul 2>&1 || (echo [ERRO] python nao encontrado.& pause & exit /b 1)
 
-if not exist "%D%.venv\Scripts\activate.bat" (
+if not exist "%D%.venv\Scripts\python.exe" (
   echo [ERRO] Ambiente virtual Python nao encontrado.
   pause
   exit /b 1
 )
 
-if not exist "%D%backend\TrafficCounter.Api\TrafficCounter.Api.csproj" (
-  echo [ERRO] Backend nao encontrado.
+if not exist "%D%backend-dev.bat" (
+  echo [ERRO] Launcher do backend nao encontrado.
   pause
   exit /b 1
 )
 
-if not exist "%D%frontend\package.json" (
-  echo [ERRO] Frontend nao encontrado.
+if not exist "%D%frontend-dev.bat" (
+  echo [ERRO] Launcher do frontend nao encontrado.
+  pause
+  exit /b 1
+)
+
+if not exist "%D%vision-worker-dev.bat" (
+  echo [ERRO] Launcher do worker nao encontrado.
   pause
   exit /b 1
 )
@@ -58,40 +69,56 @@ if errorlevel 1 (
 
 echo 1. Iniciando backend local...
 start cmd /k "cd /d %D% && call backend-dev.bat"
-
-echo 2. Aguardando backend responder em http://localhost:%BACKEND_PORT%...
-set "BACKEND_READY="
-for /L %%I in (1,1,15) do (
-  powershell -NoProfile -Command ^
-    "try { $r = Invoke-WebRequest -UseBasicParsing 'http://localhost:%BACKEND_PORT%/rounds/current?cameraId=cam_001' -TimeoutSec 2; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }"
-  if not errorlevel 1 (
-    set "BACKEND_READY=1"
-    goto :backend_ready_start_dev
-  )
-  echo    [aguardando] tentativa %%I/15...
-  timeout /t 2 /nobreak >nul
-)
-
-:backend_ready_start_dev
-if not defined BACKEND_READY (
-  echo [ERRO] O backend nao respondeu em http://localhost:%BACKEND_PORT%.
+call :wait_for_backend
+if errorlevel 1 (
+  echo [ERRO] O backend nao respondeu em http://127.0.0.1:%BACKEND_PORT%.
   echo Verifique a janela [BACKEND] antes de continuar.
   pause
   exit /b 1
 )
 echo [OK] Backend respondeu com sucesso.
 
-echo 3. Iniciando frontend...
-if exist "%D%frontend\node_modules" (
-  start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm run dev"
-) else (
-  start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm install && npm run dev"
-)
+echo 2. Iniciando frontend...
+start cmd /k "cd /d %D% && call frontend-dev.bat"
 
-echo 4. Iniciando worker...
-start cmd /k "cd /d %D%vision-worker && title [VISION] Python Worker && call %D%.venv\Scripts\activate && python app.py"
+echo 3. Iniciando worker...
+start cmd /k "cd /d %D% && call vision-worker-dev.bat"
+call :wait_for_worker
+if errorlevel 1 (
+  echo [ERRO] O worker nao respondeu em http://127.0.0.1:%WORKER_PORT%/health.
+  echo Verifique a janela [VISION] antes de continuar.
+  pause
+  exit /b 1
+)
+echo [OK] Worker respondeu com sucesso.
 
 echo.
 echo Sistema iniciado.
 echo Use este arquivo enquanto o start.bat principal estiver em uso/bloqueado.
 pause
+exit /b 0
+
+:wait_for_backend
+call :wait_for_url "%BACKEND_URL%" 60 BACKEND
+exit /b %ERRORLEVEL%
+
+:wait_for_worker
+call :wait_for_url "%WORKER_URL%" 60 VISION
+exit /b %ERRORLEVEL%
+
+:wait_for_url
+setlocal
+set "WAIT_URL=%~1"
+set "WAIT_ATTEMPTS=%~2"
+set "WAIT_LABEL=%~3"
+
+for /L %%I in (1,1,%WAIT_ATTEMPTS%) do (
+  powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing '%WAIT_URL%' -TimeoutSec 2; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }"
+  if not errorlevel 1 (
+    endlocal & exit /b 0
+  )
+  echo    [aguardando %WAIT_LABEL%] tentativa %%I/%WAIT_ATTEMPTS%...
+  timeout /t 2 /nobreak >nul
+)
+
+endlocal & exit /b 1

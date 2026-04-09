@@ -1,11 +1,11 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
-const SIGNALR_BASE_URL = import.meta.env.VITE_SIGNALR_BASE_URL || 'http://localhost:8080'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080'
+const SIGNALR_BASE_URL = import.meta.env.VITE_SIGNALR_BASE_URL || 'http://127.0.0.1:8080'
 const MJPEG_TOKEN = import.meta.env.VITE_MJPEG_TOKEN || 'CHANGE_ME'
 
-const WEBRTC_BASE_URL = (import.meta.env.VITE_WEBRTC_BASE_URL || 'http://localhost:8889').replace(/\/+$/, '')
-const HLS_BASE_URL = (import.meta.env.VITE_HLS_BASE_URL || 'http://localhost:8888').replace(/\/+$/, '')
-const MJPEG_BASE_URL = (import.meta.env.VITE_MJPEG_BASE_URL || 'http://localhost:8090/video_feed').replace(/\/+$/, '')
-const MJPEG_HEALTH_URL = import.meta.env.VITE_MJPEG_HEALTH_URL || 'http://localhost:8090/health'
+const WEBRTC_BASE_URL = (import.meta.env.VITE_WEBRTC_BASE_URL || 'http://127.0.0.1:8889').replace(/\/+$/, '')
+const HLS_BASE_URL = (import.meta.env.VITE_HLS_BASE_URL || 'http://127.0.0.1:8888').replace(/\/+$/, '')
+const MJPEG_BASE_URL = (import.meta.env.VITE_MJPEG_BASE_URL || 'http://127.0.0.1:8090/video_feed').replace(/\/+$/, '')
+const MJPEG_HEALTH_URL = import.meta.env.VITE_MJPEG_HEALTH_URL || 'http://127.0.0.1:8090/health'
 
 function normalizeCameraId(value) {
   const normalized = String(value || '')

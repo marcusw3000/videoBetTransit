@@ -18,14 +18,12 @@ echo  Banco    : SQLite local ^(appsettings.Development.json^)
 echo ============================================================
 echo.
 
-if not exist "%API_DLL%" (
-  echo [INFO] Build inicial nao encontrada. Compilando backend...
-  dotnet build TrafficCounter.Api.csproj -p:UseAppHost=false
-  if errorlevel 1 (
-    echo [ERRO] Falha ao compilar o backend.
-    pause
-    exit /b 1
-  )
+echo [INFO] Compilando backend...
+dotnet build TrafficCounter.Api.csproj -p:UseAppHost=false
+if errorlevel 1 (
+  echo [ERRO] Falha ao compilar o backend.
+  pause
+  exit /b 1
 )
 
 echo [INFO] Iniciando API via DLL para evitar inconsistencias do dotnet run...
