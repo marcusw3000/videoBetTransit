@@ -54,6 +54,8 @@ class BackendClient:
         self.round_count_url = f"{self.base_url}/internal/round-count-event"
         self.current_round_url = f"{self.base_url}/rounds/current"
         self.profile_activation_url = f"{self.base_url}/internal/rounds/profile-activated"
+        self.round_lock_url_template = f"{self.base_url}/internal/cameras/{{camera_id}}/round-lock"
+        self.camera_config_validation_url = f"{self.base_url}/internal/camera-config/validate-change"
         self.health_report_url = f"{self.base_url}/internal/health-report"
         self.api_key = api_key
         self.session_id = session_id
@@ -135,6 +137,47 @@ class BackendClient:
     def fetch_camera_config(self, _camera_id: str) -> dict | None:
         return None
 
+    def fetch_round_lock(self, camera_id: str) -> dict | None:
+        normalized_camera_id = str(camera_id or "").strip()
+        if not normalized_camera_id:
+            return {"cameraId": "", "isLocked": False, "reason": None}
+
+        try:
+            resp = self._session.get(
+                self.round_lock_url_template.format(camera_id=quote(normalized_camera_id)),
+                headers=self._default_headers,
+                timeout=3,
+            )
+            if resp.status_code == 200:
+                self._mark_success()
+                return resp.json()
+
+            self._mark_error(f"round lock HTTP {resp.status_code}: {resp.text[:200]}")
+            logger.warning("[BACKEND] Falha ao consultar round lock (%s): %s", resp.status_code, resp.text[:200])
+            return None
+        except requests.Timeout:
+            self._mark_error("timeout fetching round lock")
+            logger.warning("[BACKEND] Timeout ao consultar round lock")
+            return None
+        except requests.ConnectionError:
+            self._mark_error("connection error fetching round lock")
+            logger.warning("[BACKEND] Sem conexao ao consultar round lock")
+            return None
+        except Exception as exc:
+            self._mark_error(f"unexpected round lock error: {exc}")
+            logger.warning("[BACKEND] Erro ao consultar round lock: %s", exc)
+            return None
+
+    def ensure_camera_unlocked(self, camera_id: str, operation_name: str = "operacao") -> tuple[bool, str]:
+        lock_state = self.fetch_round_lock(camera_id)
+        if lock_state is None:
+            return False, "Nao foi possivel validar o bloqueio operacional no backend."
+
+        if bool(lock_state.get("isLocked")):
+            return False, str(lock_state.get("reason") or "Camera locked while round is active; try again after settlement.")
+
+        return True, ""
+
     def notify_stream_profile_activated(self, camera_id: str, stream_profile_id: str = "") -> bool:
         payload = {
             "cameraId": str(camera_id or "").strip(),
@@ -173,12 +216,44 @@ class BackendClient:
 
     def save_camera_config(
         self,
-        _camera_id: str,
+        camera_id: str,
         _roi: dict,
         _line: dict,
         _count_direction: str,
     ) -> bool:
-        return True
+        payload = {
+            "cameraId": str(camera_id or "").strip(),
+        }
+
+        if not payload["cameraId"]:
+            return False
+
+        try:
+            resp = self._session.post(
+                self.camera_config_validation_url,
+                json=payload,
+                headers=self._default_headers,
+                timeout=5,
+            )
+            if resp.status_code >= 400:
+                self._mark_error(f"camera config validation HTTP {resp.status_code}: {resp.text[:200]}")
+                logger.warning("[BACKEND] Falha ao validar camera config (%s): %s", resp.status_code, resp.text[:200])
+                return False
+
+            self._mark_success()
+            return True
+        except requests.ConnectionError:
+            self._mark_error("connection error validating camera config")
+            logger.error("[BACKEND] Sem conexao ao validar camera config")
+            return False
+        except requests.Timeout:
+            self._mark_error("timeout validating camera config")
+            logger.error("[BACKEND] Timeout ao validar camera config")
+            return False
+        except Exception as exc:
+            self._mark_error(f"unexpected camera config validation error: {exc}")
+            logger.error("[BACKEND] Erro ao validar camera config: %s", exc)
+            return False
 
     def send_count_event(self, payload: dict):
         if not self.session_id:

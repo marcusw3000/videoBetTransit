@@ -2295,6 +2295,14 @@ def main():
         if editor is None:
             return
 
+        unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "salvar calibracao")
+        if not unlocked:
+            editor.message = (
+                "Alteracao bloqueada: troque perfil/ROI/line apenas apos o fechamento oficial do round. "
+                f"Detalhe: {reason}"
+            )
+            return
+
         stream_store.save_selected_profile(
             roi=editor.roi,
             line=editor.line,
@@ -2342,6 +2350,22 @@ def main():
             control_panel.set_active_stream_profile(profile)
 
     def select_stream_profile(profile_id: str) -> dict:
+        target_camera_id = cfg.get("camera_id", "")
+        for existing_profile in stream_store.list_profiles():
+            if str(existing_profile.get("id") or "") == str(profile_id or ""):
+                target_camera_id = existing_profile.get("camera_id") or target_camera_id
+                break
+
+        unlocked, reason = backend.ensure_camera_unlocked(target_camera_id, "trocar stream profile")
+        if not unlocked:
+            message = (
+                "Troca de perfil bloqueada ate o fechamento oficial do round. "
+                f"Detalhe: {reason}"
+            )
+            if editor is not None:
+                editor.message = message
+            raise RuntimeError(message)
+
         profile = stream_store.select_profile(profile_id)
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
@@ -2352,6 +2376,16 @@ def main():
         return profile
 
     def open_stream_url(stream_url: str, stream_name: str) -> dict:
+        unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "alterar stream")
+        if not unlocked:
+            message = (
+                "Alteracao de stream bloqueada ate o fechamento oficial do round. "
+                f"Detalhe: {reason}"
+            )
+            if editor is not None:
+                editor.message = message
+            raise RuntimeError(message)
+
         profile, created = stream_store.apply_stream_url(stream_url, name=stream_name)
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
@@ -2363,6 +2397,16 @@ def main():
         return profile
 
     def save_stream_profile(stream_name: str, stream_url: str) -> dict:
+        unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "salvar stream profile")
+        if not unlocked:
+            message = (
+                "Configuracao bloqueada ate o fechamento oficial do round. "
+                f"Detalhe: {reason}"
+            )
+            if editor is not None:
+                editor.message = message
+            raise RuntimeError(message)
+
         target_url = stream_url or cfg.get("stream_url", "")
         profile = stream_store.save_selected_profile(
             name=stream_name,

@@ -33,6 +33,43 @@ function getWindowRef() {
   return window
 }
 
+function getSessionStorageValue(key) {
+  const win = getWindowRef()
+  if (!win) return ''
+
+  try {
+    return win.sessionStorage?.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+function setSessionStorageValue(key, value) {
+  const win = getWindowRef()
+  if (!win) return
+
+  try {
+    win.sessionStorage?.setItem(key, value)
+  } catch {
+    // ignore session storage failures
+  }
+}
+
+function buildSessionId(prefix = 'session') {
+  const win = getWindowRef()
+  if (win?.crypto?.randomUUID) return `${prefix}_${win.crypto.randomUUID()}`
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getOrCreateSessionValue(key, prefix) {
+  const existing = getSessionStorageValue(key)
+  if (existing) return existing
+
+  const next = buildSessionId(prefix)
+  setSessionStorageValue(key, next)
+  return next
+}
+
 function getSearchParams() {
   const win = getWindowRef()
   if (!win) return new URLSearchParams()
@@ -99,6 +136,7 @@ function getThemeConfig(theme) {
 
 export function getEmbedConfig() {
   const globalConfig = getGlobalConfig()
+  const cameraId = readValue('cameraId', import.meta.env.VITE_CAMERA_ID || 'cam_001')
   const theme = globalConfig.theme ?? readValue('theme', import.meta.env.VITE_THEME || 'midnight')
   const stakeOptions = parseStakeOptions(
     globalConfig.stakeOptions ?? readValue('stakeOptions', import.meta.env.VITE_STAKE_OPTIONS || '5,10,20,50'),
@@ -110,10 +148,16 @@ export function getEmbedConfig() {
   return {
     brand: readValue('brand', import.meta.env.VITE_BRAND || 'Rodovia Market'),
     locale: readValue('locale', import.meta.env.VITE_LOCALE || 'pt-BR'),
-    cameraId: readValue('cameraId', import.meta.env.VITE_CAMERA_ID || 'cam_001'),
+    cameraId,
     cameraLabel: readValue('cameraLabel', import.meta.env.VITE_CAMERA_LABEL || 'Rodovia Norte - Faixa A'),
     currency: readValue('currency', import.meta.env.VITE_CURRENCY || 'BRL'),
     timezone: readValue('timezone', import.meta.env.VITE_TIMEZONE || 'America/Sao_Paulo'),
+    gameSessionId: readValue(
+      'gameSessionId',
+      globalConfig.gameSessionId || getOrCreateSessionValue(`videobettransit:game-session:${cameraId}`, 'game'),
+    ),
+    playerRef: readValue('playerRef', globalConfig.playerRef || ''),
+    operatorRef: readValue('operatorRef', globalConfig.operatorRef || ''),
     stakeOptions,
     defaultStake: Number.isFinite(defaultStake) && defaultStake > 0 ? defaultStake : stakeOptions[0],
     theme,
@@ -162,6 +206,7 @@ export function emitEmbedEvent(eventName, payload, config = getEmbedConfig()) {
       currency: config.currency,
       timezone: config.timezone,
       mode: config.mode,
+      gameSessionId: config.gameSessionId,
     },
     emittedAt: new Date().toISOString(),
   }

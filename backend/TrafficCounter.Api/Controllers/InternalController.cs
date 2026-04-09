@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using TrafficCounter.Api.Contracts.Inbound;
+using TrafficCounter.Api.Contracts.Responses;
 using TrafficCounter.Api.Data;
 using TrafficCounter.Api.Domain.Entities;
 using TrafficCounter.Api.Domain.Enums;
@@ -76,8 +77,47 @@ public class InternalController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.CameraId))
             return BadRequest(new { error = "cameraId is required." });
 
-        await _roundService.NotifyStreamProfileActivatedAsync(dto.CameraId, dto.StreamProfileId);
-        return Ok(new { received = true });
+        try
+        {
+            await _roundService.NotifyStreamProfileActivatedAsync(dto.CameraId, dto.StreamProfileId);
+            return Ok(new { received = true });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("cameras/{cameraId}/round-lock")]
+    public async Task<IActionResult> GetRoundLock(string cameraId)
+    {
+        if (string.IsNullOrWhiteSpace(cameraId))
+            return BadRequest(new { error = "cameraId is required." });
+
+        var isLocked = await _roundService.IsCameraLockedForRoundAsync(cameraId);
+        return Ok(new RoundLockResponse
+        {
+            CameraId = cameraId.Trim(),
+            IsLocked = isLocked,
+            Reason = isLocked ? RoundService.CameraLockedMessage : null,
+        });
+    }
+
+    [HttpPost("camera-config/validate-change")]
+    public async Task<IActionResult> ValidateCameraConfigChange([FromBody] CameraConfigChangeDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.CameraId))
+            return BadRequest(new { error = "cameraId is required." });
+
+        try
+        {
+            await _roundService.EnsureCameraUnlockedAsync(dto.CameraId);
+            return Ok(new { allowed = true });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
     }
 
     [HttpPost("bets")]

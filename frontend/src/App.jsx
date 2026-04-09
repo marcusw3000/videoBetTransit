@@ -5,6 +5,7 @@ import DetectionsList from './components/DetectionsList'
 import HistoryDropdown from './components/HistoryDropdown'
 import LastResults from './components/LastResults'
 import VideoPlayer from './components/VideoPlayer'
+import { placeBet } from './services/betApi'
 import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
@@ -33,6 +34,36 @@ function formatOdds(odds, locale = 'pt-BR') {
 
 function padTime(n) {
   return String(Math.max(0, Math.floor(n))).padStart(2, '0')
+}
+
+function buildTransactionId() {
+  if (window.crypto?.randomUUID) return `tx_${window.crypto.randomUUID()}`
+  return `tx_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getApiErrorMessage(error, fallback) {
+  return error?.response?.data?.error || fallback
+}
+
+function reconcileBetWithRound(bet, roundData) {
+  if (!bet || !roundData || bet.roundId !== roundData.roundId) return bet
+
+  if (roundData.status === 'void') {
+    return {
+      ...bet,
+      status: 'void',
+      voidedAt: roundData.voidedAt || new Date().toISOString(),
+    }
+  }
+
+  if (roundData.status !== 'settled') return bet
+
+  const winningMarket = (roundData.markets || []).find((market) => market.marketId === bet.marketId)
+  return {
+    ...bet,
+    status: winningMarket?.isWinner ? 'settled_win' : 'settled_loss',
+    settledAt: roundData.settledAt || new Date().toISOString(),
+  }
 }
 
 function getDisplayName(round) {
@@ -105,6 +136,8 @@ function MarketPage() {
   const [toast, setToast] = useState(null)
   const [selectedMarketId, setSelectedMarketId] = useState('')
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
+  const [recentBets, setRecentBets] = useState([])
+  const [isSubmittingBet, setIsSubmittingBet] = useState(false)
   const [workerHealth, setWorkerHealth] = useState(null)
   const roundIdRef = useRef('')
 
@@ -120,6 +153,10 @@ function MarketPage() {
   const hasValidStake = Number.isFinite(numericStakeAmount) && numericStakeAmount > 0
 
   const overMarket = useMemo(() => markets.find((m) => m.marketType?.toLowerCase() === 'over') || null, [markets])
+  const selectedMarket = useMemo(
+    () => markets.find((market) => (market.marketId || market.id) === selectedMarketId) || null,
+    [markets, selectedMarketId],
+  )
   const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
   const webrtcSrc = useMemo(() => buildWebRtcWrapperUrl(embedConfig.cameraId), [embedConfig.cameraId])
   const hlsSrc = useMemo(() => buildHlsUrl(embedConfig.cameraId), [embedConfig.cameraId])
@@ -130,8 +167,6 @@ function MarketPage() {
     const dur = roundDurationLabel ? `(${roundDurationLabel})` : ''
     return `${name}${dur ? ' ' + dur : ''}: quantos carros?`
   }, [round, roundDurationLabel])
-  const counterLabel = 'CONTAGEM DA RODADA'
-
   function showToast(message) {
     const id = Date.now()
     setToast({ message, id })
@@ -167,6 +202,10 @@ function MarketPage() {
     }
   }, [embedConfig.cameraId])
 
+  const reconcileRecentBets = useCallback((roundData) => {
+    setRecentBets((current) => current.map((bet) => reconcileBetWithRound(bet, roundData)))
+  }, [])
+
   function handleMarketSelect(market) {
     if (!round) return
     if (!hasValidStake) {
@@ -193,6 +232,57 @@ function MarketPage() {
       locale: embedConfig.locale,
       timezone: embedConfig.timezone,
     }, embedConfig)
+  }
+
+  async function handleSubmitBet() {
+    if (!round || !selectedMarket || !hasValidStake || roundPhase !== 'open' || round?.isSuspended) {
+      return
+    }
+
+    const transactionId = buildTransactionId()
+    const payload = {
+      transactionId,
+      gameSessionId: embedConfig.gameSessionId,
+      roundId: round.roundId,
+      marketId: selectedMarket.marketId || selectedMarket.id,
+      stakeAmount: numericStakeAmount,
+      currency: embedConfig.currency,
+      playerRef: embedConfig.playerRef || null,
+      operatorRef: embedConfig.operatorRef || null,
+      metadataJson: JSON.stringify({
+        cameraId: embedConfig.cameraId,
+        cameraLabel: embedConfig.cameraLabel,
+        locale: embedConfig.locale,
+      }),
+    }
+
+    emitEmbedEvent('bet-submit', {
+      transactionId,
+      ...payload,
+      marketLabel: selectedMarket.label,
+      odds: selectedMarket.odds,
+    }, embedConfig)
+
+    try {
+      setIsSubmittingBet(true)
+      const acceptedBet = await placeBet(payload)
+      setRecentBets((current) => [acceptedBet, ...current.filter((bet) => bet.id !== acceptedBet.id)].slice(0, 8))
+      setSelectedMarketId('')
+      showToast(`Aposta aceita: ${selectedMarket.label}.`)
+      emitEmbedEvent('bet-accepted', acceptedBet, embedConfig)
+    } catch (err) {
+      const message = getApiErrorMessage(err, 'Nao foi possivel concluir a aposta.')
+      showToast(message)
+      emitEmbedEvent('bet-rejected', {
+        transactionId,
+        message,
+        roundId: round.roundId,
+        marketId: selectedMarket.marketId || selectedMarket.id,
+        marketLabel: selectedMarket.label,
+      }, embedConfig)
+    } finally {
+      setIsSubmittingBet(false)
+    }
   }
 
   useEffect(() => {
@@ -235,6 +325,7 @@ function MarketPage() {
       onRoundSettled: async (data) => {
         if (!active) return
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        reconcileRecentBets(data)
         setSelectedMarketId('')
         showToast('Round encerrado! Novo round iniciado.')
         await loadCurrentRound()
@@ -243,6 +334,7 @@ function MarketPage() {
       onRoundVoided: async (data) => {
         if (!active) return
         if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        reconcileRecentBets(data)
         setSelectedMarketId('')
         showToast('Round anulado. Carregando proximo round oficial.')
         await loadCurrentRound()
@@ -259,7 +351,7 @@ function MarketPage() {
       clearInterval(pollId)
       stopRoundConnection().catch(console.error)
     }
-  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, updateRound])
+  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, reconcileRecentBets, updateRound])
 
   useEffect(() => {
     let active = true
@@ -306,6 +398,7 @@ function MarketPage() {
       cameraLabel: embedConfig.cameraLabel,
       currency: embedConfig.currency,
       timezone: embedConfig.timezone,
+      gameSessionId: embedConfig.gameSessionId,
       stakeOptions: embedConfig.stakeOptions,
       defaultStake: embedConfig.defaultStake,
       mode: embedConfig.mode,
@@ -392,12 +485,6 @@ function MarketPage() {
         <div className="exchange-body">
           <div className="left-panel">
             <div className="count-bar">
-              <div className="count-bar-left">
-                <span className="count-bar-label">{counterLabel}</span>
-                <span className="count-bar-value">
-                  {displayCount ?? '--'}
-                </span>
-              </div>
               <div className="count-bar-right">
                 <span className="count-bar-label">TEMPO DO ROUND</span>
                 <span className="count-bar-timer">
@@ -431,6 +518,7 @@ function MarketPage() {
               betCloseSeconds={betCloseSeconds}
               selectedMarketId={selectedMarketId}
               onMarketSelect={handleMarketSelect}
+              onSubmitBet={handleSubmitBet}
               stakeAmount={stakeAmount}
               onStakeChange={setStakeAmount}
               stakeOptions={embedConfig.stakeOptions}
@@ -438,6 +526,8 @@ function MarketPage() {
               currency={embedConfig.currency}
               balance={0}
               isSuspended={round?.isSuspended}
+              recentBets={recentBets}
+              isSubmittingBet={isSubmittingBet}
             />
             <DetectionsList detections={[]} />
           </div>

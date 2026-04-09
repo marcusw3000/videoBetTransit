@@ -6,6 +6,7 @@ using TrafficCounter.Api.Contracts.Inbound;
 using TrafficCounter.Api.Contracts.Requests;
 using TrafficCounter.Api.Contracts.Responses;
 using TrafficCounter.Api.Data;
+using TrafficCounter.Api.Domain.Enums;
 using TrafficCounter.Api.Services;
 using TrafficCounter.Api.Tests.Infrastructure;
 using Xunit;
@@ -406,6 +407,61 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         Assert.NotNull(round);
         Assert.Equal("normal", round!.RoundMode);
+    }
+
+    [Fact]
+    public async Task RoundLock_returns_locked_when_camera_has_active_round()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_lock_round");
+        Assert.NotNull(round);
+
+        var response = await _client.GetAsync("/internal/cameras/cam_lock_round/round-lock");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<RoundLockResponse>();
+        Assert.NotNull(payload);
+        Assert.True(payload!.IsLocked);
+        Assert.Equal("cam_lock_round", payload.CameraId);
+    }
+
+    [Fact]
+    public async Task ValidateCameraConfigChange_returns_conflict_when_camera_has_active_round()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_lock_config");
+        Assert.NotNull(round);
+
+        var response = await _client.PostAsJsonAsync("/internal/camera-config/validate-change", new CameraConfigChangeDto
+        {
+            CameraId = "cam_lock_config",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ValidateCameraConfigChange_allows_camera_without_active_round()
+    {
+        var response = await _client.PostAsJsonAsync("/internal/camera-config/validate-change", new CameraConfigChangeDto
+        {
+            CameraId = "cam_unlock_config",
+        });
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task NotifyStreamProfileActivated_returns_conflict_when_camera_has_active_round()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_lock_profile");
+        Assert.NotNull(round);
+
+        var response = await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_lock_profile",
+            StreamProfileId = "profile-z",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     [Fact]

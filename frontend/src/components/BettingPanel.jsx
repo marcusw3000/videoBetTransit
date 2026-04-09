@@ -33,7 +33,7 @@ function getMarketBtnClass(marketType) {
   }
 }
 
-const POSITIONS_TABS = ['Posições', 'Em aberto', 'Encerrados']
+const POSITIONS_TABS = ['Posicoes', 'Em aberto', 'Encerrados']
 
 export default function BettingPanel({
   markets = [],
@@ -41,6 +41,7 @@ export default function BettingPanel({
   betCloseSeconds = 0,
   selectedMarketId = '',
   onMarketSelect,
+  onSubmitBet,
   stakeAmount = '3',
   onStakeChange,
   stakeOptions = [1, 10, 50, 100],
@@ -48,15 +49,17 @@ export default function BettingPanel({
   currency = 'BRL',
   balance = 0,
   isSuspended = false,
+  recentBets = [],
+  isSubmittingBet = false,
 }) {
-  const [posTab, setPosTab] = useState('Posições')
+  const [posTab, setPosTab] = useState('Posicoes')
 
   const numericStake = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStake) && numericStake > 0
 
   const selectedMarket = useMemo(
     () => markets.find((m) => (m.marketId || m.id) === selectedMarketId) || null,
-    [markets, selectedMarketId]
+    [markets, selectedMarketId],
   )
 
   const payout = hasValidStake && selectedMarket
@@ -69,6 +72,17 @@ export default function BettingPanel({
   function handleStakeIncrement(delta) {
     const next = Math.max(0, (hasValidStake ? numericStake : 0) + delta)
     onStakeChange?.(String(next % 1 === 0 ? next : next.toFixed(2)))
+  }
+
+  function getBetStatusLabel(status) {
+    switch ((status || '').toLowerCase()) {
+      case 'accepted': return 'Em aberto'
+      case 'settled_win': return 'Ganhou'
+      case 'settled_loss': return 'Perdeu'
+      case 'void': return 'Anulada'
+      case 'rollback': return 'Rollback'
+      default: return 'Pendente'
+    }
   }
 
   return (
@@ -89,12 +103,12 @@ export default function BettingPanel({
         >
           Comprar
         </button>
-        <span className="bet-type-refresh" title="Atualizar odds">↻</span>
+        <span className="bet-type-refresh" title="Atualizar odds">R</span>
       </div>
 
       <div className="mkt-pick-grid">
         {markets.length === 0 && (
-          <span className="mkt-pick-empty">Mercados indisponíveis</span>
+          <span className="mkt-pick-empty">Mercados indisponiveis</span>
         )}
         {markets.map((m) => {
           const mId = m.marketId || m.id
@@ -169,7 +183,7 @@ export default function BettingPanel({
         <div className="payout-row">
           <div className="payout-label">
             <span>Para ganhar</span>
-            <span className="payout-trophy">🏆</span>
+            <span className="payout-trophy">$</span>
           </div>
           <div className="payout-value-col">
             <span className="payout-amount">{formatCurrency(payout, locale, currency)}</span>
@@ -181,19 +195,22 @@ export default function BettingPanel({
       <button
         type="button"
         className={`bet-cta-btn${canBet ? ' bet-cta-btn-active' : ''}`}
-        disabled={!canBet}
+        disabled={!canBet || isSubmittingBet}
+        onClick={() => canBet && onSubmitBet?.(selectedMarket)}
       >
-        {!isBettingOpen
-          ? roundPhase === 'closing' ? 'Mercado Fechado' : 'Aguardando Round'
-          : !hasValidStake
-            ? 'Escolha o valor da aposta'
-            : !selectedMarket
-              ? 'Escolha um mercado'
-              : `Comprar ${selectedMarket.label || selectedMarket.marketType}`}
+        {isSubmittingBet
+          ? 'Enviando aposta...'
+          : !isBettingOpen
+            ? roundPhase === 'closing' ? 'Mercado Fechado' : 'Aguardando Round'
+            : !hasValidStake
+              ? 'Escolha o valor da aposta'
+              : !selectedMarket
+                ? 'Escolha um mercado'
+                : `Comprar ${selectedMarket.label || selectedMarket.marketType}`}
       </button>
 
       <div className="positions-section">
-        <span className="positions-title">Minhas posições</span>
+        <span className="positions-title">Minhas posicoes</span>
         <div className="positions-tabs">
           {POSITIONS_TABS.map((t) => (
             <button
@@ -206,9 +223,19 @@ export default function BettingPanel({
             </button>
           ))}
         </div>
-        <div className="positions-empty">
-          Faça login para visualizar suas posições.
-        </div>
+        {recentBets.length === 0 ? (
+          <div className="positions-empty">
+            Nenhuma aposta feita nesta sessao ainda.
+          </div>
+        ) : (
+          <div className="positions-list">
+            {recentBets.slice(0, 4).map((bet) => (
+              <div key={bet.id || bet.transactionId} className="positions-empty">
+                {bet.marketLabel} | {formatCurrency(bet.stakeAmount, locale, currency)} | {getBetStatusLabel(bet.status)}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

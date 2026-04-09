@@ -15,6 +15,8 @@ namespace TrafficCounter.Api.Services;
 
 public class RoundService
 {
+    public const string CameraLockedMessage = "Camera locked while round is active; try again after settlement.";
+
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IHubContext<RoundHub> _hub;
     private readonly ILogger<RoundService> _logger;
@@ -298,6 +300,9 @@ public class RoundService
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var normalizedCameraId = NormalizeCameraId(cameraId);
+        if (await IsCameraLockedForRoundAsync(normalizedCameraId, db))
+            throw new InvalidOperationException(CameraLockedMessage);
+
         var normalizedProfileId = NormalizeOptional(streamProfileId);
         var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
 
@@ -310,6 +315,18 @@ public class RoundService
         state.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync();
+    }
+
+    public async Task<bool> IsCameraLockedForRoundAsync(string cameraId = "default")
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await IsCameraLockedForRoundAsync(NormalizeCameraId(cameraId), db);
+    }
+
+    public async Task EnsureCameraUnlockedAsync(string cameraId = "default")
+    {
+        if (await IsCameraLockedForRoundAsync(cameraId))
+            throw new InvalidOperationException(CameraLockedMessage);
     }
 
     private async Task CreateNewRoundAsync(AppDbContext db, string cameraId)
@@ -595,4 +612,11 @@ public class RoundService
         RoundMode RoundMode,
         bool WasEligibleForTurbo,
         int RoundsSinceProfileSwitch);
+
+    private static Task<bool> IsCameraLockedForRoundAsync(string cameraId, AppDbContext db) =>
+        db.Rounds.AnyAsync(r =>
+            r.CameraId == cameraId &&
+            (r.Status == RoundStatus.Open ||
+             r.Status == RoundStatus.Closing ||
+             r.Status == RoundStatus.Settling));
 }
