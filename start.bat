@@ -122,16 +122,35 @@ if not exist "%D%logs" mkdir "%D%logs"
 echo 1. Iniciando Backend .NET (porta %BACKEND_PORT%)...
 start cmd /k "cd /d %D% && call backend-dev.bat"
 
-echo 2. Iniciando Frontend React (porta %FRONTEND_PORT%)...
+echo 2. Aguardando backend responder em %BACKEND_URL%...
+set "BACKEND_READY="
+for /L %%I in (1,1,15) do (
+    powershell -NoProfile -Command ^
+        "try { $r = Invoke-WebRequest -UseBasicParsing '%BACKEND_URL%/rounds/current?cameraId=cam_001' -TimeoutSec 2; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }"
+    if not errorlevel 1 (
+        set "BACKEND_READY=1"
+        goto :backend_ready_run_dev
+    )
+    echo    [aguardando] tentativa %%I/15...
+    timeout /t 2 /nobreak >nul
+)
+
+:backend_ready_run_dev
+if not defined BACKEND_READY (
+    echo [ERRO] O backend nao respondeu em %BACKEND_URL%.
+    echo Verifique a janela [BACKEND] antes de continuar.
+    pause & exit /b 1
+)
+echo [OK] Backend respondeu com sucesso.
+echo.
+
+echo 3. Iniciando Frontend React (porta %FRONTEND_PORT%)...
 if exist "%D%frontend\node_modules" (
     start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm run dev"
 ) else (
     echo    [INFO] node_modules ausente - instalando dependencias...
     start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm install && npm run dev"
 )
-
-echo 3. Aguardando backend inicializar (5s)...
-timeout /t 5 /nobreak >nul
 
 echo 4. Iniciando Vision Worker (Python)...
 start cmd /k "cd /d %D%vision-worker && title [VISION] Python Worker && call %D%.venv\Scripts\activate && python app.py"

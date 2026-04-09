@@ -21,4 +21,5 @@ public class Round
     public string? VoidReason { get; set; }
 
     public ICollection<RoundMarket> Markets { get; set; } = [];
+    public ICollection<RoundEvent> Events { get; set; } = [];
 }

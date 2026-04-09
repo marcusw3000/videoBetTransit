@@ -111,13 +111,14 @@ static async Task MigrateWithRetryAsync(WebApplication app)
             var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
             await using var ctx = await factory.CreateDbContextAsync();
 
-            // SQLite e InMemory: EnsureCreated (cria schema direto do modelo)
-            // PostgreSQL: MigrateAsync (aplica migrations versionadas)
             var providerName = ctx.Database.ProviderName ?? "";
-            if (providerName.Contains("Sqlite") || !ctx.Database.IsRelational())
-                await ctx.Database.EnsureCreatedAsync();
-            else
+            if (providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+                await SqliteSchemaRepair.TryRepairLegacySchemaAsync(ctx, app.Logger);
+
+            if (ctx.Database.IsRelational())
                 await ctx.Database.MigrateAsync();
+            else
+                await ctx.Database.EnsureCreatedAsync();
 
             return;
         }

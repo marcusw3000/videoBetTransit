@@ -171,7 +171,8 @@ public class StreamSessionService
             {
                 Id = e.Id,
                 RoundId = e.RoundId,
-                SessionId = e.SessionId,
+                SessionId = e.SessionId ?? Guid.Empty,
+                CameraId = e.CameraId,
                 TimestampUtc = e.TimestampUtc,
                 TrackId = e.TrackId,
                 ObjectClass = e.ObjectClass,
@@ -179,6 +180,8 @@ public class StreamSessionService
                 LineId = e.LineId,
                 FrameNumber = e.FrameNumber,
                 Confidence = e.Confidence,
+                SnapshotUrl = e.SnapshotUrl,
+                Source = e.Source,
                 EventHash = e.EventHash,
             })
             .ToListAsync();

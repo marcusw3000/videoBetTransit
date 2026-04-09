@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<RecordingSegment> RecordingSegments => Set<RecordingSegment>();
     public DbSet<Round> Rounds => Set<Round>();
     public DbSet<RoundMarket> RoundMarkets => Set<RoundMarket>();
+    public DbSet<RoundEvent> RoundEvents => Set<RoundEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

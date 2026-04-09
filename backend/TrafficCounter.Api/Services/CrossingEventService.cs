@@ -76,6 +76,7 @@ public class CrossingEventService
             Id = Guid.NewGuid(),
             RoundId = round?.RoundId,
             SessionId = sessionId,
+            CameraId = cameraId,
             TimestampUtc = dto.TimestampUtc,
             TrackId = dto.TrackId,
             ObjectClass = dto.ObjectClass,
@@ -83,6 +84,8 @@ public class CrossingEventService
             LineId = dto.LineId,
             FrameNumber = dto.FrameNumber,
             Confidence = dto.Confidence,
+            SnapshotUrl = null,
+            Source = "vision_worker_crossing_event",
             PreviousEventHash = previousHash,
             EventHash = expectedHash, // store the server-computed hash
         };

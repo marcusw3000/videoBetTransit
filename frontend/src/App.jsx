@@ -11,6 +11,7 @@ import { buildHlsUrl, buildMjpegUrl, buildWebRtcWrapperUrl } from './config'
 import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } from './embed'
 
 const RECENT_HISTORY_LIMIT = 6
+const ROUND_POLL_INTERVAL_MS = 3000
 
 function formatCurrency(value, locale, currency) {
   return new Intl.NumberFormat(locale, {
@@ -77,6 +78,20 @@ function getAppView() {
   if (queryView === 'admin') return 'admin'
   if (hashView === 'admin') return 'admin'
   return 'market'
+}
+
+function isRoundForCamera(round, cameraId) {
+  const expected = String(cameraId || '').trim().toLowerCase()
+  if (!expected) return true
+
+  const directCameraId = String(round?.cameraId || '').trim().toLowerCase()
+  if (directCameraId) return directCameraId === expected
+
+  const cameraIds = Array.isArray(round?.cameraIds)
+    ? round.cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  return cameraIds.length === 0 || cameraIds.includes(expected)
 }
 
 function MarketPage() {
@@ -199,13 +214,19 @@ function MarketPage() {
 
     void bootstrap()
 
+    const pollId = setInterval(() => {
+      void loadCurrentRound()
+    }, ROUND_POLL_INTERVAL_MS)
+
     startRoundConnection({
       onCountUpdated: (data) => {
         if (!active) return
+        if (!isRoundForCamera(data, embedConfig.cameraId)) return
         updateRound(data)
       },
-      onRoundSettled: async () => {
+      onRoundSettled: async (data) => {
         if (!active) return
+        if (!isRoundForCamera(data, embedConfig.cameraId)) return
         setSelectedMarketId('')
         showToast('Round encerrado! Novo round iniciado.')
         await loadCurrentRound()
@@ -219,6 +240,7 @@ function MarketPage() {
 
     return () => {
       active = false
+      clearInterval(pollId)
       stopRoundConnection().catch(console.error)
     }
   }, [embedConfig.cameraId, loadCurrentRound, loadHistory, updateRound])

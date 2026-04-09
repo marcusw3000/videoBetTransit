@@ -1210,7 +1210,7 @@ def resolve_round_sync(
     if not backend_round:
         return current_round_id, current_total, False
 
-    backend_round_id = str(backend_round.get("id", "")).strip()
+    backend_round_id = str(backend_round.get("roundId", "")).strip()
     if not backend_round_id:
         return current_round_id, current_total, False
 
@@ -2296,7 +2296,7 @@ def main():
         return profile
 
     if round_sync_enabled:
-        backend_round = backend.fetch_current_round()
+        backend_round = backend.fetch_current_round(cfg.get("camera_id", ""))
         current_round_id, total, round_changed = resolve_round_sync(
             current_round_id,
             backend_round,
@@ -2398,9 +2398,9 @@ def main():
             pending_stream_profile = None
             reset_tracking_state()
             if round_sync_enabled:
-                backend_round = backend.fetch_current_round()
+                backend_round = backend.fetch_current_round(profile.get("camera_id", ""))
                 if backend_round:
-                    backend_round_id = str(backend_round.get("id", "")).strip()
+                    backend_round_id = str(backend_round.get("roundId", "")).strip()
                     if backend_round_id:
                         current_round_id = backend_round_id
                     total = int(backend_round.get("currentCount", 0) or 0)
@@ -2455,7 +2455,7 @@ def main():
         now_ts = time.time()
         if round_sync_enabled and now_ts - last_round_sync >= ROUND_SYNC_INTERVAL:
             last_round_sync = now_ts
-            backend_round = backend.fetch_current_round()
+            backend_round = backend.fetch_current_round(cfg.get("camera_id", ""))
             next_round_id, next_total, round_changed = resolve_round_sync(
                 current_round_id,
                 backend_round,

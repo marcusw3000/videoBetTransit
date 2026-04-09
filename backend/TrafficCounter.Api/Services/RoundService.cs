@@ -1,6 +1,9 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using TrafficCounter.Api.Contracts.Inbound;
 using TrafficCounter.Api.Contracts.Responses;
 using TrafficCounter.Api.Data;
 using TrafficCounter.Api.Domain.Entities;
@@ -29,23 +32,20 @@ public class RoundService
         _options = options.Value;
     }
 
-    // ── API pública ─────────────────────────────────────────────────────────
-
-    /// <summary>Garante que existe um round ativo. Cria um se não houver.</summary>
     public async Task<bool> EnsureActiveRoundAsync(string cameraId = "default")
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var active = await db.Rounds.AnyAsync(r =>
             r.CameraId == cameraId &&
-            r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void);
+            r.Status != RoundStatus.Settled &&
+            r.Status != RoundStatus.Void);
         if (active) return false;
 
         await CreateNewRoundAsync(db, cameraId);
         return true;
     }
 
-    /// <summary>Avança fases do round baseado no tempo. Chamado a cada segundo.</summary>
     public async Task<bool> TickAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -65,20 +65,20 @@ public class RoundService
 
         foreach (var round in rounds)
         {
-            // Open → Closing
             if (round.Status == RoundStatus.Open && now >= round.BetCloseAt)
             {
                 round.Status = RoundStatus.Closing;
+                db.RoundEvents.Add(CreateRoundEvent(round, "bet_closed", now, source: "round_manager"));
                 changed = true;
                 _logger.LogInformation("[Round {Id}] Apostas fechadas.", round.RoundId);
             }
 
-            // Closing → Settled
             if (round.Status == RoundStatus.Closing && now >= round.EndsAt)
             {
                 round.Status = RoundStatus.Settled;
                 round.FinalCount = round.CurrentCount;
                 round.SettledAt = now;
+                db.RoundEvents.Add(CreateRoundEvent(round, "settled", now, round.FinalCount, source: "round_manager"));
                 changed = true;
 
                 foreach (var market in round.Markets)
@@ -102,7 +102,6 @@ public class RoundService
         return changed;
     }
 
-    /// <summary>Incrementa a contagem do round ativo e envia count_updated.</summary>
     public async Task<Round?> IncrementCountAsync(string cameraId = "default")
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -132,27 +131,99 @@ public class RoundService
         return round;
     }
 
-    public async Task<Round?> GetCurrentRoundAsync(string cameraId = "default")
+    public async Task<Round?> RecordCountEventAsync(RoundCountEventDto dto)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
+        var cameraId = string.IsNullOrWhiteSpace(dto.CameraId) ? "default" : dto.CameraId.Trim();
+        Round? round = null;
+
+        if (Guid.TryParse(dto.RoundId, out var explicitRoundId))
+        {
+            round = await db.Rounds
+                .Include(r => r.Markets)
+                .Where(r => r.RoundId == explicitRoundId)
+                .Where(r => r.CameraId == cameraId)
+                .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+                .FirstOrDefaultAsync();
+        }
+
+        round ??= await db.Rounds
+            .Include(r => r.Markets)
+            .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+            .Where(r => r.CameraId == cameraId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (round is null)
+        {
+            await CreateNewRoundAsync(db, cameraId);
+            round = await db.Rounds
+                .Include(r => r.Markets)
+                .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+                .Where(r => r.CameraId == cameraId)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstAsync();
+        }
+
+        round.CurrentCount++;
+
+        db.VehicleCrossingEvents.Add(new VehicleCrossingEvent
+        {
+            Id = Guid.NewGuid(),
+            RoundId = round.RoundId,
+            SessionId = null,
+            CameraId = cameraId,
+            TimestampUtc = dto.CrossedAt == default ? DateTime.UtcNow : dto.CrossedAt,
+            TrackId = long.TryParse(dto.TrackId, out var trackId) ? trackId : 0,
+            ObjectClass = string.IsNullOrWhiteSpace(dto.VehicleType) ? "unknown" : dto.VehicleType.Trim(),
+            Direction = "unknown",
+            LineId = "round_count_event",
+            FrameNumber = 0,
+            Confidence = 1.0,
+            SnapshotUrl = string.IsNullOrWhiteSpace(dto.SnapshotUrl) ? null : dto.SnapshotUrl.Trim(),
+            Source = "vision_worker_round_count",
+            PreviousEventHash = null,
+            EventHash = BuildSyntheticCountEventHash(dto, round.RoundId),
+        });
+
+        await db.SaveChangesAsync();
+        await BroadcastAsync("count_updated", round);
+        return round;
+    }
+
+    public async Task<Round?> GetCurrentRoundAsync(string cameraId = "default")
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var normalizedCameraId = string.IsNullOrWhiteSpace(cameraId) ? "default" : cameraId.Trim();
+
         var round = await db.Rounds
             .Include(r => r.Markets)
-            .Where(r => r.CameraId == cameraId)
+            .Where(r => r.CameraId == normalizedCameraId)
             .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
             .OrderByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
 
         round ??= await db.Rounds
             .Include(r => r.Markets)
-            .Where(r => r.CameraId == cameraId)
+            .Where(r => r.CameraId == normalizedCameraId)
             .OrderByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
+
+        if (round is null)
+        {
+            await CreateNewRoundAsync(db, normalizedCameraId);
+            round = await db.Rounds
+                .Include(r => r.Markets)
+                .Where(r => r.CameraId == normalizedCameraId)
+                .Where(r => r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
+        }
 
         return round;
     }
 
-    /// <summary>Anula um round. Retorna false se não encontrado ou já finalizado.</summary>
     public async Task<bool> VoidRoundAsync(Guid roundId, string reason)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -167,22 +238,18 @@ public class RoundService
         round.Status = RoundStatus.Void;
         round.VoidedAt = DateTime.UtcNow;
         round.VoidReason = reason;
-
-        // Mercados permanecem com IsWinner = null (anulados)
+        db.RoundEvents.Add(CreateRoundEvent(round, "voided", round.VoidedAt.Value, round.CurrentCount, reason, "internal_api"));
 
         await db.SaveChangesAsync();
         _logger.LogInformation("[Round {Id}] Anulado. Motivo: {Reason}", round.RoundId, reason);
 
         await BroadcastAsync("round_voided", round);
 
-        // Inicia novo round para não deixar a UI parada
         await using var db2 = await _dbFactory.CreateDbContextAsync();
         await CreateNewRoundAsync(db2, round.CameraId);
 
         return true;
     }
-
-    // ── Internos ────────────────────────────────────────────────────────────
 
     private async Task CreateNewRoundAsync(AppDbContext db, string cameraId)
     {
@@ -199,7 +266,6 @@ public class RoundService
             CurrentCount = 0,
         };
 
-        // Gera mercados a partir da configuração
         var markets = _options.Markets.Select((t, i) => new RoundMarket
         {
             MarketId = Guid.NewGuid(),
@@ -217,10 +283,11 @@ public class RoundService
 
         db.Rounds.Add(round);
         db.RoundMarkets.AddRange(markets);
+        db.RoundEvents.Add(CreateRoundEvent(round, "opened", now, 0, source: "round_manager"));
         await db.SaveChangesAsync();
 
         _logger.LogInformation(
-            "[Round {Id}] Iniciado para camera {CameraId} com {Count} mercado(s). Encerra às {EndsAt:HH:mm:ss} UTC.",
+            "[Round {Id}] Iniciado para camera {CameraId} com {Count} mercado(s). Encerra as {EndsAt:HH:mm:ss} UTC.",
             round.RoundId, round.CameraId, markets.Count, round.EndsAt);
     }
 
@@ -228,10 +295,10 @@ public class RoundService
         market.MarketType switch
         {
             "under" => finalCount < market.Threshold!.Value,
-            "over"  => finalCount >= market.Threshold!.Value,
+            "over" => finalCount >= market.Threshold!.Value,
             "range" => finalCount >= market.Min!.Value && finalCount <= market.Max!.Value,
             "exact" => finalCount == market.TargetValue!.Value,
-            _       => false,
+            _ => false,
         };
 
     private async Task BroadcastAsync(string eventName, Round round)
@@ -239,7 +306,38 @@ public class RoundService
         await _hub.Clients.All.SendAsync(eventName, ToResponse(round));
     }
 
-    // ── DTO mapping ─────────────────────────────────────────────────────────
+    private static RoundEvent CreateRoundEvent(
+        Round round,
+        string eventType,
+        DateTime timestampUtc,
+        int? countValue = null,
+        string? reason = null,
+        string? source = null)
+    {
+        return new RoundEvent
+        {
+            Id = Guid.NewGuid(),
+            RoundId = round.RoundId,
+            EventType = eventType,
+            RoundStatus = round.Status.ToString().ToLowerInvariant(),
+            TimestampUtc = timestampUtc,
+            CountValue = countValue ?? round.CurrentCount,
+            Reason = reason,
+            Source = source,
+        };
+    }
+
+    private static string BuildSyntheticCountEventHash(RoundCountEventDto dto, Guid roundId)
+    {
+        var input = string.Join("|",
+            roundId,
+            dto.CameraId,
+            dto.TrackId,
+            dto.VehicleType,
+            dto.CrossedAt.ToString("O"),
+            dto.TotalCount);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input))).ToLowerInvariant();
+    }
 
     private static RoundResponse ToResponse(Round r) => new()
     {
@@ -269,7 +367,6 @@ public class RoundService
         MarketType = m.MarketType,
         Label = m.Label,
         Odds = m.Odds,
-        // under/over: TargetValue = Threshold; range: Min/Max; exact: TargetValue
         TargetValue = m.MarketType is "under" or "over" ? m.Threshold : m.TargetValue,
         Min = m.Min,
         Max = m.Max,

@@ -211,7 +211,7 @@ class ResolveRoundSyncTests(unittest.TestCase):
     def test_detects_round_change_and_resets_total_to_backend_count(self):
         round_id, total, changed = resolve_round_sync(
             "rnd_1",
-            {"id": "rnd_2", "currentCount": 0},
+            {"roundId": "rnd_2", "currentCount": 0},
             9,
         )
 
@@ -222,7 +222,18 @@ class ResolveRoundSyncTests(unittest.TestCase):
     def test_keeps_total_when_round_is_the_same(self):
         round_id, total, changed = resolve_round_sync(
             "rnd_2",
-            {"id": "rnd_2", "currentCount": 0},
+            {"roundId": "rnd_2", "currentCount": 0},
+            6,
+        )
+
+        self.assertEqual("rnd_2", round_id)
+        self.assertEqual(6, total)
+        self.assertFalse(changed)
+
+    def test_ignores_backend_payload_without_round_id(self):
+        round_id, total, changed = resolve_round_sync(
+            "rnd_2",
+            {"id": "legacy_field_only", "currentCount": 3},
             6,
         )
 

@@ -26,6 +26,7 @@ export function normalizeRoundContract(round) {
   return {
     id: round.roundId || round.id || '',
     roundId: round.roundId || round.id || '',
+    cameraId: round.cameraId || (Array.isArray(round.cameraIds) ? round.cameraIds[0] || '' : ''),
     displayName: round.displayName || 'Rodada Turbo',
     status,
     createdAt: round.createdAt || null,

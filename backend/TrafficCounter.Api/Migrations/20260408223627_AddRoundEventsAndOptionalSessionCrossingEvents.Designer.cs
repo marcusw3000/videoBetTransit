@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TrafficCounter.Api.Data;
 
@@ -10,9 +11,11 @@ using TrafficCounter.Api.Data;
 namespace TrafficCounter.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260408223627_AddRoundEventsAndOptionalSessionCrossingEvents")]
+    partial class AddRoundEventsAndOptionalSessionCrossingEvents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
@@ -335,11 +338,6 @@ namespace TrafficCounter.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("CameraId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
                     b.Property<double>("Confidence")
                         .HasColumnType("REAL");
 
@@ -376,14 +374,6 @@ namespace TrafficCounter.Api.Migrations
                     b.Property<Guid?>("SessionId")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("SnapshotUrl")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Source")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTime>("TimestampUtc")
                         .HasColumnType("TEXT");
 
@@ -395,8 +385,6 @@ namespace TrafficCounter.Api.Migrations
                     b.HasIndex("EventHash");
 
                     b.HasIndex("RoundId");
-
-                    b.HasIndex("RoundId", "TimestampUtc");
 
                     b.HasIndex("SessionId", "TimestampUtc");
 

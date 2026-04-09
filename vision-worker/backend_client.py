@@ -3,7 +3,7 @@ import logging
 import queue
 import threading
 import time
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -98,10 +98,15 @@ class BackendClient:
         if start_workers:
             self._start_workers(max(1, count_worker_count), max(1, live_worker_count))
 
-    def fetch_current_round(self) -> dict | None:
+    def fetch_current_round(self, camera_id: str = "") -> dict | None:
+        url = self.current_round_url
+        normalized_camera_id = str(camera_id or "").strip()
+        if normalized_camera_id:
+            url = f"{url}?cameraId={quote(normalized_camera_id)}"
+
         try:
             resp = self._session.get(
-                self.current_round_url,
+                url,
                 headers=self._default_headers,
                 timeout=3,
             )

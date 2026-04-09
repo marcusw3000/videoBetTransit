@@ -59,14 +59,36 @@ if errorlevel 1 (
 echo 1. Iniciando backend local...
 start cmd /k "cd /d %D% && call backend-dev.bat"
 
-echo 2. Iniciando frontend...
+echo 2. Aguardando backend responder em http://localhost:%BACKEND_PORT%...
+set "BACKEND_READY="
+for /L %%I in (1,1,15) do (
+  powershell -NoProfile -Command ^
+    "try { $r = Invoke-WebRequest -UseBasicParsing 'http://localhost:%BACKEND_PORT%/rounds/current?cameraId=cam_001' -TimeoutSec 2; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }"
+  if not errorlevel 1 (
+    set "BACKEND_READY=1"
+    goto :backend_ready_start_dev
+  )
+  echo    [aguardando] tentativa %%I/15...
+  timeout /t 2 /nobreak >nul
+)
+
+:backend_ready_start_dev
+if not defined BACKEND_READY (
+  echo [ERRO] O backend nao respondeu em http://localhost:%BACKEND_PORT%.
+  echo Verifique a janela [BACKEND] antes de continuar.
+  pause
+  exit /b 1
+)
+echo [OK] Backend respondeu com sucesso.
+
+echo 3. Iniciando frontend...
 if exist "%D%frontend\node_modules" (
   start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm run dev"
 ) else (
   start cmd /k "cd /d %D%frontend && title [FRONTEND] React :5173 && npm install && npm run dev"
 )
 
-echo 3. Iniciando worker...
+echo 4. Iniciando worker...
 start cmd /k "cd /d %D%vision-worker && title [VISION] Python Worker && call %D%.venv\Scripts\activate && python app.py"
 
 echo.

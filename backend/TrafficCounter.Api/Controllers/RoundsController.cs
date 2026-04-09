@@ -27,7 +27,7 @@ public class RoundsController : ControllerBase
         var round = await _roundService.GetCurrentRoundAsync(effectiveCameraId);
 
         if (round is null)
-            return NotFound(new { error = $"Nenhum round disponível ainda para camera '{effectiveCameraId}'." });
+            return NotFound(new { error = $"Nenhum round disponivel ainda para camera '{effectiveCameraId}'." });
 
         return Ok(ToResponse(round));
     }
@@ -55,13 +55,85 @@ public class RoundsController : ControllerBase
     }
 
     [HttpGet("{roundId:guid}/count-events")]
-    public IActionResult GetCountEvents(Guid roundId)
+    public async Task<IActionResult> GetCountEvents(Guid roundId)
     {
-        // Stub — retorna lista vazia por ora
-        return Ok(Array.Empty<object>());
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var events = await db.VehicleCrossingEvents
+            .Where(e => e.RoundId == roundId)
+            .OrderByDescending(e => e.TimestampUtc)
+            .Take(500)
+            .Select(e => new CrossingEventResponse
+            {
+                Id = e.Id,
+                RoundId = e.RoundId,
+                SessionId = e.SessionId ?? Guid.Empty,
+                CameraId = e.CameraId,
+                TimestampUtc = e.TimestampUtc,
+                TrackId = e.TrackId,
+                ObjectClass = e.ObjectClass,
+                Direction = e.Direction,
+                LineId = e.LineId,
+                FrameNumber = e.FrameNumber,
+                Confidence = e.Confidence,
+                SnapshotUrl = e.SnapshotUrl,
+                Source = e.Source,
+                EventHash = e.EventHash,
+            })
+            .ToListAsync();
+
+        return Ok(events);
     }
 
-    // ── DTO mapping ─────────────────────────────────────────────────────────
+    [HttpGet("{roundId:guid}/timeline")]
+    public async Task<IActionResult> GetTimeline(Guid roundId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var roundEvents = await db.RoundEvents
+            .Where(e => e.RoundId == roundId)
+            .Select(e => new RoundTimelineItemResponse
+            {
+                Kind = "round_event",
+                TimestampUtc = e.TimestampUtc,
+                RoundId = e.RoundId,
+                EventType = e.EventType,
+                RoundStatus = e.RoundStatus,
+                CountValue = e.CountValue,
+                Reason = e.Reason,
+                Source = e.Source,
+            })
+            .ToListAsync();
+
+        var crossingEvents = await db.VehicleCrossingEvents
+            .Where(e => e.RoundId == roundId)
+            .Select(e => new RoundTimelineItemResponse
+            {
+                Kind = "crossing_event",
+                TimestampUtc = e.TimestampUtc,
+                RoundId = e.RoundId ?? roundId,
+                EventType = "counted_vehicle",
+                RoundStatus = string.Empty,
+                CameraId = e.CameraId,
+                TrackId = e.TrackId,
+                ObjectClass = e.ObjectClass,
+                Direction = e.Direction,
+                LineId = e.LineId,
+                SnapshotUrl = e.SnapshotUrl,
+                Confidence = e.Confidence,
+                Source = e.Source,
+                EventHash = e.EventHash,
+            })
+            .ToListAsync();
+
+        var timeline = roundEvents
+            .Concat(crossingEvents)
+            .OrderBy(item => item.TimestampUtc)
+            .ThenBy(item => item.Kind)
+            .ToList();
+
+        return Ok(timeline);
+    }
 
     private static RoundResponse ToResponse(Domain.Entities.Round r) => new()
     {
