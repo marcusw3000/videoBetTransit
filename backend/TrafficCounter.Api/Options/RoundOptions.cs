@@ -2,11 +2,12 @@ namespace TrafficCounter.Api.Options;
 
 public class RoundOptions
 {
-    public int DurationSeconds { get; set; } = 180;
-    public int BetWindowSeconds { get; set; } = 70;
+    public int DurationSeconds { get; set; } = 60;
+    public int BetWindowSeconds { get; set; } = 15;
     public int SettleDelaySeconds { get; set; } = 2;
     public RoundTimingOptions Timing { get; set; } = new();
     public TurboRoundOptions Turbo { get; set; } = new();
+    public DynamicMarketOptions DynamicMarkets { get; set; } = new();
     public RoundMarketSets MarketSets { get; set; } = new();
     public List<MarketTemplate> Markets { get; set; } = [];
 }
@@ -31,7 +32,7 @@ public class MarketTemplate
 
 public class TurboRoundOptions
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
     public double Probability { get; set; } = 0.25;
     public int WarmupRoundsAfterProfileSwitch { get; set; } = 5;
 }
@@ -40,25 +41,39 @@ public class RoundTimingOptions
 {
     public RoundModeTimingOptions Normal { get; set; } = new()
     {
-        DurationSeconds = 180,
-        BetWindowSeconds = 70,
+        DurationSeconds = 60,
+        BetWindowSeconds = 15,
     };
 
     public RoundModeTimingOptions Turbo { get; set; } = new()
     {
-        DurationSeconds = 120,
-        BetWindowSeconds = 30,
+        DurationSeconds = 60,
+        BetWindowSeconds = 15,
     };
 }
 
 public class RoundModeTimingOptions
 {
-    public int DurationSeconds { get; set; } = 180;
-    public int BetWindowSeconds { get; set; } = 70;
+    public int DurationSeconds { get; set; } = 60;
+    public int BetWindowSeconds { get; set; } = 15;
 }
 
 public class RoundMarketSets
 {
     public List<MarketTemplate> Normal { get; set; } = [];
     public List<MarketTemplate> Turbo { get; set; } = [];
+}
+
+public class DynamicMarketOptions
+{
+    public bool Enabled { get; set; } = true;
+    public int HistoryWindow { get; set; } = 12;
+    public int MinSamplesForFullConfidence { get; set; } = 3;
+    public decimal LastRoundWeight { get; set; } = 0.50m;
+    public decimal EmaWeight { get; set; } = 0.35m;
+    public decimal MedianWeight { get; set; } = 0.15m;
+    public decimal EmaAlpha { get; set; } = 0.45m;
+    public int HalfRange { get; set; } = 2;
+    public int MinCenter { get; set; } = 1;
+    public int MaxCenter { get; set; } = 60;
 }

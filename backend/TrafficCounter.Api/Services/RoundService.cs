@@ -23,6 +23,7 @@ public class RoundService
     private readonly RoundOptions _options;
     private readonly IRandomSource _randomSource;
     private readonly BetService _betService;
+    private readonly DynamicMarketLineService _dynamicMarketLineService;
 
     public RoundService(
         IDbContextFactory<AppDbContext> dbFactory,
@@ -30,7 +31,8 @@ public class RoundService
         ILogger<RoundService> logger,
         IOptions<RoundOptions> options,
         IRandomSource randomSource,
-        BetService betService)
+        BetService betService,
+        DynamicMarketLineService dynamicMarketLineService)
     {
         _dbFactory = dbFactory;
         _hub = hub;
@@ -38,6 +40,7 @@ public class RoundService
         _options = options.Value;
         _randomSource = randomSource;
         _betService = betService;
+        _dynamicMarketLineService = dynamicMarketLineService;
     }
 
     public async Task<bool> EnsureActiveRoundAsync(string cameraId = "default")
@@ -273,26 +276,7 @@ public class RoundService
 
         if (round is null)
             return false;
-        if (round.Status == RoundStatus.Settled || round.Status == RoundStatus.Void)
-            return false;
-
-        round.Status = RoundStatus.Void;
-        round.VoidedAt = DateTime.UtcNow;
-        round.VoidReason = reason;
-        db.RoundEvents.Add(CreateRoundEvent(round, "voided", round.VoidedAt.Value, round.CurrentCount, reason, "internal_api"));
-
-        await db.SaveChangesAsync();
-        _logger.LogInformation("[Round {Id}] Anulado. Motivo: {Reason}", round.RoundId, reason);
-
-        if (round.VoidedAt.HasValue)
-            await _betService.VoidAcceptedBetsForRoundAsync(round.RoundId, round.VoidedAt.Value);
-
-        await BroadcastAsync("round_voided", round);
-
-        await using var db2 = await _dbFactory.CreateDbContextAsync();
-        await CreateNewRoundAsync(db2, round.CameraId);
-
-        return true;
+        return await VoidRoundAsync(db, round, reason, "internal_api");
     }
 
     public async Task NotifyStreamProfileActivatedAsync(string cameraId, string? streamProfileId)
@@ -317,6 +301,75 @@ public class RoundService
         await db.SaveChangesAsync();
     }
 
+    public async Task HandleCameraSourceActivationAsync(string cameraId, string sourceUrl)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var normalizedCameraId = NormalizeCameraId(cameraId);
+        var normalizedSourceUrl = NormalizeRequiredSourceUrl(sourceUrl);
+        var sourceFingerprint = BuildSourceFingerprint(normalizedSourceUrl);
+        var now = DateTime.UtcNow;
+        var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+
+        if (string.IsNullOrWhiteSpace(state.LastSourceFingerprint))
+        {
+            state.LastSourceFingerprint = sourceFingerprint;
+            state.LastSourceUrl = normalizedSourceUrl;
+            state.LastSourceChangedAt = now;
+            state.UpdatedAt = now;
+            await db.SaveChangesAsync();
+            return;
+        }
+
+        if (string.Equals(state.LastSourceFingerprint, sourceFingerprint, StringComparison.Ordinal))
+        {
+            if (!string.Equals(state.LastSourceUrl, normalizedSourceUrl, StringComparison.Ordinal))
+            {
+                state.LastSourceUrl = normalizedSourceUrl;
+                state.UpdatedAt = now;
+                await db.SaveChangesAsync();
+            }
+
+            return;
+        }
+
+        var previousFingerprint = state.LastSourceFingerprint;
+        state.ActiveStreamProfileId = null;
+        state.RoundsSinceProfileSwitch = 0;
+        state.LastProfileChangedAt = now;
+        state.LastSourceFingerprint = sourceFingerprint;
+        state.LastSourceUrl = normalizedSourceUrl;
+        state.LastSourceChangedAt = now;
+        state.UpdatedAt = now;
+
+        var activeRound = await db.Rounds
+            .Include(r => r.Markets)
+            .Where(r => r.CameraId == normalizedCameraId)
+            .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (activeRound is null)
+        {
+            await db.SaveChangesAsync();
+            _logger.LogInformation(
+                "[CameraSource] Source alterada para camera {CameraId}. Nenhum round ativo; baseline resetada.",
+                normalizedCameraId);
+            return;
+        }
+
+        var sourceChangeReason =
+            $"previousFingerprint={previousFingerprint};newFingerprint={sourceFingerprint};sourceChangedAt={now:O}";
+
+        await VoidRoundAsync(
+            db,
+            activeRound,
+            "Camera source changed during active round",
+            "pipeline_orchestrator",
+            "camera_source_changed",
+            sourceChangeReason);
+    }
+
     public async Task<bool> IsCameraLockedForRoundAsync(string cameraId = "default")
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -336,6 +389,13 @@ public class RoundService
         var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
         var selection = SelectRoundMode(state);
         var timing = GetTiming(selection.RoundMode);
+        var marketLine = await _dynamicMarketLineService.BuildTemplatesAsync(
+            db,
+            normalizedCameraId,
+            timing.DurationSeconds,
+            selection.RoundsSinceProfileSwitch,
+            state.LastProfileChangedAt,
+            GetMarketTemplates(selection.RoundMode));
         var round = new Round
         {
             RoundId = Guid.NewGuid(),
@@ -349,7 +409,7 @@ public class RoundService
             CurrentCount = 0,
         };
 
-        var markets = GetMarketTemplates(selection.RoundMode).Select((t, i) => new RoundMarket
+        var markets = marketLine.Templates.Select((t, i) => new RoundMarket
         {
             MarketId = Guid.NewGuid(),
             RoundId = round.RoundId,
@@ -375,6 +435,13 @@ public class RoundService
             now,
             0,
             $"roundMode={selection.RoundMode.ToString().ToLowerInvariant()};eligible={selection.WasEligibleForTurbo.ToString().ToLowerInvariant()};streamProfileId={state.ActiveStreamProfileId ?? "none"};roundsSinceSwitchBeforeCreate={selection.RoundsSinceProfileSwitch}",
+            "round_manager"));
+        db.RoundEvents.Add(CreateRoundEvent(
+            round,
+            "market_line_computed",
+            now,
+            0,
+            marketLine.ToAuditReason(),
             "round_manager"));
         db.RoundEvents.Add(CreateRoundEvent(round, "opened", now, 0, source: "round_manager"));
         await db.SaveChangesAsync();
@@ -492,10 +559,21 @@ public class RoundService
         return string.IsNullOrWhiteSpace(cameraId) ? "default" : cameraId.Trim();
     }
 
+    private static string NormalizeRequiredSourceUrl(string sourceUrl)
+    {
+        var normalized = NormalizeOptional(sourceUrl);
+        return normalized ?? throw new InvalidOperationException("sourceUrl is required.");
+    }
+
     private static string? NormalizeOptional(string? value)
     {
         var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string BuildSourceFingerprint(string normalizedSourceUrl)
+    {
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedSourceUrl))).ToLowerInvariant();
     }
 
     private static string NormalizeVehicleType(string vehicleType)
@@ -512,11 +590,11 @@ public class RoundService
         DisplayName = r.DisplayName,
         Status = r.Status.ToString().ToLowerInvariant(),
         IsSuspended = r.Status != RoundStatus.Open,
-        CreatedAt = r.CreatedAt,
-        BetCloseAt = r.BetCloseAt,
-        EndsAt = r.EndsAt,
-        SettledAt = r.SettledAt,
-        VoidedAt = r.VoidedAt,
+        CreatedAt = SaoPauloTime.FromUtc(r.CreatedAt),
+        BetCloseAt = SaoPauloTime.FromUtc(r.BetCloseAt),
+        EndsAt = SaoPauloTime.FromUtc(r.EndsAt),
+        SettledAt = SaoPauloTime.FromUtc(r.SettledAt),
+        VoidedAt = SaoPauloTime.FromUtc(r.VoidedAt),
         VoidReason = r.VoidReason,
         CurrentCount = r.CurrentCount,
         FinalCount = r.FinalCount,
@@ -612,6 +690,46 @@ public class RoundService
         RoundMode RoundMode,
         bool WasEligibleForTurbo,
         int RoundsSinceProfileSwitch);
+
+    private async Task<bool> VoidRoundAsync(
+        AppDbContext db,
+        Round round,
+        string reason,
+        string source,
+        string? preVoidEventType = null,
+        string? preVoidEventReason = null)
+    {
+        if (round.Status == RoundStatus.Settled || round.Status == RoundStatus.Void)
+            return false;
+
+        var voidedAt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(preVoidEventType))
+        {
+            db.RoundEvents.Add(CreateRoundEvent(
+                round,
+                preVoidEventType,
+                voidedAt,
+                round.CurrentCount,
+                preVoidEventReason,
+                source));
+        }
+
+        round.Status = RoundStatus.Void;
+        round.VoidedAt = voidedAt;
+        round.VoidReason = reason;
+        db.RoundEvents.Add(CreateRoundEvent(round, "voided", voidedAt, round.CurrentCount, reason, source));
+
+        await db.SaveChangesAsync();
+        _logger.LogInformation("[Round {Id}] Anulado. Motivo: {Reason}", round.RoundId, reason);
+
+        await _betService.VoidAcceptedBetsForRoundAsync(round.RoundId, voidedAt);
+        await BroadcastAsync("round_voided", round);
+
+        await using var db2 = await _dbFactory.CreateDbContextAsync();
+        await CreateNewRoundAsync(db2, round.CameraId);
+
+        return true;
+    }
 
     private static Task<bool> IsCameraLockedForRoundAsync(string cameraId, AppDbContext db) =>
         db.Rounds.AnyAsync(r =>

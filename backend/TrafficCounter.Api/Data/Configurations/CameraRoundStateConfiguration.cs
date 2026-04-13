@@ -12,6 +12,8 @@ public class CameraRoundStateConfiguration : IEntityTypeConfiguration<CameraRoun
 
         builder.Property(x => x.CameraId).HasMaxLength(128).IsRequired();
         builder.Property(x => x.ActiveStreamProfileId).HasMaxLength(128);
+        builder.Property(x => x.LastSourceFingerprint).HasMaxLength(128);
+        builder.Property(x => x.LastSourceUrl).HasMaxLength(1024);
 
         builder.HasIndex(x => x.ActiveStreamProfileId);
     }

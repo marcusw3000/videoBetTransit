@@ -22,11 +22,11 @@ public class RoundResponse
     public string Status { get; set; } = string.Empty;
     public bool IsSuspended { get; set; }
 
-    public DateTime CreatedAt { get; set; }
-    public DateTime BetCloseAt { get; set; }
-    public DateTime EndsAt { get; set; }
-    public DateTime? SettledAt { get; set; }
-    public DateTime? VoidedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset BetCloseAt { get; set; }
+    public DateTimeOffset EndsAt { get; set; }
+    public DateTimeOffset? SettledAt { get; set; }
+    public DateTimeOffset? VoidedAt { get; set; }
     public string? VoidReason { get; set; }
 
     public int CurrentCount { get; set; }

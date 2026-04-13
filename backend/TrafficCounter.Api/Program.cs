@@ -45,6 +45,7 @@ builder.Services.AddHttpClient<MediaMtxClient>();
 builder.Services.AddScoped<StreamSessionService>();
 builder.Services.AddScoped<CrossingEventService>();
 builder.Services.AddScoped<UrlValidationService>();
+builder.Services.AddScoped<DynamicMarketLineService>();
 builder.Services.AddScoped<RoundService>();
 builder.Services.AddScoped<BetService>();
 builder.Services.AddSingleton<IRandomSource, SystemRandomSource>();

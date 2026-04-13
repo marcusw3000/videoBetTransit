@@ -49,6 +49,7 @@ public class PipelineOrchestratorService
         {
             using var scope = _scopeFactory.CreateScope();
             var sessionService = scope.ServiceProvider.GetRequiredService<StreamSessionService>();
+            var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
 
             var session = await sessionService.GetAsync(sessionId);
             if (session is null)
@@ -60,6 +61,7 @@ public class PipelineOrchestratorService
             await sessionService.TransitionStatusAsync(sessionId, SessionStatus.Starting);
 
             var cameraId = StreamPathNaming.ExtractCameraId(session);
+            await roundService.HandleCameraSourceActivationAsync(cameraId, session.SourceUrl);
             var rawPath = StreamPathNaming.BuildRawPath(cameraId);
             var processedPath = StreamPathNaming.BuildProcessedPath(cameraId);
 

@@ -6,6 +6,7 @@ using TrafficCounter.Api.Contracts.Inbound;
 using TrafficCounter.Api.Contracts.Requests;
 using TrafficCounter.Api.Contracts.Responses;
 using TrafficCounter.Api.Data;
+using TrafficCounter.Api.Domain.Entities;
 using TrafficCounter.Api.Domain.Enums;
 using TrafficCounter.Api.Services;
 using TrafficCounter.Api.Tests.Infrastructure;
@@ -313,8 +314,283 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.NotNull(round);
         Assert.Equal("normal", round!.RoundMode);
         Assert.Equal("Rodada Normal", round.DisplayName);
-        Assert.Equal(180, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
-        Assert.Equal(70, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
+        Assert.Equal(60, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
+        Assert.Equal(15, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
+    }
+
+    [Fact]
+    public async Task Dynamic_market_lines_fall_back_to_static_templates_without_history()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await roundService.EnsureActiveRoundAsync("cam_dynamic_fallback");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_dynamic_fallback");
+
+        Assert.NotNull(round);
+        AssertMarketLine(round!, underThreshold: 10, rangeMin: 10, rangeMax: 14, exactTarget: 12, overThreshold: 15);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var auditEvent = await db.RoundEvents
+            .Where(e => e.RoundId == Guid.Parse(round!.RoundId))
+            .SingleAsync(e => e.EventType == "market_line_computed");
+
+        Assert.Contains("forecastSource=fallback", auditEvent.Reason);
+        Assert.Contains("sampleSize=0", auditEvent.Reason);
+    }
+
+    [Fact]
+    public async Task Dynamic_market_lines_move_up_with_recent_high_history()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await SeedSettledRoundHistoryAsync(
+            dbFactory,
+            "cam_dynamic_high",
+            roundsSinceProfileSwitch: 3,
+            lastProfileChangedAt: null,
+            new SeededHistoricalRound(RoundMode.Normal, 29),
+            new SeededHistoricalRound(RoundMode.Normal, 37),
+            new SeededHistoricalRound(RoundMode.Normal, 40));
+
+        await roundService.EnsureActiveRoundAsync("cam_dynamic_high");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_dynamic_high");
+
+        Assert.NotNull(round);
+        AssertMarketLine(round!, underThreshold: 11, rangeMin: 11, rangeMax: 15, exactTarget: 13, overThreshold: 16);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var auditEvent = await db.RoundEvents
+            .Where(e => e.RoundId == Guid.Parse(round!.RoundId))
+            .SingleAsync(e => e.EventType == "market_line_computed");
+
+        Assert.Contains("forecastSource=history", auditEvent.Reason);
+        Assert.Contains("sampleSize=3", auditEvent.Reason);
+        Assert.Contains("center=13", auditEvent.Reason);
+    }
+
+    [Fact]
+    public async Task Dynamic_market_lines_move_down_with_recent_low_history()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await SeedSettledRoundHistoryAsync(
+            dbFactory,
+            "cam_dynamic_low",
+            roundsSinceProfileSwitch: 3,
+            lastProfileChangedAt: null,
+            new SeededHistoricalRound(RoundMode.Normal, 0),
+            new SeededHistoricalRound(RoundMode.Normal, 1),
+            new SeededHistoricalRound(RoundMode.Normal, 2));
+
+        await roundService.EnsureActiveRoundAsync("cam_dynamic_low");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_dynamic_low");
+
+        Assert.NotNull(round);
+        AssertMarketLine(round!, underThreshold: 1, rangeMin: 1, rangeMax: 3, exactTarget: 1, overThreshold: 4);
+    }
+
+    [Fact]
+    public async Task Dynamic_market_lines_normalize_counts_from_mixed_round_modes()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await SeedSettledRoundHistoryAsync(
+            dbFactory,
+            "cam_dynamic_mixed_modes",
+            roundsSinceProfileSwitch: 3,
+            lastProfileChangedAt: null,
+            new SeededHistoricalRound(RoundMode.Normal, 18),
+            new SeededHistoricalRound(RoundMode.Turbo, 12),
+            new SeededHistoricalRound(RoundMode.Turbo, 12));
+
+        await roundService.EnsureActiveRoundAsync("cam_dynamic_mixed_modes");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_dynamic_mixed_modes");
+
+        Assert.NotNull(round);
+        Assert.Equal("normal", round!.RoundMode);
+        AssertMarketLine(round, underThreshold: 4, rangeMin: 4, rangeMax: 8, exactTarget: 6, overThreshold: 9);
+    }
+
+    [Fact]
+    public async Task Dynamic_market_lines_keep_partial_fallback_anchor_during_profile_warmup()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var lastProfileChangedAt = DateTime.UtcNow.AddHours(-1);
+
+        await SeedSettledRoundHistoryAsync(
+            dbFactory,
+            "cam_dynamic_warmup_anchor",
+            roundsSinceProfileSwitch: 1,
+            lastProfileChangedAt: lastProfileChangedAt,
+            new SeededHistoricalRound(RoundMode.Normal, 40));
+
+        await roundService.EnsureActiveRoundAsync("cam_dynamic_warmup_anchor");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_dynamic_warmup_anchor");
+
+        Assert.NotNull(round);
+        AssertMarketLine(round!, underThreshold: 10, rangeMin: 10, rangeMax: 14, exactTarget: 12, overThreshold: 15);
+    }
+
+    [Fact]
+    public async Task First_source_activation_initializes_snapshot_without_voiding_active_round()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await roundService.EnsureActiveRoundAsync("cam_source_first_start");
+        var roundBefore = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_first_start");
+
+        await roundService.HandleCameraSourceActivationAsync("cam_source_first_start", "rtsp://camera-a/live");
+
+        var roundAfter = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_first_start");
+
+        Assert.NotNull(roundBefore);
+        Assert.NotNull(roundAfter);
+        Assert.Equal(roundBefore!.RoundId, roundAfter!.RoundId);
+        Assert.Equal("open", roundAfter.Status);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var state = await db.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_source_first_start");
+        Assert.Equal("rtsp://camera-a/live", state.LastSourceUrl);
+        Assert.False(string.IsNullOrWhiteSpace(state.LastSourceFingerprint));
+        Assert.NotNull(state.LastSourceChangedAt);
+    }
+
+    [Fact]
+    public async Task Same_source_activation_does_not_reset_state_or_void_round()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await SeedSettledRoundHistoryAsync(
+            dbFactory,
+            "cam_source_same_restart",
+            roundsSinceProfileSwitch: 3,
+            lastProfileChangedAt: DateTime.UtcNow.AddHours(-2),
+            new SeededHistoricalRound(RoundMode.Normal, 20),
+            new SeededHistoricalRound(RoundMode.Normal, 22),
+            new SeededHistoricalRound(RoundMode.Normal, 24));
+        await SetCameraSourceSnapshotAsync(dbFactory, "cam_source_same_restart", "rtsp://camera-a/live");
+
+        await roundService.EnsureActiveRoundAsync("cam_source_same_restart");
+        var roundBefore = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_same_restart");
+
+        await roundService.HandleCameraSourceActivationAsync("cam_source_same_restart", "rtsp://camera-a/live");
+
+        var roundAfter = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_same_restart");
+
+        Assert.NotNull(roundBefore);
+        Assert.NotNull(roundAfter);
+        Assert.Equal(roundBefore!.RoundId, roundAfter!.RoundId);
+        Assert.Equal("open", roundAfter.Status);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var state = await db.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_source_same_restart");
+        Assert.Equal(4, state.RoundsSinceProfileSwitch);
+        Assert.Equal("rtsp://camera-a/live", state.LastSourceUrl);
+        Assert.Equal(0, await db.Rounds.CountAsync(r => r.CameraId == "cam_source_same_restart" && r.Status == RoundStatus.Void));
+    }
+
+    [Fact]
+    public async Task Different_source_without_active_round_resets_learning_and_next_round_uses_fallback()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await SeedSettledRoundHistoryAsync(
+            dbFactory,
+            "cam_source_reset_idle",
+            roundsSinceProfileSwitch: 3,
+            lastProfileChangedAt: DateTime.UtcNow.AddHours(-2),
+            new SeededHistoricalRound(RoundMode.Normal, 29),
+            new SeededHistoricalRound(RoundMode.Normal, 37),
+            new SeededHistoricalRound(RoundMode.Normal, 40));
+        await SetCameraSourceSnapshotAsync(dbFactory, "cam_source_reset_idle", "rtsp://camera-a/live");
+
+        await roundService.HandleCameraSourceActivationAsync("cam_source_reset_idle", "rtsp://camera-b/live");
+        await roundService.EnsureActiveRoundAsync("cam_source_reset_idle");
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_reset_idle");
+
+        Assert.NotNull(round);
+        AssertMarketLine(round!, underThreshold: 10, rangeMin: 10, rangeMax: 14, exactTarget: 12, overThreshold: 15);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var state = await db.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_source_reset_idle");
+        Assert.Equal(1, state.RoundsSinceProfileSwitch);
+        Assert.Equal("rtsp://camera-b/live", state.LastSourceUrl);
+        Assert.NotNull(state.LastSourceChangedAt);
+    }
+
+    [Fact]
+    public async Task Different_source_with_active_round_voids_current_round_and_resets_next_round()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await SeedSettledRoundHistoryAsync(
+            dbFactory,
+            "cam_source_reset_active",
+            roundsSinceProfileSwitch: 3,
+            lastProfileChangedAt: DateTime.UtcNow.AddHours(-2),
+            new SeededHistoricalRound(RoundMode.Normal, 29),
+            new SeededHistoricalRound(RoundMode.Normal, 37),
+            new SeededHistoricalRound(RoundMode.Normal, 40));
+        await SetCameraSourceSnapshotAsync(dbFactory, "cam_source_reset_active", "rtsp://camera-a/live");
+
+        await roundService.EnsureActiveRoundAsync("cam_source_reset_active");
+        var activeRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_reset_active");
+        Assert.NotNull(activeRound);
+
+        var betResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        {
+            TransactionId = "txn-source-swap-001",
+            GameSessionId = "session-source-swap-001",
+            RoundId = activeRound!.RoundId,
+            MarketId = activeRound.Markets.First().MarketId,
+            StakeAmount = 5m,
+            Currency = "BRL",
+        });
+        betResponse.EnsureSuccessStatusCode();
+        var createdBet = await betResponse.Content.ReadFromJsonAsync<BetResponse>();
+
+        await roundService.HandleCameraSourceActivationAsync("cam_source_reset_active", "rtsp://camera-b/live");
+
+        var currentRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_reset_active");
+        var voidedBet = await _client.GetFromJsonAsync<BetResponse>($"/bets/{createdBet!.Id}");
+
+        Assert.NotNull(currentRound);
+        Assert.NotEqual(activeRound.RoundId, currentRound!.RoundId);
+        Assert.Equal("open", currentRound.Status);
+        AssertMarketLine(currentRound, underThreshold: 10, rangeMin: 10, rangeMax: 14, exactTarget: 12, overThreshold: 15);
+
+        Assert.NotNull(voidedBet);
+        Assert.Equal("void", voidedBet!.Status);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var oldRound = await db.Rounds.SingleAsync(r => r.RoundId == Guid.Parse(activeRound.RoundId));
+        Assert.Equal(RoundStatus.Void, oldRound.Status);
+        Assert.Equal("Camera source changed during active round", oldRound.VoidReason);
+        Assert.True(await db.RoundEvents.AnyAsync(e => e.RoundId == oldRound.RoundId && e.EventType == "camera_source_changed"));
     }
 
     [Fact]
@@ -339,10 +615,9 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task Turbo_round_is_selected_after_warmup_when_probability_hits()
+    public async Task Turbo_round_is_frozen_even_after_warmup_when_probability_hits()
     {
         using var scope = _factory.Services.CreateScope();
-        var random = scope.ServiceProvider.GetRequiredService<FakeRandomSource>();
         var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
 
@@ -358,16 +633,15 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             await ForceSettleCurrentRoundAsync(dbFactory, "cam_turbo_enabled");
         }
 
-        random.Enqueue(0.0);
         await roundService.EnsureActiveRoundAsync("cam_turbo_enabled");
 
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_turbo_enabled");
 
         Assert.NotNull(round);
-        Assert.Equal("turbo", round!.RoundMode);
-        Assert.Equal("Rodada Turbo", round.DisplayName);
-        Assert.Equal(120, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
-        Assert.Equal(30, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
+        Assert.Equal("normal", round!.RoundMode);
+        Assert.Equal("Rodada Normal", round.DisplayName);
+        Assert.Equal(60, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
+        Assert.Equal(15, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
     }
 
     [Fact]
@@ -867,4 +1141,106 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         round.FinalCount = round.CurrentCount;
         await db.SaveChangesAsync();
     }
+
+    private static void AssertMarketLine(
+        RoundResponse round,
+        int underThreshold,
+        int rangeMin,
+        int rangeMax,
+        int exactTarget,
+        int overThreshold)
+    {
+        var under = Assert.Single(round.Markets, market => market.MarketType == "under");
+        var range = Assert.Single(round.Markets, market => market.MarketType == "range");
+        var exact = Assert.Single(round.Markets, market => market.MarketType == "exact");
+        var over = Assert.Single(round.Markets, market => market.MarketType == "over");
+
+        Assert.Equal($"Menos de {underThreshold}", under.Label);
+        Assert.Equal(underThreshold, under.TargetValue);
+
+        Assert.Equal($"{rangeMin} a {rangeMax}", range.Label);
+        Assert.Equal(rangeMin, range.Min);
+        Assert.Equal(rangeMax, range.Max);
+
+        Assert.Equal($"Exato {exactTarget}", exact.Label);
+        Assert.Equal(exactTarget, exact.TargetValue);
+
+        Assert.Equal($"{overThreshold} ou mais", over.Label);
+        Assert.Equal(overThreshold, over.TargetValue);
+    }
+
+    private static async Task SeedSettledRoundHistoryAsync(
+        IDbContextFactory<AppDbContext> dbFactory,
+        string cameraId,
+        int roundsSinceProfileSwitch,
+        DateTime? lastProfileChangedAt,
+        params SeededHistoricalRound[] rounds)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var now = DateTime.UtcNow;
+        var state = await db.CameraRoundStates.FirstOrDefaultAsync(item => item.CameraId == cameraId);
+
+        if (state is null)
+        {
+            state = new CameraRoundState
+            {
+                CameraId = cameraId,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            db.CameraRoundStates.Add(state);
+        }
+
+        state.RoundsSinceProfileSwitch = roundsSinceProfileSwitch;
+        state.LastProfileChangedAt = lastProfileChangedAt;
+        state.UpdatedAt = now;
+
+        var start = lastProfileChangedAt ?? now.AddHours(-2);
+        for (var index = 0; index < rounds.Length; index++)
+        {
+            var seededRound = rounds[index];
+            var createdAt = start.AddMinutes((index + 1) * 5);
+            var durationSeconds = seededRound.RoundMode == RoundMode.Turbo ? 120 : 180;
+            var betWindowSeconds = seededRound.RoundMode == RoundMode.Turbo ? 30 : 70;
+            var endsAt = createdAt.AddSeconds(durationSeconds);
+
+            db.Rounds.Add(new Round
+            {
+                RoundId = Guid.NewGuid(),
+                CameraId = cameraId,
+                RoundMode = seededRound.RoundMode,
+                Status = RoundStatus.Settled,
+                DisplayName = seededRound.RoundMode == RoundMode.Turbo ? "Rodada Turbo" : "Rodada Normal",
+                CreatedAt = createdAt,
+                BetCloseAt = createdAt.AddSeconds(betWindowSeconds),
+                EndsAt = endsAt,
+                SettledAt = endsAt.AddSeconds(2),
+                CurrentCount = seededRound.FinalCount,
+                FinalCount = seededRound.FinalCount,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SetCameraSourceSnapshotAsync(
+        IDbContextFactory<AppDbContext> dbFactory,
+        string cameraId,
+        string sourceUrl)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var state = await db.CameraRoundStates.SingleAsync(item => item.CameraId == cameraId);
+        var now = DateTime.UtcNow;
+
+        state.LastSourceUrl = sourceUrl;
+        state.LastSourceFingerprint = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sourceUrl)))
+            .ToLowerInvariant();
+        state.LastSourceChangedAt = now.AddMinutes(-1);
+        state.UpdatedAt = now;
+
+        await db.SaveChangesAsync();
+    }
+
+    private readonly record struct SeededHistoricalRound(RoundMode RoundMode, int FinalCount);
 }

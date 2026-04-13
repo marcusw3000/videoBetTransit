@@ -1,23 +1,21 @@
-function getArrow(item, overMarket) {
-  if (!item || item.status === 'void') return { symbol: '○', cls: 'last-arrow-void' }
+function resolveOverMarket(item, fallbackOverMarket) {
+  return item?.markets?.find((market) => market.marketType?.toLowerCase() === 'over') || fallbackOverMarket || null
+}
+
+function getArrow(item, fallbackOverMarket) {
+  if (!item || item.status === 'void') return { symbol: '\u25cb', cls: 'last-arrow-void' }
 
   const finalCount = item.finalCount
-  if (finalCount == null) return { symbol: '○', cls: 'last-arrow-void' }
+  if (finalCount == null) return { symbol: '\u25cb', cls: 'last-arrow-void' }
 
-  if (overMarket) {
-    return finalCount > overMarket.targetValue
-      ? { symbol: '▲', cls: 'last-arrow-over' }
-      : { symbol: '▼', cls: 'last-arrow-under' }
+  const overMarket = resolveOverMarket(item, fallbackOverMarket)
+  if (overMarket?.targetValue != null) {
+    return finalCount >= overMarket.targetValue
+      ? { symbol: '\u25b2', cls: 'last-arrow-over' }
+      : { symbol: '\u25bc', cls: 'last-arrow-under' }
   }
 
-  const overMkt = item.markets?.find((m) => m.marketType?.toLowerCase() === 'over')
-  if (overMkt) {
-    return finalCount > overMkt.targetValue
-      ? { symbol: '▲', cls: 'last-arrow-over' }
-      : { symbol: '▼', cls: 'last-arrow-under' }
-  }
-
-  return { symbol: '○', cls: 'last-arrow-void' }
+  return { symbol: '\u25cb', cls: 'last-arrow-void' }
 }
 
 export default function LastResults({ history = [], overMarket = null }) {
@@ -25,7 +23,7 @@ export default function LastResults({ history = [], overMarket = null }) {
 
   return (
     <div className="last-results-bar">
-      <span className="last-results-label">Últimos</span>
+      <span className="last-results-label">{'\u00daltimos'}</span>
       <div className="last-results-arrows">
         {recent.map((item, i) => {
           const arrow = getArrow(item, overMarket)
@@ -40,7 +38,7 @@ export default function LastResults({ history = [], overMarket = null }) {
           )
         })}
         {recent.length === 0 && (
-          <span className="last-results-empty">—</span>
+          <span className="last-results-empty">{'\u2014'}</span>
         )}
       </div>
     </div>
