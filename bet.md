@@ -468,6 +468,95 @@ Colocar o produto em rota de entrada controlada em operadoras reais.
 
 - rollout sem observabilidade suficiente
 - comportamento diferente por operador sem isolamento
+
+## 12.1 Security Review Atual
+
+Data de referencia desta revisao:
+
+- `2026-04-12`
+
+Escopo revisado:
+
+- `frontend/src/App.jsx`
+- `frontend/src/embed.js`
+- `frontend/src/services/betApi.js`
+- `backend/TrafficCounter.Api/Controllers/BetsController.cs`
+- `backend/TrafficCounter.Api/Controllers/InternalController.cs`
+- `backend/TrafficCounter.Api/Services/BetService.cs`
+- `backend/TrafficCounter.Api/Security/RequireApiKeyAttribute.cs`
+- `backend/TrafficCounter.Api/appsettings.json`
+
+Resumo executivo:
+
+- o frontend nao parece conseguir alterar o resultado oficial do round nem as odds soberanas do settlement
+- o backend recalcula `market`, `odds` e `potential_payout` a partir do round oficial
+- porem a superficie publica de aposta ainda confia demais no browser para identidade, contexto e valor de stake
+- no estado atual, o produto nao deve ser tratado como pronto para integracao real com operadora sem endurecimento de autenticacao e contrato financeiro
+
+Achados principais:
+
+1. `Alta` - o payload de aposta pode ser adulterado via DevTools ou chamada direta da API publica
+
+- hoje `stakeAmount`, `playerRef`, `operatorRef` e `metadataJson` saem do browser
+- a rota publica `POST /bets` aceita chamada direta sem autenticacao de operadora
+- isso permite forjar identidade logica, enviar stake arbitrario e ignorar o fluxo esperado da UI
+
+2. `Alta` - falta vinculo criptografico entre sessao embedada e contexto do jogador
+
+- `gameSessionId`, `playerRef`, `operatorRef`, `currency` e parte do contexto comercial chegam por query string ou config global do embed
+- esses campos sao uteis para UX e correlacao, mas nao devem ser tratados como fonte soberana
+- sem launch token assinado ou sessao emitida pelo backend, o provider nao consegue confiar na origem do jogador
+
+3. `Alta` - endpoints internos dependem de `X-API-Key`, mas a protecao pode ficar efetivamente desligada se a chave estiver vazia
+
+- o atributo `RequireApiKey` libera a requisicao quando `Security:BackendApiKey` estiver em branco
+- isso e aceitavel apenas para desenvolvimento local controlado
+- em ambiente real, startup deve falhar se a chave obrigatoria nao existir
+
+4. `Media` - o backend valida janela do round e mercado oficial, mas ainda nao aplica limites de risco suficientes
+
+- existe validacao de `round open`, `betCloseAt` e pertencimento do `marketId` ao round
+- isso protege odds e settlement contra manipulacao simples do front
+- porem ainda faltam limite de stake, validacao de moeda por operadora, checagem de saldo e contrato de wallet server-to-server
+
+5. `Media` - integracao de embed ainda esta frouxa para ambiente multioperadora
+
+- o embed usa `postMessage` com target `*`
+- a estrategia atual ainda nao fixa `trusted origins`, CSP e `frame-ancestors`
+- isso nao muda settlement por si so, mas amplia risco de integracao insegura e vazamento de eventos
+
+6. `Media` - trilha de integridade ainda nao esta endurecida
+
+- `EnforceHashChain` esta desabilitado no estado atual
+- isso reduz a capacidade de provar imutabilidade forte de eventos e resultado em disputa ou auditoria
+
+7. `Baixa` - existe risco de vazamento acidental de contexto operacional em logs e metadados
+
+- `metadataJson` e campos opcionais do cliente sao persistidos
+- sem contrato estrito de schema e minimizacao de PII, ha espaco para gravar dados alem do necessario
+
+Conclusao pratica:
+
+- o sistema ja separa razoavelmente bem `frontend` de `resultado oficial`
+- o principal risco atual nao e o jogador mudar o settlement pelo console
+- o principal risco atual e aceitar entrada de aposta, identidade e contexto demais a partir de um cliente nao confiavel
+- para entrar em bet real, a aposta precisa sair de um contrato autenticado entre operadora e provider, nao de um payload livre do browser
+
+Hardening minimo antes de operadora:
+
+- remover a confianca em `playerRef`, `operatorRef`, `currency` e `gameSessionId` enviados pelo browser sem assinatura
+- introduzir `launch token` assinado e de curta duracao para abrir o jogo embedado
+- trocar a aceitacao publica de aposta por fluxo `server-to-server` ou por token de sessao assinado emitido pelo provider
+- falhar startup se `BackendApiKey` estiver vazio fora de ambiente local
+- aplicar `trusted origins`, `frame-ancestors`, CSP e validacao de origem no `postMessage`
+- implementar limites de stake, validacao por operadora e contrato de wallet
+- ativar e verificar `hash chain` para eventos e resultado oficial
+
+Decisao recomendada:
+
+- tratar o frontend como canal de apresentacao e captura de intencao
+- tratar o backend do provider como unica fonte soberana de round, mercado, aceite, wallet e settlement
+- nao liberar homologacao com operadora antes de concluir o endurecimento de `EP13`, `EP14` e `EP15`
 - exposicao comercial mal calibrada
 
 ### Validacao
@@ -1109,10 +1198,13 @@ Tasks:
 
 - [ ] implementar launch token assinado
 - [ ] implementar autenticacao server-to-server
+- [ ] impedir aposta publica sem contexto autenticado de operadora ou sessao assinada
+- [ ] falhar startup se `BackendApiKey` obrigatoria estiver ausente fora de ambiente local
 - [ ] implementar RBAC administrativo
 - [ ] auditar alteracao de ROI, line e stream profile
 - [ ] auditar `void`, override e reprocessamento
 - [ ] segregar secrets por ambiente
+- [ ] validar origem e integridade do contexto recebido pelo embed
 
 Criterio de aceite:
 
@@ -1141,6 +1233,8 @@ Tasks:
 - [ ] definir retencao de snapshots e evidencias
 - [ ] definir pacote de evidencia para auditoria
 - [ ] implementar hash chain de resultado
+- [ ] implementar hash chain ou trilha de integridade para `crossing_events` e `round_events`
+- [ ] definir schema permitido para `metadataJson` e politica de minimizacao
 - [ ] preparar material base para certificadora
 
 Criterio de aceite:
@@ -1168,6 +1262,8 @@ Tasks:
 - [ ] definir estrategia de embed
 - [ ] aplicar `trusted origins`
 - [ ] aplicar CSP e frame policy
+- [ ] restringir `postMessage` a origins permitidas
+- [ ] definir `frame-ancestors` por operador e ambiente
 - [ ] fechar layout web e mobile do produto
 - [ ] criar rollout por operador
 - [ ] criar feature flags por camera e operador
