@@ -9,7 +9,7 @@ Python vision-worker/app.py
   - consome o stream de camera
   - roda YOLO + tracking + contagem
   - envia eventos HTTP para o backend
-  - publica video anotado via MJPEG com Flask + waitress
+  - publica video anotado em `processed/<camera_id>` e fallback MJPEG com Flask + waitress
 
 Backend .NET 8
   - persiste round atual, historico, count-events e camera-config em SQLite
@@ -20,17 +20,17 @@ Backend .NET 8
 
 Frontend React
   - consome REST e SignalR do backend
-  - exibe o feed MJPEG anotado vindo do Python
+  - exibe a live processada por camera via WebRTC/HLS, com fallback MJPEG
   - mostra contador, timer, faixas, historico filtravel, painel operacional e alertas de monitoramento
 ```
 
 Fluxo resumido:
 1. `vision-worker/app.py` le o stream configurado em `vision-worker/config.json`.
 2. A engine detecta e rastreia veiculos dentro da ROI.
-3. Quando um veiculo cruza a linha, a engine envia `POST /api/rounds/count-events` para o backend.
+3. Quando um veiculo cruza a linha, a engine envia `POST /internal/round-count-event` para o backend.
 4. O backend atualiza o round e faz broadcast via SignalR.
 5. O frontend atualiza contador, timer, historico e lista de deteccoes.
-6. O video mostrado no browser pode vir do backend local em `http://127.0.0.1:8080` ou diretamente do MJPEG Python em `http://127.0.0.1:8090/video_feed`, dependendo do ambiente.
+6. O video mostrado no browser usa a saida `processed/<cameraId>` via MediaMTX, com fallback MJPEG direto do Python em `http://127.0.0.1:8090/video_feed`.
 7. O painel operacional consulta o backend local e o `/health` do worker Python para mostrar estado da camera, backend e metricas.
 8. A UI gera alertas quando stream, backend, frames ou contagem entram em estado suspeito.
 9. A secao de historico permite filtrar por camera, periodo e ID do round, alem de exportar CSV de rounds e count-events.
@@ -75,7 +75,7 @@ videoBetTransit/
 Arquivos importantes:
 - `vision-worker/app.py`: worker oficial de deteccao, contagem e servidor MJPEG.
 - `vision-worker/backend_client.py`: cliente HTTP usado pelo worker para falar com o backend.
-- `vision-worker/config.json`: stream, ROI, linha de contagem, modelo, MJPEG host e porta.
+- `vision-worker/config.json`: stream atual, esteira de presets, ROI, linha de contagem, rotacao, modelo, MJPEG host e porta.
 - `backend-dev.bat`: launcher canonico do backend local.
 - `frontend-dev.bat`: launcher canonico do frontend local.
 - `vision-worker-dev.bat`: launcher canonico do worker local.
@@ -83,7 +83,7 @@ Arquivos importantes:
 - `start-dev.bat`: orquestrador simplificado para bootstrap local no Windows.
 - `validate.bat`: validacao unica com sintaxe Python, testes Python, testes .NET e build do frontend.
 - `frontend/src/App.jsx`: orquestra tela principal.
-- `frontend/src/components/VideoPlayer.jsx`: exibe o feed MJPEG anotado.
+- `frontend/src/components/VideoPlayer.jsx`: exibe a live processada com fallback MJPEG.
 
 ## Engine Python
 
@@ -93,6 +93,8 @@ Responsabilidades principais:
 - filtrar por ROI
 - contar cruzamento da linha
 - permitir calibrar ROI e linha por arraste na propria janela Python
+- manter uma esteira de presets com `camera_id`, URL, ROI, linha e direcao
+- permitir rotacao randômica opcional entre presets, aplicada apenas em janela segura entre rounds
 - salvar snapshots opcionais
 - enviar `count-events` e `live-detections`
 - servir `/health` e `/video_feed` via Flask, publicados por `waitress`
@@ -100,6 +102,7 @@ Responsabilidades principais:
 
 Configuracoes relevantes em `vision-worker/config.json`:
 - `stream_url`: URL do stream da camera
+- `camera_id`: camera logica ativa, tambem usada para publicar em `processed/<camera_id>`
 - `ffmpeg_capture_options`: opcoes de captura do FFmpeg via OpenCV, usadas para tentar reduzir buffer
 - `stream_buffer_size`: tamanho do buffer da captura OpenCV
 - `stream_open_timeout_ms`: timeout de abertura da captura
@@ -112,6 +115,11 @@ Configuracoes relevantes em `vision-worker/config.json`:
 - `roi`: regiao de interesse
 - `line`: linha de contagem
 - `count_direction`: `up`, `down` ou `any`
+- `stream_profiles`: esteira de presets operacionais; cada item carrega `id`, `name`, `stream_url`, `camera_id`, `roi`, `line` e `count_direction`
+- `selected_stream_profile_id`: preset atualmente selecionado na esteira
+- `stream_rotation.enabled`: ativa/desativa rotacao randômica; por padrao fica `false`
+- `stream_rotation.mode`: modo da rotacao; hoje `round_boundary`
+- `stream_rotation.strategy`: estrategia de sorteio; hoje `uniform_excluding_current`
 - `show_window`: mostra janela OpenCV local
 - `save_snapshots`: salva recortes dos veiculos contados
 - `mjpeg_host`: host do servidor MJPEG
@@ -128,10 +136,13 @@ Observacao importante:
 - o feed MJPEG pode exigir `token` na query string
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
+- o painel local do Vision tambem permite informar `Camera ID`, abrir URL, salvar preset, ativar rotacao e sortear a proxima camera
 - a esteira de streams continua salva localmente em `vision-worker/config.json` para garantir boot offline
 - quando `supabase_url` e `supabase_service_key` estao configurados, a engine sincroniza a esteira com o Supabase
 - no primeiro boot com Supabase, se a tabela remota estiver vazia, a configuracao local e publicada
 - se ja existirem perfis remotos, eles passam a popular a esteira local
+- a rotacao randômica fica pendente enquanto o round estiver `open` ou `closing`; a aplicacao so ocorre em `settling`, validada pelo backend
+- o `/health` do worker expoe `selectedStreamProfileId` e `streamRotation`, alem dos dados de pipeline ja existentes
 - a baseline atual de latencia ficou boa com:
   - `ffmpeg_capture_options`: `fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;32768`
   - `stream_buffer_size`: `1`
@@ -140,15 +151,16 @@ Observacao importante:
 ## Backend .NET
 
 Principais rotas:
-- `GET /api/rounds/current`
-- `GET /api/rounds/history`
-- `GET /api/rounds/{roundId}/count-events`
-- `POST /api/rounds/settle`
-- `POST /api/rounds/count-events`
-- `GET /api/camera-config/{cameraId}`
-- `POST /api/camera-config/{cameraId}`
-- `GET /proxy/video-feed`
-- `GET /proxy/health`
+- `GET /rounds/current`
+- `GET /rounds/history`
+- `GET /rounds/{roundId}/count-events`
+- `GET /rounds/{roundId}/timeline`
+- `POST /internal/round-count-event`
+- `POST /internal/camera-config/validate-change`
+- `POST /internal/rounds/profile-activated`
+- `GET /internal/cameras/{cameraId}/round-lock`
+- `GET /streams`
+- `POST /streams`
 
 Eventos SignalR:
 - `count_updated`
@@ -159,6 +171,8 @@ Caracteristicas atuais:
 - migracao inicial versionada em `TrafficCounter.Api/Migrations`
 - rounds com encerramento automatico
 - rotas sensiveis protegidas por API key
+- bloqueio operacional de alteracoes durante round `open`, `closing` e `settling`
+- excecao interna `AllowSettling` para permitir rotacao controlada de camera apenas durante `settling`
 - CORS configurado por ambiente via `Cors:AllowedOrigins`
 - proxy opcional do MJPEG para unificar acesso pelo backend
 
@@ -173,20 +187,21 @@ Fluxo atual:
 1. busca o round atual
 2. busca o historico
 3. conecta nos hubs SignalR
-4. mostra o feed MJPEG em `VideoPlayer`
-5. mostra a lista de deteccoes recebida por SignalR
-6. consulta o health operacional para exibir status da camera, backend, feed MJPEG, FPS e ultimo evento
+4. monta a URL da live a partir do `cameraId` configurado
+5. mostra o feed WebRTC/HLS com fallback MJPEG em `VideoPlayer`
+6. mostra a lista de deteccoes recebida por SignalR
+7. consulta o health operacional para exibir status da camera, backend, feed, FPS, perfil ativo e ultimo evento
 
 Observacao:
-- `VideoPlayer.jsx` usa `<img>` apontando para o feed MJPEG
+- `VideoPlayer.jsx` nao foi alterado pela esteira randômica; ele continua consumindo a saida `processed/<cameraId>`
 - `OperationsCard.jsx` mostra saude operacional via backend e health do worker
 - `AlertsPanel.jsx` mostra alertas para stream indisponivel, backend com falha, frames parados e contagem zerada suspeita
-- o historico usa `GET /api/rounds/history` e `GET /api/rounds/{roundId}/count-events` para filtros, tendencia e exportacao CSV
+- o historico usa `GET /rounds/history` e `GET /rounds/{roundId}/count-events` para filtros, tendencia e exportacao CSV
 - por padrao, os endpoints locais do frontend apontam para `127.0.0.1`
 - no Windows atual, o launcher `frontend-dev.bat` sobe o Vite com `--configLoader native` para contornar o erro local `spawn EPERM` do loader padrao
 - o frontend nao possui mais tela de configuracao de ROI/linha
-- `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL` e `VITE_MJPEG_URL` devem ser definidos por ambiente
-- `hls.js` foi removido do fluxo principal
+- o frontend tambem nao acompanha automaticamente a camera sorteada; para inspecionar outra saida, configure o `cameraId` correspondente
+- `VITE_API_BASE_URL`, `VITE_SIGNALR_BASE_URL`, `VITE_HLS_BASE_URL`, `VITE_WEBRTC_BASE_URL`, `VITE_MJPEG_BASE_URL` e `VITE_MJPEG_TOKEN` devem ser definidos por ambiente quando necessario
 
 Latencia:
 - o `/health` do Python expõe tambem latencia interna basica da pipeline
@@ -202,9 +217,8 @@ Backend .NET:
 - `TrafficCounter.Api/appsettings.Production.json.example`: exemplo para producao
 
 Frontend React:
-- `traffic-counter-front/.env.example`: exemplo generico
-- `traffic-counter-front/.env.development.example`: exemplo para desenvolvimento
-- `traffic-counter-front/.env.production.example`: exemplo para producao
+- `frontend/` e a fonte principal da interface web
+- `traffic-counter-front/` permanece apenas como referencia legada
 
 Observacao:
 - em producao, `Cors:AllowedOrigins` deve ser definido explicitamente
@@ -223,6 +237,9 @@ Observacao:
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
 - Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
 - se quiser sincronizar a esteira no Supabase, crie a tabela usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `vision-worker/config.json`
+- para rotação randômica real, cadastre ao menos dois `stream_profiles` com `camera_id` e URL validos
+- cada preset publica na propria saida `processed/<camera_id>`; o frontend deve apontar para o `cameraId` que se quer monitorar
+- troca manual de ROI, linha e stream profile segue bloqueada durante round ativo; a excecao `AllowSettling` e restrita a rotacao controlada durante `settling`
 - No ambiente Windows atual, `127.0.0.1` e o host confiavel; `localhost` pode falhar por resolver em `::1`.
 - A `.venv` precisa estar atualizada com `vision-worker/requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.

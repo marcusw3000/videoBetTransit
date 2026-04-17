@@ -48,6 +48,11 @@
   "min_hits_to_count": 4,
   "max_track_history_age": 300,
   "min_bbox_area": 100,
+  "stream_rotation": {
+    "enabled": false,
+    "mode": "round_boundary",
+    "strategy": "uniform_excluding_current"
+  },
   "stream_profiles": [
     {
       "id": "stream_1775342309357",

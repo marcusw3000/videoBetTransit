@@ -79,7 +79,7 @@ public class InternalController : ControllerBase
 
         try
         {
-            await _roundService.NotifyStreamProfileActivatedAsync(dto.CameraId, dto.StreamProfileId);
+            await _roundService.NotifyStreamProfileActivatedAsync(dto.CameraId, dto.StreamProfileId, dto.AllowSettling);
             return Ok(new { received = true });
         }
         catch (InvalidOperationException ex)
@@ -111,7 +111,10 @@ public class InternalController : ControllerBase
 
         try
         {
-            await _roundService.EnsureCameraUnlockedAsync(dto.CameraId);
+            if (dto.AllowSettling)
+                await _roundService.EnsureCameraUnlockedForBoundaryChangeAsync(dto.CameraId);
+            else
+                await _roundService.EnsureCameraUnlockedAsync(dto.CameraId);
             return Ok(new { allowed = true });
         }
         catch (InvalidOperationException ex)

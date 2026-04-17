@@ -178,10 +178,17 @@ class BackendClient:
 
         return True, ""
 
-    def notify_stream_profile_activated(self, camera_id: str, stream_profile_id: str = "") -> bool:
+    def notify_stream_profile_activated(
+        self,
+        camera_id: str,
+        stream_profile_id: str = "",
+        *,
+        allow_settling: bool = False,
+    ) -> bool:
         payload = {
             "cameraId": str(camera_id or "").strip(),
             "streamProfileId": str(stream_profile_id or "").strip(),
+            "allowSettling": bool(allow_settling),
         }
 
         if not payload["cameraId"]:
@@ -221,8 +228,33 @@ class BackendClient:
         _line: dict,
         _count_direction: str,
     ) -> bool:
+        return self.validate_camera_config_change(camera_id)
+
+    def ensure_camera_change_allowed(
+        self,
+        camera_id: str,
+        operation_name: str = "operacao",
+        *,
+        allow_settling: bool = False,
+    ) -> tuple[bool, str]:
+        if not str(camera_id or "").strip():
+            return False, f"Camera ID vazio para {operation_name}."
+
+        ok = self.validate_camera_config_change(camera_id, allow_settling=allow_settling)
+        if ok:
+            return True, ""
+
+        return False, "Nao foi possivel validar a janela operacional no backend."
+
+    def validate_camera_config_change(
+        self,
+        camera_id: str,
+        *,
+        allow_settling: bool = False,
+    ) -> bool:
         payload = {
             "cameraId": str(camera_id or "").strip(),
+            "allowSettling": bool(allow_settling),
         }
 
         if not payload["cameraId"]:

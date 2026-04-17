@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import queue
+import random
 import requests
 import subprocess
 import threading
@@ -204,6 +205,17 @@ active_stream_ref = None
 active_mjpeg_server_ref = None
 active_control_panel_ref = None
 active_snapshot_writer_ref = None
+stream_rotation_status_lock = threading.Lock()
+stream_rotation_status_ref = {
+    "enabled": False,
+    "mode": "round_boundary",
+    "strategy": "uniform_excluding_current",
+    "pending": False,
+    "pendingProfileId": "",
+    "selectedStreamProfileId": "",
+    "activeProfileLabel": "",
+    "lastMessage": "",
+}
 
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
@@ -624,6 +636,17 @@ def consume_pipeline_commands():
         pending_pipeline_refresh = False
     return next_start, next_stop, next_refresh
 
+
+def update_stream_rotation_status(**values):
+    with stream_rotation_status_lock:
+        stream_rotation_status_ref.update(values)
+
+
+def get_stream_rotation_status() -> dict:
+    with stream_rotation_status_lock:
+        return dict(stream_rotation_status_ref)
+
+
 def is_mjpeg_request_authorized() -> bool:
     if not mjpeg_token_ref:
         return True
@@ -655,6 +678,8 @@ def create_mjpeg_app() -> Flask:
         payload["sourceUrl"] = active_config.get("stream_url", "")
         payload["captureSourceUrl"] = active_config.get("capture_source_url", "")
         payload["processedStreamPath"] = active_config.get("processed_stream_path", "")
+        payload["selectedStreamProfileId"] = active_config.get("selected_stream_profile_id", "")
+        payload["streamRotation"] = get_stream_rotation_status()
         return jsonify(payload)
 
     @app.post("/pipeline/start")
@@ -850,6 +875,13 @@ atexit.register(cleanup_runtime)
 # ---------------------------------------------------------------------------
 DEFAULT_ROI = {"x": 0, "y": 0, "w": 0, "h": 0}
 DEFAULT_LINE = {"x1": 0, "y1": 0, "x2": 0, "y2": 0}
+DEFAULT_STREAM_ROTATION = {
+    "enabled": False,
+    "mode": "round_boundary",
+    "strategy": "uniform_excluding_current",
+}
+STREAM_ROTATION_SAFE_STATUSES = {"settling", "settled", "void"}
+STREAM_ROTATION_DEFER_STATUSES = {"open", "closing"}
 
 
 def normalize_roi_config(value, fallback: dict | None = None) -> dict:
@@ -879,6 +911,78 @@ def normalize_count_direction(value) -> str:
     if direction in {"up", "down", "any", "down_to_up", "up_to_down"}:
         return direction
     return "any"
+
+
+def normalize_stream_rotation_config(value) -> dict:
+    source = value if isinstance(value, dict) else {}
+    mode = str(source.get("mode") or DEFAULT_STREAM_ROTATION["mode"]).strip().lower()
+    strategy = str(source.get("strategy") or DEFAULT_STREAM_ROTATION["strategy"]).strip().lower()
+
+    if mode != "round_boundary":
+        mode = DEFAULT_STREAM_ROTATION["mode"]
+    if strategy != "uniform_excluding_current":
+        strategy = DEFAULT_STREAM_ROTATION["strategy"]
+
+    return {
+        "enabled": bool(source.get("enabled", DEFAULT_STREAM_ROTATION["enabled"])),
+        "mode": mode,
+        "strategy": strategy,
+    }
+
+
+def get_round_status(backend_round: dict | None) -> str:
+    if not isinstance(backend_round, dict):
+        return ""
+    return str(backend_round.get("status") or "").strip().lower()
+
+
+def get_round_id(backend_round: dict | None) -> str:
+    if not isinstance(backend_round, dict):
+        return ""
+    return str(backend_round.get("roundId") or "").strip()
+
+
+def is_round_safe_for_stream_rotation(backend_round: dict | None) -> bool:
+    return get_round_status(backend_round) in STREAM_ROTATION_SAFE_STATUSES
+
+
+def should_defer_stream_rotation(backend_round: dict | None) -> bool:
+    status = get_round_status(backend_round)
+    return not status or status in STREAM_ROTATION_DEFER_STATUSES or status not in STREAM_ROTATION_SAFE_STATUSES
+
+
+def select_random_stream_profile(
+    profiles: list[dict],
+    current_profile_id: str = "",
+    *,
+    rng=random,
+) -> dict | None:
+    eligible = [
+        dict(profile)
+        for profile in profiles
+        if str(profile.get("id") or "").strip()
+        and str(profile.get("stream_url") or "").strip()
+        and str(profile.get("camera_id") or "").strip()
+    ]
+    if len(eligible) < 2:
+        return None
+
+    current_profile_id = str(current_profile_id or "").strip()
+    candidates = [
+        profile for profile in eligible
+        if str(profile.get("id") or "").strip() != current_profile_id
+    ]
+    if not candidates:
+        candidates = eligible
+
+    return dict(rng.choice(candidates))
+
+
+def should_apply_pending_stream_rotation(
+    pending_profile: dict | None,
+    backend_round: dict | None,
+) -> bool:
+    return isinstance(pending_profile, dict) and is_round_safe_for_stream_rotation(backend_round)
 
 
 def shorten_text(value: str, max_len: int = 56) -> str:
@@ -976,6 +1080,7 @@ def sync_config_with_selected_profile(cfg: dict, profile: dict) -> dict:
 
 def normalize_config(cfg: dict | None) -> dict:
     cfg = dict(cfg or {})
+    cfg["stream_rotation"] = normalize_stream_rotation_config(cfg.get("stream_rotation"))
     raw_profiles = cfg.get("stream_profiles")
     profiles = []
 
@@ -1140,6 +1245,7 @@ class StreamProfileStore:
         self,
         *,
         name: str | None = None,
+        camera_id: str | None = None,
         stream_url: str | None = None,
         roi: dict | None = None,
         line: dict | None = None,
@@ -1147,13 +1253,20 @@ class StreamProfileStore:
     ) -> dict:
         current = get_selected_stream_profile(self.cfg)
         target_url = str(stream_url or current.get("stream_url") or "").strip()
+        target_camera_id = str(camera_id or current.get("camera_id") or self.cfg.get("camera_id") or "").strip()
         if not target_url:
             raise ValueError("Informe uma URL de stream antes de salvar.")
+        if not target_camera_id:
+            raise ValueError("Informe um camera_id antes de salvar.")
 
         selected_stream_url = str(current.get("stream_url") or "").strip()
-        if target_url != selected_stream_url:
+        selected_camera_id = str(current.get("camera_id") or "").strip()
+        if target_url != selected_stream_url or target_camera_id != selected_camera_id:
             for profile in self.cfg.get("stream_profiles", []):
-                if str(profile.get("stream_url") or "").strip() == target_url:
+                if (
+                    str(profile.get("stream_url") or "").strip() == target_url
+                    and str(profile.get("camera_id") or "").strip() == target_camera_id
+                ):
                     current = profile
                     break
             else:
@@ -1161,7 +1274,7 @@ class StreamProfileStore:
                     "id": make_stream_profile_id({str(profile.get("id") or "") for profile in self.cfg.get("stream_profiles", [])}),
                     "name": "",
                     "stream_url": target_url,
-                    "camera_id": str(self.cfg.get("camera_id") or "").strip(),
+                    "camera_id": target_camera_id,
                     "roi": dict(self.cfg.get("roi") or DEFAULT_ROI),
                     "line": dict(self.cfg.get("line") or DEFAULT_LINE),
                     "count_direction": self.cfg.get("count_direction", "any"),
@@ -1171,6 +1284,7 @@ class StreamProfileStore:
         if name is not None:
             current["name"] = str(name).strip()
         current["stream_url"] = target_url
+        current["camera_id"] = target_camera_id
         if roi is not None:
             current["roi"] = normalize_roi_config(roi, current.get("roi"))
         if line is not None:
@@ -1180,13 +1294,25 @@ class StreamProfileStore:
 
         return dict(sync_config_with_selected_profile(self.cfg, current))
 
-    def apply_stream_url(self, stream_url: str, *, name: str | None = None) -> tuple[dict, bool]:
+    def apply_stream_url(
+        self,
+        stream_url: str,
+        *,
+        name: str | None = None,
+        camera_id: str | None = None,
+    ) -> tuple[dict, bool]:
         target_url = str(stream_url or "").strip()
+        target_camera_id = str(camera_id or self.cfg.get("camera_id") or "").strip()
         if not target_url:
             raise ValueError("Informe uma URL de stream.")
+        if not target_camera_id:
+            raise ValueError("Informe um camera_id.")
 
         for profile in self.cfg.get("stream_profiles", []):
-            if str(profile.get("stream_url") or "").strip() == target_url:
+            if (
+                str(profile.get("stream_url") or "").strip() == target_url
+                and str(profile.get("camera_id") or "").strip() == target_camera_id
+            ):
                 if name is not None and str(name).strip():
                     profile["name"] = str(name).strip()
                 return dict(sync_config_with_selected_profile(self.cfg, profile)), False
@@ -1196,11 +1322,11 @@ class StreamProfileStore:
             "name": str(name or "").strip()
             or guess_stream_profile_name(
                 target_url,
-                self.cfg.get("camera_id", ""),
+                target_camera_id,
                 index=len(self.cfg.get("stream_profiles", [])) + 1,
             ),
             "stream_url": target_url,
-            "camera_id": str(self.cfg.get("camera_id") or "").strip(),
+            "camera_id": target_camera_id,
             "roi": normalize_roi_config(self.cfg.get("roi")),
             "line": normalize_line_config(self.cfg.get("line")),
             "count_direction": normalize_count_direction(self.cfg.get("count_direction", "any")),
@@ -1826,6 +1952,9 @@ class EditorControlPanel:
         on_select_stream,
         on_open_stream,
         on_save_stream_profile,
+        on_toggle_stream_rotation,
+        on_queue_random_stream,
+        stream_rotation_enabled: bool = False,
     ):
         self.editor = editor
         self.stream_store = stream_store
@@ -1834,6 +1963,8 @@ class EditorControlPanel:
         self.on_select_stream = on_select_stream
         self.on_open_stream = on_open_stream
         self.on_save_stream_profile = on_save_stream_profile
+        self.on_toggle_stream_rotation = on_toggle_stream_rotation
+        self.on_queue_random_stream = on_queue_random_stream
         self.should_close = False
         self._stream_profile_ids: list[str] = []
         self._root = tk.Tk()
@@ -1850,7 +1981,9 @@ class EditorControlPanel:
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
         self._stream_name_var = tk.StringVar()
+        self._stream_camera_id_var = tk.StringVar()
         self._stream_url_var = tk.StringVar()
+        self._stream_rotation_enabled_var = tk.BooleanVar(value=bool(stream_rotation_enabled))
         self._stream_selector = ttk.Combobox(frame, state="readonly", width=48)
         self._stream_selector.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
         self._stream_selector.bind("<<ComboboxSelected>>", self._handle_profile_preview)
@@ -1861,51 +1994,70 @@ class EditorControlPanel:
         ttk.Entry(frame, textvariable=self._stream_name_var).grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
-        ttk.Label(frame, text="URL da stream").grid(row=4, column=0, columnspan=2, sticky="w")
-        ttk.Entry(frame, textvariable=self._stream_url_var).grid(
+        ttk.Label(frame, text="Camera ID").grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Entry(frame, textvariable=self._stream_camera_id_var).grid(
             row=5, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
+        ttk.Label(frame, text="URL da stream").grid(row=6, column=0, columnspan=2, sticky="w")
+        ttk.Entry(frame, textvariable=self._stream_url_var).grid(
+            row=7, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
         ttk.Button(frame, text="Abrir URL", command=self.open_stream_url).grid(
-            row=6, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
+            row=8, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
         )
         ttk.Button(frame, text="Salvar na Esteira", command=self.save_stream_profile).grid(
-            row=6, column=1, sticky="ew", pady=(0, 10)
+            row=8, column=1, sticky="ew", pady=(0, 10)
+        )
+
+        ttk.Label(frame, text="Rotacao Randômica", font=("Segoe UI", 11, "bold")).grid(
+            row=9, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+        ttk.Checkbutton(
+            frame,
+            text="Ativar entre rounds",
+            variable=self._stream_rotation_enabled_var,
+            command=self.toggle_stream_rotation,
+        ).grid(
+            row=10, column=0, sticky="w", padx=(0, 6), pady=(0, 10)
+        )
+        ttk.Button(frame, text="Sortear Proxima", command=self.queue_random_stream).grid(
+            row=10, column=1, sticky="ew", pady=(0, 10)
         )
 
         ttk.Label(frame, text="Ajuste de ROI e Linha", font=("Segoe UI", 11, "bold")).grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(0, 8)
+            row=11, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
 
         ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
-            row=8, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=12, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
-            row=8, column=1, sticky="ew", pady=(0, 6)
+            row=12, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Salvar", command=self.save).grid(
-            row=9, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=13, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
-            row=9, column=1, sticky="ew", pady=(0, 6)
+            row=13, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
-            row=10, column=0, columnspan=2, sticky="ew"
+            row=14, column=0, columnspan=2, sticky="ew"
         )
         ttk.Button(frame, text="Fechar", command=self.request_close).grid(
-            row=11, column=0, columnspan=2, sticky="ew", pady=(6, 0)
+            row=15, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
 
         self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
         self._message_var = tk.StringVar(value=self.editor.message)
         ttk.Label(frame, textvariable=self._mode_var).grid(
-            row=12, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=16, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         ttk.Label(frame, textvariable=self._message_var, wraplength=360).grid(
-            row=13, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=17, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
         ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, T, Q").grid(
-            row=14, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=18, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         self._refresh_stream_profiles()
         self.set_active_stream_profile(self.stream_store.get_selected_profile())
@@ -1936,7 +2088,7 @@ class EditorControlPanel:
 
         try:
             profile = self.on_select_stream(self._stream_profile_ids[index])
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             self.editor.message = str(exc)
             return
 
@@ -1947,8 +2099,9 @@ class EditorControlPanel:
             profile = self.on_open_stream(
                 self._stream_url_var.get(),
                 self._stream_name_var.get(),
+                self._stream_camera_id_var.get(),
             )
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             self.editor.message = str(exc)
             return
 
@@ -1959,16 +2112,34 @@ class EditorControlPanel:
             profile = self.on_save_stream_profile(
                 self._stream_name_var.get(),
                 self._stream_url_var.get(),
+                self._stream_camera_id_var.get(),
             )
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             self.editor.message = str(exc)
             return
 
         self.set_active_stream_profile(profile)
 
+    def toggle_stream_rotation(self):
+        try:
+            self.on_toggle_stream_rotation(bool(self._stream_rotation_enabled_var.get()))
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+
+    def queue_random_stream(self):
+        try:
+            profile = self.on_queue_random_stream()
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+
+        if profile:
+            self._refresh_stream_profiles(selected_profile_id=profile.get("id"))
+
     def set_active_stream_profile(self, profile: dict):
         self._refresh_stream_profiles(selected_profile_id=profile.get("id"))
         self._stream_name_var.set(str(profile.get("name") or ""))
+        self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
         self._stream_url_var.set(str(profile.get("stream_url") or ""))
 
     def _refresh_stream_profiles(self, selected_profile_id: str | None = None):
@@ -1991,6 +2162,7 @@ class EditorControlPanel:
         for profile in self.stream_store.list_profiles():
             if str(profile.get("id") or "") == profile_id:
                 self._stream_name_var.set(str(profile.get("name") or ""))
+                self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
                 self._stream_url_var.set(str(profile.get("stream_url") or ""))
                 break
 
@@ -2198,6 +2370,18 @@ def main():
         )
     bootstrap_stream_profiles_from_supabase(cfg, config_path, supabase_sync)
     stream_store = StreamProfileStore(cfg)
+    stream_rotation = cfg["stream_rotation"]
+    selected_profile = stream_store.get_selected_profile()
+    update_stream_rotation_status(
+        enabled=bool(stream_rotation.get("enabled")),
+        mode=stream_rotation.get("mode", "round_boundary"),
+        strategy=stream_rotation.get("strategy", "uniform_excluding_current"),
+        pending=False,
+        pendingProfileId="",
+        selectedStreamProfileId=str(selected_profile.get("id") or ""),
+        activeProfileLabel=format_stream_profile_label(selected_profile),
+        lastMessage="",
+    )
     streamer.set_jpeg_quality(int(cfg.get("mjpeg_jpeg_quality", 70)))
     streamer.set_fps_limit(float(cfg.get("mjpeg_fps_limit", 0)))
 
@@ -2257,6 +2441,8 @@ def main():
     editor = None
     control_panel = None
     pending_stream_profile = None
+    pending_rotation_profile = None
+    last_rotation_round_id = ""
     pending_stream_refresh_started_at = None
     current_round_id = str(cfg.get("round_id", "")).strip()
     last_visual_detections: list[dict] = []
@@ -2288,6 +2474,137 @@ def main():
         last_seen.clear()
         track_hits.clear()
         counted_ids.clear()
+
+    def publish_rotation_status(message: str = ""):
+        selected = stream_store.get_selected_profile()
+        update_stream_rotation_status(
+            enabled=bool(stream_rotation.get("enabled")),
+            mode=stream_rotation.get("mode", "round_boundary"),
+            strategy=stream_rotation.get("strategy", "uniform_excluding_current"),
+            pending=isinstance(pending_rotation_profile, dict),
+            pendingProfileId=str((pending_rotation_profile or {}).get("id") or ""),
+            selectedStreamProfileId=str(selected.get("id") or ""),
+            activeProfileLabel=format_stream_profile_label(selected),
+            lastMessage=message,
+        )
+
+    def set_rotation_enabled(enabled: bool):
+        stream_rotation["enabled"] = bool(enabled)
+        cfg["stream_rotation"] = dict(stream_rotation)
+        save_config(config_path, cfg)
+        publish_rotation_status(
+            "Rotacao randômica ativada" if enabled else "Rotacao randômica desativada"
+        )
+        if editor is not None:
+            editor.message = get_stream_rotation_status()["lastMessage"]
+
+    def queue_random_stream_profile(*, reason: str = "manual") -> dict:
+        nonlocal pending_rotation_profile
+
+        profile = select_random_stream_profile(
+            stream_store.list_profiles(),
+            str(cfg.get("selected_stream_profile_id") or ""),
+            rng=random,
+        )
+        if profile is None:
+            message = "Rotacao requer ao menos dois perfis com camera_id e URL."
+            publish_rotation_status(message)
+            raise ValueError(message)
+
+        pending_rotation_profile = dict(profile)
+        message = (
+            f"Proxima stream sorteada ({reason}): "
+            f"{format_stream_profile_label(pending_rotation_profile)}"
+        )
+        publish_rotation_status(message)
+        if editor is not None:
+            editor.message = message
+        return pending_rotation_profile
+
+    def maybe_schedule_stream_rotation(backend_round: dict | None):
+        nonlocal pending_rotation_profile, last_rotation_round_id
+
+        if pending_rotation_profile is None and not stream_rotation.get("enabled"):
+            publish_rotation_status()
+            return
+
+        round_id = get_round_id(backend_round)
+        if (
+            pending_rotation_profile is None
+            and stream_rotation.get("enabled")
+            and is_round_safe_for_stream_rotation(backend_round)
+            and round_id
+            and round_id != last_rotation_round_id
+        ):
+            try:
+                queue_random_stream_profile(reason="auto")
+            except ValueError:
+                last_rotation_round_id = round_id
+                return
+
+        if pending_rotation_profile is None:
+            publish_rotation_status()
+            return
+
+        if not should_apply_pending_stream_rotation(pending_rotation_profile, backend_round):
+            status = get_round_status(backend_round) or "indisponivel"
+            publish_rotation_status(f"Rotacao pendente aguardando janela segura ({status}).")
+            return
+
+        target_camera_id = str(pending_rotation_profile.get("camera_id") or "").strip()
+        allowed, reason = backend.ensure_camera_change_allowed(
+            target_camera_id,
+            operation_name="rotacao de stream profile",
+            allow_settling=True,
+        )
+        if not allowed:
+            publish_rotation_status(f"Rotacao pendente bloqueada pelo backend: {reason}")
+            return
+
+        profile = dict(pending_rotation_profile)
+        profile["_activation_allow_settling"] = True
+        pending_rotation_profile = None
+        last_rotation_round_id = round_id or last_rotation_round_id
+        queue_stream_profile(
+            profile,
+            message=f"Rotacao aplicada em janela segura: {format_stream_profile_label(profile)}",
+        )
+        publish_rotation_status("Rotacao aplicada em janela segura.")
+
+    def poll_round_state_if_needed():
+        nonlocal last_round_sync, current_round_id, total
+
+        should_poll_round = (
+            round_sync_enabled
+            or bool(stream_rotation.get("enabled"))
+            or pending_rotation_profile is not None
+        )
+        now_ts = time.time()
+        if not should_poll_round or now_ts - last_round_sync < ROUND_SYNC_INTERVAL:
+            return
+
+        last_round_sync = now_ts
+        backend_round = backend.fetch_current_round(cfg.get("camera_id", ""))
+        if round_sync_enabled:
+            next_round_id, next_total, round_changed = resolve_round_sync(
+                current_round_id,
+                backend_round,
+                total,
+            )
+            if round_changed:
+                logger.info(
+                    "Mudanca de round detectada (%s -> %s). Resetando stream local.",
+                    current_round_id or "<none>",
+                    next_round_id,
+                )
+                current_round_id = next_round_id
+                reset_tracking_state()
+                total = next_total
+                request_stream_reset()
+            else:
+                current_round_id = next_round_id
+
+        maybe_schedule_stream_rotation(backend_round)
 
     def save_editor_state():
         nonlocal roi, line
@@ -2348,6 +2665,7 @@ def main():
             editor.load_values(roi, line, message=message)
         if control_panel is not None:
             control_panel.set_active_stream_profile(profile)
+        publish_rotation_status(message)
 
     def select_stream_profile(profile_id: str) -> dict:
         target_camera_id = cfg.get("camera_id", "")
@@ -2375,7 +2693,7 @@ def main():
         )
         return profile
 
-    def open_stream_url(stream_url: str, stream_name: str) -> dict:
+    def open_stream_url(stream_url: str, stream_name: str, camera_id: str) -> dict:
         unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "alterar stream")
         if not unlocked:
             message = (
@@ -2386,7 +2704,11 @@ def main():
                 editor.message = message
             raise RuntimeError(message)
 
-        profile, created = stream_store.apply_stream_url(stream_url, name=stream_name)
+        profile, created = stream_store.apply_stream_url(
+            stream_url,
+            name=stream_name,
+            camera_id=camera_id,
+        )
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
         action = "adicionada" if created else "reaberta"
@@ -2396,7 +2718,7 @@ def main():
         )
         return profile
 
-    def save_stream_profile(stream_name: str, stream_url: str) -> dict:
+    def save_stream_profile(stream_name: str, stream_url: str, camera_id: str) -> dict:
         unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "salvar stream profile")
         if not unlocked:
             message = (
@@ -2410,6 +2732,7 @@ def main():
         target_url = stream_url or cfg.get("stream_url", "")
         profile = stream_store.save_selected_profile(
             name=stream_name,
+            camera_id=camera_id or cfg.get("camera_id", ""),
             stream_url=target_url,
             roi=editor.roi if editor is not None else roi,
             line=editor.line if editor is not None else line,
@@ -2418,7 +2741,7 @@ def main():
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
         saved_backend = backend.save_camera_config(
-            camera_id=cfg["camera_id"],
+            camera_id=profile["camera_id"],
             roi=profile["roi"],
             line={
                 "x1": profile["line"]["x1"],
@@ -2464,6 +2787,9 @@ def main():
             select_stream_profile,
             open_stream_url,
             save_stream_profile,
+            set_rotation_enabled,
+            lambda: queue_random_stream_profile(reason="manual"),
+            stream_rotation_enabled=bool(stream_rotation.get("enabled")),
         )
         active_control_panel_ref = control_panel
 
@@ -2646,11 +2972,14 @@ def main():
                 format_stream_profile_label(profile),
                 cfg["stream_url"],
             )
-            if round_sync_enabled:
-                backend.notify_stream_profile_activated(
-                    cfg.get("camera_id", ""),
-                    profile.get("id", ""),
-                )
+            backend.notify_stream_profile_activated(
+                cfg.get("camera_id", ""),
+                profile.get("id", ""),
+                allow_settling=bool(profile.get("_activation_allow_settling")),
+            )
+            publish_rotation_status(f"Perfil ativo: {format_stream_profile_label(profile)}")
+
+        poll_round_state_if_needed()
 
         if not pipeline_runtime.is_running():
             time.sleep(0.05)
@@ -2677,27 +3006,6 @@ def main():
             logger.info("ROI: %s | Linha: %s | Direção: %s", roi, line, count_direction)
 
         now_ts = time.time()
-        if round_sync_enabled and now_ts - last_round_sync >= ROUND_SYNC_INTERVAL:
-            last_round_sync = now_ts
-            backend_round = backend.fetch_current_round(cfg.get("camera_id", ""))
-            next_round_id, next_total, round_changed = resolve_round_sync(
-                current_round_id,
-                backend_round,
-                total,
-            )
-            if round_changed:
-                logger.info(
-                    "Mudanca de round detectada (%s -> %s). Resetando stream local.",
-                    current_round_id or "<none>",
-                    next_round_id,
-                )
-                current_round_id = next_round_id
-                reset_tracking_state()
-                total = next_total
-                request_stream_reset()
-            else:
-                current_round_id = next_round_id
-
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
             last_config_poll = now_ts
             admin_cfg = backend.fetch_camera_config(cfg["camera_id"])

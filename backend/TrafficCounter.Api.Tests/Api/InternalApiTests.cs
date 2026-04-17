@@ -713,6 +713,53 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
+    public async Task ValidateCameraConfigChange_allows_boundary_change_during_settling()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_boundary_config");
+        Assert.NotNull(round);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var persisted = await db.Rounds.SingleAsync(r => r.RoundId == Guid.Parse(round!.RoundId));
+            persisted.Status = RoundStatus.Settling;
+            await db.SaveChangesAsync();
+        }
+
+        var response = await _client.PostAsJsonAsync("/internal/camera-config/validate-change", new CameraConfigChangeDto
+        {
+            CameraId = "cam_boundary_config",
+            AllowSettling = true,
+        });
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task ValidateCameraConfigChange_without_boundary_flag_blocks_settling_round()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_settling_config");
+        Assert.NotNull(round);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var persisted = await db.Rounds.SingleAsync(r => r.RoundId == Guid.Parse(round!.RoundId));
+            persisted.Status = RoundStatus.Settling;
+            await db.SaveChangesAsync();
+        }
+
+        var response = await _client.PostAsJsonAsync("/internal/camera-config/validate-change", new CameraConfigChangeDto
+        {
+            CameraId = "cam_settling_config",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
     public async Task ValidateCameraConfigChange_allows_camera_without_active_round()
     {
         var response = await _client.PostAsJsonAsync("/internal/camera-config/validate-change", new CameraConfigChangeDto
@@ -736,6 +783,40 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task NotifyStreamProfileActivated_with_boundary_flag_updates_state_during_settling()
+    {
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_boundary_profile");
+        Assert.NotNull(round);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var persisted = await db.Rounds.SingleAsync(r => r.RoundId == Guid.Parse(round!.RoundId));
+            persisted.Status = RoundStatus.Settling;
+            await db.SaveChangesAsync();
+        }
+
+        var response = await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_boundary_profile",
+            StreamProfileId = "profile-boundary",
+            AllowSettling = true,
+        });
+
+        response.EnsureSuccessStatusCode();
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDbFactory = verifyScope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var verifyDb = await verifyDbFactory.CreateDbContextAsync();
+        var state = await verifyDb.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_boundary_profile");
+
+        Assert.Equal("profile-boundary", state.ActiveStreamProfileId);
+        Assert.Equal(0, state.RoundsSinceProfileSwitch);
+        Assert.NotNull(state.LastProfileChangedAt);
     }
 
     [Fact]

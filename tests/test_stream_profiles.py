@@ -1,0 +1,167 @@
+import unittest
+
+from app import (
+    StreamProfileStore,
+    consume_pipeline_commands,
+    create_mjpeg_app,
+    is_round_safe_for_stream_rotation,
+    normalize_config,
+    select_random_stream_profile,
+    should_apply_pending_stream_rotation,
+)
+
+
+class _FirstChoiceRandom:
+    def choice(self, values):
+        return values[0]
+
+
+def make_cfg():
+    return {
+        "stream_url": "rtsp://camera-a/live",
+        "camera_id": "cam_a",
+        "roi": {"x": 1, "y": 2, "w": 100, "h": 80},
+        "line": {"x1": 10, "y1": 20, "x2": 90, "y2": 20},
+        "count_direction": "down",
+        "stream_profiles": [
+            {
+                "id": "profile-a",
+                "name": "Camera A",
+                "stream_url": "rtsp://camera-a/live",
+                "camera_id": "cam_a",
+                "roi": {"x": 1, "y": 2, "w": 100, "h": 80},
+                "line": {"x1": 10, "y1": 20, "x2": 90, "y2": 20},
+                "count_direction": "down",
+            }
+        ],
+        "selected_stream_profile_id": "profile-a",
+    }
+
+
+class StreamProfileStoreTests(unittest.TestCase):
+    def test_apply_stream_url_creates_profile_with_camera_id_and_current_geometry(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+
+        profile, created = store.apply_stream_url(
+            "rtsp://camera-b/live",
+            name="Camera B",
+            camera_id="cam_b",
+        )
+
+        self.assertTrue(created)
+        self.assertEqual("cam_b", profile["camera_id"])
+        self.assertEqual("rtsp://camera-b/live", profile["stream_url"])
+        self.assertEqual({"x": 1, "y": 2, "w": 100, "h": 80}, profile["roi"])
+        self.assertEqual({"x1": 10, "y1": 20, "x2": 90, "y2": 20}, profile["line"])
+        self.assertEqual("cam_b", cfg["camera_id"])
+        self.assertEqual(profile["id"], cfg["selected_stream_profile_id"])
+
+    def test_save_selected_profile_updates_camera_id_url_roi_and_line_together(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+
+        profile = store.save_selected_profile(
+            name="Camera A Ajustada",
+            camera_id="cam_a_adjusted",
+            stream_url="rtsp://camera-a-adjusted/live",
+            roi={"x": 5, "y": 6, "w": 70, "h": 40},
+            line={"x1": 7, "y1": 8, "x2": 90, "y2": 91},
+            count_direction="up",
+        )
+
+        self.assertEqual("cam_a_adjusted", profile["camera_id"])
+        self.assertEqual("rtsp://camera-a-adjusted/live", profile["stream_url"])
+        self.assertEqual({"x": 5, "y": 6, "w": 70, "h": 40}, profile["roi"])
+        self.assertEqual({"x1": 7, "y1": 8, "x2": 90, "y2": 91}, profile["line"])
+        self.assertEqual("up", profile["count_direction"])
+        self.assertEqual("cam_a_adjusted", cfg["camera_id"])
+
+    def test_normalize_config_adds_disabled_stream_rotation_defaults(self):
+        cfg = normalize_config(make_cfg())
+
+        self.assertEqual(
+            {
+                "enabled": False,
+                "mode": "round_boundary",
+                "strategy": "uniform_excluding_current",
+            },
+            cfg["stream_rotation"],
+        )
+
+
+class StreamRotationTests(unittest.TestCase):
+    def test_random_selection_excludes_current_profile(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+        store.apply_stream_url("rtsp://camera-b/live", name="Camera B", camera_id="cam_b")
+
+        selected = select_random_stream_profile(
+            store.list_profiles(),
+            "profile-a",
+            rng=_FirstChoiceRandom(),
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual("cam_b", selected["camera_id"])
+
+    def test_random_selection_requires_two_eligible_profiles(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+
+        selected = select_random_stream_profile(
+            store.list_profiles(),
+            "profile-a",
+            rng=_FirstChoiceRandom(),
+        )
+
+        self.assertIsNone(selected)
+
+    def test_pending_rotation_waits_for_non_countable_round_window(self):
+        pending = {"id": "profile-b", "camera_id": "cam_b", "stream_url": "rtsp://camera-b/live"}
+
+        self.assertFalse(should_apply_pending_stream_rotation(pending, {"status": "open"}))
+        self.assertFalse(should_apply_pending_stream_rotation(pending, {"status": "closing"}))
+        self.assertTrue(should_apply_pending_stream_rotation(pending, {"status": "settling"}))
+        self.assertTrue(is_round_safe_for_stream_rotation({"status": "settling"}))
+
+
+class WorkerApiContractTests(unittest.TestCase):
+    def test_health_exposes_active_profile_and_rotation_status(self):
+        client = create_mjpeg_app().test_client()
+
+        response = client.get("/health")
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertIn("selectedStreamProfileId", payload)
+        self.assertIn("streamRotation", payload)
+        self.assertIn("pending", payload["streamRotation"])
+
+    def test_pipeline_start_accepts_stream_contract_without_starting_capture_inline(self):
+        client = create_mjpeg_app().test_client()
+
+        response = client.post(
+            "/pipeline/start",
+            json={
+                "sessionId": "session-1",
+                "cameraId": "cam_contract",
+                "sourceUrl": "rtsp://camera-contract/live",
+                "rawStreamPath": "raw/cam_contract",
+                "processedStreamPath": "processed/cam_contract",
+                "direction": "down",
+                "countLine": {"x1": 1, "y1": 2, "x2": 3, "y2": 4},
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        queued, should_stop, should_refresh = consume_pipeline_commands()
+        self.assertFalse(should_stop)
+        self.assertFalse(should_refresh)
+        self.assertEqual("cam_contract", queued.camera_id)
+        self.assertEqual("rtsp://camera-contract/live", queued.source_url)
+        self.assertEqual({"x1": 1, "y1": 2, "x2": 3, "y2": 4}, queued.count_line)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -26,7 +26,8 @@ Ao final da execucao, o projeto deve operar como um provider de jogo live com:
 Premissas assumidas para este plano:
 
 - o `vision-worker` e o entrypoint oficial do worker Python
-- a esteira de streams com ROI e mark line por perfil ja existe no fluxo atual
+- a esteira de streams com ROI, mark line, `camera_id` e direcao por perfil ja existe no fluxo atual
+- a troca randômica de cameras e permitida apenas como acao controlada entre rounds, preservando o round oficial
 - Supabase pode ser usado como camada operacional e administrativa
 - o backend persistido deve ser a fonte oficial do resultado
 - o video e evidencia operacional e UX, nao soberania de settlement
@@ -117,8 +118,9 @@ Transformar o estado atual em uma base unica e estavel para evolucao como provid
 
 - `vision-worker` definido como entrypoint oficial
 - `config.json` do worker contendo stream profiles e integracao operacional
-- esteira funcionando com `Carregar`, `Salvar na Esteira` e reaplicacao de ROI/line
-- health operacional cobrindo stream, backend e pipeline
+- esteira funcionando com `Carregar`, `Salvar na Esteira`, `camera_id` por preset e reaplicacao de ROI/line
+- rotacao randômica opcional entre rounds, desativada por padrao
+- health operacional cobrindo stream, backend, pipeline, perfil ativo e estado da rotacao
 - documentacao curta da arquitetura atual
 
 ### Dependencias
@@ -137,6 +139,7 @@ Transformar o estado atual em uma base unica e estavel para evolucao como provid
 - confirmar abertura do worker correto
 - carregar stream salva
 - trocar perfil e validar reaplicacao de ROI/line
+- validar que a rotacao randômica fica pendente durante round contavel e aplica apenas em janela segura
 - validar `/health`
 
 ### Definicao de pronto
@@ -656,14 +659,15 @@ Impedir que alteracoes operacionais contaminem rounds em andamento e preparar a 
 ### Escopo do proximo passo
 
 - implementar `EP06` Freeze Operacional por Round
-- bloquear troca de `ROI`, `line`, `stream profile` e configuracao comercial com round `open`, `closing` ou `settling`
+- bloquear troca manual de `ROI`, `line`, `stream profile` e configuracao comercial com round `open`, `closing` ou `settling`
+- permitir apenas a rotacao operacional automatizada em janela nao contavel, com validacao explicita do backend
 - registrar tentativas administrativas bloqueadas
 - consolidar o stream como baseline congelado, com mudanca apenas por correcao de incidente
 - preparar a camada seguinte de `EP11` para incidente e runbook quando houver degradacao operacional
 
 ### Entregavel esperado
 
-Um round oficial protegido contra contaminacao operacional em runtime, com comportamento previsivel para operacao e suporte.
+Um round oficial protegido contra contaminacao operacional em runtime, com comportamento previsivel para operacao e suporte, incluindo troca randômica controlada apenas fora da janela contavel.
 
 ### Abordagem recomendada
 
@@ -671,8 +675,9 @@ Em vez de voltar a mexer no stream para explicar o jogo, a abordagem recomendada
 
 1. preservar a esteira atual como baseline operacional
 2. endurecer os bloqueios operacionais em torno do round oficial
-3. abrir incidentes e evidencias quando a operacao fugir do esperado
-4. tratar qualquer mudanca de stream como bugfix isolado, e nao como eixo da evolucao do produto
+3. tratar rotacao de camera como recurso operacional controlado, nao como edicao manual livre
+4. abrir incidentes e evidencias quando a operacao fugir do esperado
+5. tratar qualquer mudanca estrutural de stream como bugfix isolado, e nao como eixo da evolucao do produto
 
 ### Depois disso
 
@@ -771,6 +776,9 @@ Tasks:
 - [ ] validar a esteira de streams no fluxo de startup completo
 - [ ] validar sincronizacao local e remota de `stream_profiles`
 - [ ] registrar o stream atual como baseline antes de retomar evolucao do provider
+- [x] adicionar `camera_id` por preset de stream
+- [x] adicionar rotacao randômica opcional entre rounds
+- [x] expor perfil ativo e estado da rotacao no `/health` do worker
 
 Criterio de aceite:
 
@@ -789,13 +797,26 @@ Status atual:
 - [ ] validar a esteira de streams no fluxo de startup completo
 - [ ] validar sincronizacao local e remota de `stream_profiles`
 - [ ] registrar o stream atual como baseline antes de retomar evolucao do provider
+- [x] adicionar `camera_id` por preset de stream
+- [x] adicionar rotacao randômica opcional entre rounds
+- [x] expor perfil ativo e estado da rotacao no `/health` do worker
 
 Estado operacional de `EP01`:
 
-- consolidado parcialmente
+- consolidado parcialmente, com esteira operacional ampliada
 - o worker oficial ja esta identificado, mas ainda convive com legado na raiz
-- o stream precisa voltar a ser tratado como baseline operacional, nao como frente de experimentacao
-- a pendencia principal de `EP01` e fechar a ambiguidade estrutural sem abrir nova superficie de regressao no pipeline visual
+- cada preset agora pode carregar `camera_id`, URL, ROI, line e direcao como pacote operacional
+- a rotacao randômica fica desativada por padrao e, quando ativada, sorteia outro perfil elegivel sem alterar `VideoPlayer.jsx`
+- `/health` do worker ja expoe `selectedStreamProfileId` e `streamRotation`
+- a pendencia principal de `EP01` agora e validacao manual de startup completo e sincronizacao Supabase em ambiente real
+
+Atualizacao de implementacao em 2026-04-17:
+
+- `vision-worker/app.py` passou a persistir `stream_rotation` com `enabled=false`, `mode=round_boundary` e `strategy=uniform_excluding_current`
+- `StreamProfileStore` passou a tratar `camera_id`, `stream_url`, ROI, line e direcao como contrato unico do preset
+- o painel local do Vision recebeu campo `Camera ID`, toggle de rotacao e acao `Sortear Proxima`
+- a troca randômica fica pendente durante round contavel e so aplica em janela segura validada pelo backend
+- testes adicionados: `tests/test_stream_profiles.py`, cobrindo criacao/salvamento de preset, sorteio, pendencia por status de round e contratos de `/health` e `/pipeline/start`
 
 ### EP02 - Persistencia do Core de Rounds
 
@@ -970,15 +991,25 @@ Repositorio principal:
 
 Tasks:
 
-- [ ] bloquear troca de ROI durante round aberto
-- [ ] bloquear troca de line durante round aberto
-- [ ] bloquear troca de stream profile durante round aberto
+- [x] bloquear troca manual de ROI durante round aberto
+- [x] bloquear troca manual de line durante round aberto
+- [x] bloquear troca manual de stream profile durante round aberto
+- [x] permitir excecao controlada `AllowSettling` para rotacao entre rounds
 - [ ] bloquear mudanca de target e mercados durante round aberto
 - [ ] registrar tentativa administrativa bloqueada
 
 Criterio de aceite:
 
-- nenhuma configuracao critica muda enquanto o round estiver `open`, `closing` ou `settling`
+- nenhuma configuracao critica muda enquanto o round estiver `open` ou `closing`
+- durante `settling`, apenas mudanca operacional controlada e validada pelo backend pode ser aplicada para preparar o proximo round
+
+Estado operacional de `EP06`:
+
+- o backend recebeu `AllowSettling` nos contratos internos de validacao de config e ativacao de profile
+- a validacao normal continua bloqueando `open`, `closing` e `settling`
+- a validacao especial de boundary bloqueia `open` e `closing`, mas permite `settling`
+- o worker usa essa excecao apenas para rotacao randômica pendente, mantendo troca manual bloqueada pelo fluxo atual
+- testes .NET cobrem conflito normal em round ativo, permissao durante `settling` com `AllowSettling` e atualizacao de `CameraRoundState`
 
 ### EP07 - Provider API
 
@@ -1277,12 +1308,12 @@ Criterio de aceite:
 
 Se formos executar agora, a ordem mais eficiente e:
 
-1. fechar `EP01` sem novas alteracoes de stream alem de correcao de incidente
+1. validar `EP01` em startup real, incluindo esteira com `camera_id`, rotacao randômica e sincronizacao Supabase
 2. considerar `EP02` Persistencia do Core de Rounds como baseline funcional
 3. considerar `EP03` Round Engine como baseline funcional
 4. endurecer `EP04` Integracao Worker x Round Engine
 5. manter o frontend consumindo o lifecycle oficial de round, e nao inferencias do stream
-6. seguir com `EP06` Freeze Operacional por Round
+6. concluir `EP06` com auditoria de tentativas bloqueadas e freeze de configuracao comercial
 7. seguir com `EP05` Regras de Jogo e Mercados
 8. seguir com `EP07` Provider API
 9. seguir com `EP08` Webhooks e Entrega Assincrona

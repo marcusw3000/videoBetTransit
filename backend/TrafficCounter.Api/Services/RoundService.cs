@@ -279,12 +279,18 @@ public class RoundService
         return await VoidRoundAsync(db, round, reason, "internal_api");
     }
 
-    public async Task NotifyStreamProfileActivatedAsync(string cameraId, string? streamProfileId)
+    public async Task NotifyStreamProfileActivatedAsync(
+        string cameraId,
+        string? streamProfileId,
+        bool allowSettling = false)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var normalizedCameraId = NormalizeCameraId(cameraId);
-        if (await IsCameraLockedForRoundAsync(normalizedCameraId, db))
+        var locked = allowSettling
+            ? await IsCameraLockedForBoundaryChangeAsync(normalizedCameraId, db)
+            : await IsCameraLockedForRoundAsync(normalizedCameraId, db);
+        if (locked)
             throw new InvalidOperationException(CameraLockedMessage);
 
         var normalizedProfileId = NormalizeOptional(streamProfileId);
@@ -379,6 +385,13 @@ public class RoundService
     public async Task EnsureCameraUnlockedAsync(string cameraId = "default")
     {
         if (await IsCameraLockedForRoundAsync(cameraId))
+            throw new InvalidOperationException(CameraLockedMessage);
+    }
+
+    public async Task EnsureCameraUnlockedForBoundaryChangeAsync(string cameraId = "default")
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        if (await IsCameraLockedForBoundaryChangeAsync(NormalizeCameraId(cameraId), db))
             throw new InvalidOperationException(CameraLockedMessage);
     }
 
@@ -737,4 +750,10 @@ public class RoundService
             (r.Status == RoundStatus.Open ||
              r.Status == RoundStatus.Closing ||
              r.Status == RoundStatus.Settling));
+
+    private static Task<bool> IsCameraLockedForBoundaryChangeAsync(string cameraId, AppDbContext db) =>
+        db.Rounds.AnyAsync(r =>
+            r.CameraId == cameraId &&
+            (r.Status == RoundStatus.Open ||
+             r.Status == RoundStatus.Closing));
 }

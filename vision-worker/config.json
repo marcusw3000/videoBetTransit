@@ -56,6 +56,11 @@
   "supabase_service_key": "CHANGE_ME",
   "supabase_stream_profiles_table": "stream_profiles",
   "supabase_stream_profiles_scope": "videoBetTransit",
+  "stream_rotation": {
+    "enabled": false,
+    "mode": "round_boundary",
+    "strategy": "uniform_excluding_current"
+  },
   "stream_profiles": [
     {
       "id": "stream_default",
