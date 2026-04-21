@@ -880,6 +880,12 @@ DEFAULT_STREAM_ROTATION = {
     "enabled": False,
     "mode": "round_boundary",
     "strategy": "uniform_excluding_current",
+    "min_rounds_per_stream": 8,
+    "max_rounds_per_stream": 15,
+    "current_stream_profile_id": "",
+    "rounds_on_current_stream": 0,
+    "target_rounds_for_current_stream": 0,
+    "last_counted_round_id": "",
 }
 STREAM_ROTATION_SAFE_STATUSES = {"settling", "settled", "void"}
 STREAM_ROTATION_DEFER_STATUSES = {"open", "closing"}
@@ -925,6 +931,11 @@ def normalize_stream_rotation_config(value) -> dict:
     source = value if isinstance(value, dict) else {}
     mode = str(source.get("mode") or DEFAULT_STREAM_ROTATION["mode"]).strip().lower()
     strategy = str(source.get("strategy") or DEFAULT_STREAM_ROTATION["strategy"]).strip().lower()
+    min_rounds = int(source.get("min_rounds_per_stream", DEFAULT_STREAM_ROTATION["min_rounds_per_stream"]) or 0)
+    max_rounds = int(source.get("max_rounds_per_stream", DEFAULT_STREAM_ROTATION["max_rounds_per_stream"]) or 0)
+    min_rounds = max(1, min_rounds)
+    max_rounds = max(min_rounds, max_rounds)
+    target_rounds = int(source.get("target_rounds_for_current_stream", 0) or 0)
 
     if mode != "round_boundary":
         mode = DEFAULT_STREAM_ROTATION["mode"]
@@ -935,6 +946,12 @@ def normalize_stream_rotation_config(value) -> dict:
         "enabled": bool(source.get("enabled", DEFAULT_STREAM_ROTATION["enabled"])),
         "mode": mode,
         "strategy": strategy,
+        "min_rounds_per_stream": min_rounds,
+        "max_rounds_per_stream": max_rounds,
+        "current_stream_profile_id": str(source.get("current_stream_profile_id") or "").strip(),
+        "rounds_on_current_stream": max(0, int(source.get("rounds_on_current_stream", 0) or 0)),
+        "target_rounds_for_current_stream": target_rounds if min_rounds <= target_rounds <= max_rounds else 0,
+        "last_counted_round_id": str(source.get("last_counted_round_id") or "").strip(),
     }
 
 
@@ -991,6 +1008,69 @@ def should_apply_pending_stream_rotation(
     backend_round: dict | None,
 ) -> bool:
     return isinstance(pending_profile, dict) and is_round_safe_for_stream_rotation(backend_round)
+
+
+def choose_stream_rotation_target(rotation: dict, *, rng=random) -> int:
+    normalized = normalize_stream_rotation_config(rotation)
+    return int(rng.randint(
+        normalized["min_rounds_per_stream"],
+        normalized["max_rounds_per_stream"],
+    ))
+
+
+def ensure_stream_rotation_profile_state(
+    rotation: dict,
+    stream_profile_id: str,
+    *,
+    rng=random,
+    force_new_target: bool = False,
+) -> bool:
+    profile_id = str(stream_profile_id or "").strip()
+    previous_profile_id = str(rotation.get("current_stream_profile_id") or "").strip()
+    changed = previous_profile_id != profile_id
+
+    if changed:
+        rotation["current_stream_profile_id"] = profile_id
+        rotation["rounds_on_current_stream"] = 0
+        rotation["last_counted_round_id"] = ""
+
+    if changed or force_new_target or int(rotation.get("target_rounds_for_current_stream", 0) or 0) <= 0:
+        rotation["target_rounds_for_current_stream"] = choose_stream_rotation_target(rotation, rng=rng)
+        return True
+
+    return changed
+
+
+def count_settled_round_for_stream_rotation(rotation: dict, backend_round: dict | None) -> bool:
+    if get_round_status(backend_round) != "settled":
+        return False
+
+    round_id = get_round_id(backend_round)
+    if not round_id or round_id == str(rotation.get("last_counted_round_id") or ""):
+        return False
+
+    rotation["last_counted_round_id"] = round_id
+    rotation["rounds_on_current_stream"] = max(
+        0,
+        int(rotation.get("rounds_on_current_stream", 0) or 0),
+    ) + 1
+    return True
+
+
+def stream_rotation_target_reached(rotation: dict) -> bool:
+    target = int(rotation.get("target_rounds_for_current_stream", 0) or 0)
+    if target <= 0:
+        return False
+    rounds = int(rotation.get("rounds_on_current_stream", 0) or 0)
+    return rounds >= target
+
+
+def format_stream_rotation_progress(rotation: dict) -> str:
+    rounds = int(rotation.get("rounds_on_current_stream", 0) or 0)
+    target = int(rotation.get("target_rounds_for_current_stream", 0) or 0)
+    if target <= 0:
+        return "Rotacao ativa: alvo ainda nao sorteado."
+    return f"Rotacao ativa: {rounds}/{target} rounds nesta stream"
 
 
 def shorten_text(value: str, max_len: int = 56) -> str:
@@ -2728,12 +2808,23 @@ def main():
     stream_store = StreamProfileStore(cfg)
     stream_rotation = cfg["stream_rotation"]
     selected_profile = stream_store.get_selected_profile()
+    if stream_rotation.get("enabled") and ensure_stream_rotation_profile_state(
+        stream_rotation,
+        str(selected_profile.get("id") or ""),
+        rng=random,
+    ):
+        cfg["stream_rotation"] = dict(stream_rotation)
+        save_config(config_path, cfg)
     update_stream_rotation_status(
         enabled=bool(stream_rotation.get("enabled")),
         mode=stream_rotation.get("mode", "round_boundary"),
         strategy=stream_rotation.get("strategy", "uniform_excluding_current"),
         pending=False,
         pendingProfileId="",
+        roundsOnCurrentStream=int(stream_rotation.get("rounds_on_current_stream", 0) or 0),
+        targetRoundsForCurrentStream=int(stream_rotation.get("target_rounds_for_current_stream", 0) or 0),
+        currentStreamProfileId=str(stream_rotation.get("current_stream_profile_id") or ""),
+        lastCountedRoundId=str(stream_rotation.get("last_counted_round_id") or ""),
         selectedStreamProfileId=str(selected_profile.get("id") or ""),
         activeProfileLabel=format_stream_profile_label(selected_profile),
         lastMessage="",
@@ -2844,6 +2935,10 @@ def main():
             strategy=stream_rotation.get("strategy", "uniform_excluding_current"),
             pending=isinstance(pending_rotation_profile, dict),
             pendingProfileId=str((pending_rotation_profile or {}).get("id") or ""),
+            roundsOnCurrentStream=int(stream_rotation.get("rounds_on_current_stream", 0) or 0),
+            targetRoundsForCurrentStream=int(stream_rotation.get("target_rounds_for_current_stream", 0) or 0),
+            currentStreamProfileId=str(stream_rotation.get("current_stream_profile_id") or ""),
+            lastCountedRoundId=str(stream_rotation.get("last_counted_round_id") or ""),
             selectedStreamProfileId=str(selected.get("id") or ""),
             activeProfileLabel=format_stream_profile_label(selected),
             lastMessage=message,
@@ -2851,11 +2946,19 @@ def main():
 
     def set_rotation_enabled(enabled: bool):
         stream_rotation["enabled"] = bool(enabled)
+        if enabled:
+            ensure_stream_rotation_profile_state(
+                stream_rotation,
+                str(cfg.get("selected_stream_profile_id") or ""),
+                rng=random,
+            )
         cfg["stream_rotation"] = dict(stream_rotation)
         save_config(config_path, cfg)
         publish_rotation_status(
             "Rotacao randômica ativada" if enabled else "Rotacao randômica desativada"
         )
+        if enabled:
+            publish_rotation_status(format_stream_rotation_progress(stream_rotation))
         if editor is not None:
             editor.message = get_stream_rotation_status()["lastMessage"]
 
@@ -2890,21 +2993,45 @@ def main():
             return
 
         round_id = get_round_id(backend_round)
+        if stream_rotation.get("enabled"):
+            if ensure_stream_rotation_profile_state(
+                stream_rotation,
+                str(cfg.get("selected_stream_profile_id") or ""),
+                rng=random,
+            ):
+                cfg["stream_rotation"] = dict(stream_rotation)
+                save_config(config_path, cfg)
+
+            if count_settled_round_for_stream_rotation(stream_rotation, backend_round):
+                cfg["stream_rotation"] = dict(stream_rotation)
+                save_config(config_path, cfg)
+
         if (
             pending_rotation_profile is None
             and stream_rotation.get("enabled")
             and is_round_safe_for_stream_rotation(backend_round)
             and round_id
             and round_id != last_rotation_round_id
+            and stream_rotation_target_reached(stream_rotation)
         ):
             try:
                 queue_random_stream_profile(reason="auto")
+                publish_rotation_status(
+                    "Alvo atingido: "
+                    f"{stream_rotation.get('rounds_on_current_stream', 0)}/"
+                    f"{stream_rotation.get('target_rounds_for_current_stream', 0)}; "
+                    f"proxima stream sorteada: {format_stream_profile_label(pending_rotation_profile)}"
+                )
             except ValueError:
                 last_rotation_round_id = round_id
                 return
 
         if pending_rotation_profile is None:
-            publish_rotation_status()
+            publish_rotation_status(
+                format_stream_rotation_progress(stream_rotation)
+                if stream_rotation.get("enabled")
+                else ""
+            )
             return
 
         if not should_apply_pending_stream_rotation(pending_rotation_profile, backend_round):
@@ -3031,28 +3158,17 @@ def main():
         )
 
     def select_stream_profile(profile_id: str) -> dict:
-        target_camera_id = cfg.get("camera_id", "")
-        for existing_profile in stream_store.list_profiles():
-            if str(existing_profile.get("id") or "") == str(profile_id or ""):
-                target_camera_id = existing_profile.get("camera_id") or target_camera_id
-                break
-
-        unlocked, reason = backend.ensure_camera_unlocked(target_camera_id, "trocar stream profile")
-        if not unlocked:
-            message = (
-                "Troca de perfil bloqueada ate o fechamento oficial do round. "
-                f"Detalhe: {reason}"
-            )
-            if editor is not None:
-                editor.message = message
-            raise RuntimeError(message)
-
         profile = stream_store.select_profile(profile_id)
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        queued_profile = dict(profile)
+        queued_profile["_activation_auto_switch_round"] = True
         queue_stream_profile(
-            profile,
-            message=f"Stream pronta para trocar: {format_stream_profile_label(profile)}",
+            queued_profile,
+            message=(
+                "Stream pronta para trocar; round sera alternado automaticamente: "
+                f"{format_stream_profile_label(profile)}"
+            ),
         )
         return profile
 
@@ -3436,6 +3552,9 @@ def main():
             try:
                 current_pipeline_cfg = build_pipeline_config(cfg)
                 pipeline_runtime.start(current_pipeline_cfg)
+                if ensure_stream_rotation_profile_state(stream_rotation, str(profile.get("id") or ""), rng=random):
+                    cfg["stream_rotation"] = dict(stream_rotation)
+                    save_config(config_path, cfg)
                 last_track_results = None
                 last_visual_detections = []
                 last_operator_preview = None
@@ -3454,6 +3573,7 @@ def main():
                         cfg.get("camera_id", ""),
                         profile.get("id", ""),
                         allow_settling=bool(profile.get("_activation_allow_settling")),
+                        auto_switch_round=bool(profile.get("_activation_auto_switch_round")),
                     )
                 publish_rotation_status(f"Perfil ativo: {format_stream_profile_label(profile)}")
             except Exception as exc:

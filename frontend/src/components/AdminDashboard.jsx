@@ -219,9 +219,9 @@ export default function AdminDashboard() {
 
   const loadRounds = useCallback(async (preferredRoundId = '') => {
     const [nextCurrentRound, roundHistory, nextRecentRounds] = await Promise.all([
-      getCurrentRound(embedConfig.cameraId),
-      getRoundHistory(embedConfig.cameraId),
-      getRecentRounds(embedConfig.cameraId, 12),
+      getCurrentRound(activeCameraId),
+      getRoundHistory(activeCameraId),
+      getRecentRounds(activeCameraId, 12),
     ])
 
     setCurrentRound(nextCurrentRound)
@@ -233,7 +233,7 @@ export default function AdminDashboard() {
     const targetRoundId = preferredRoundId || selectedRoundId || nextCurrentRound?.roundId || ''
     const fallbackRound = mergedRecentRounds.find((item) => item.roundId === targetRoundId) || null
     await loadRoundDetail(targetRoundId, fallbackRound)
-  }, [embedConfig.cameraId, loadRoundDetail, selectedRoundId])
+  }, [activeCameraId, loadRoundDetail, selectedRoundId])
 
   useEffect(() => {
     let active = true
@@ -322,7 +322,7 @@ export default function AdminDashboard() {
     startRoundConnection({
       onCountUpdated: async (payload) => {
         if (!active) return
-        if (payload?.cameraId !== embedConfig.cameraId) return
+        if (payload?.cameraId !== activeCameraId) return
         setCurrentRound(payload)
         setRecentRounds((prev) => mergeRounds(payload, prev))
         if (!selectedRoundId || payload?.roundId === selectedRoundId) {
@@ -332,7 +332,7 @@ export default function AdminDashboard() {
       },
       onRoundUpdated: async (payload) => {
         if (!active) return
-        if (payload?.cameraId !== embedConfig.cameraId) return
+        if (payload?.cameraId !== activeCameraId) return
         setCurrentRound(payload)
         setRecentRounds((prev) => mergeRounds(payload, prev))
         if (!selectedRoundId || payload?.roundId === selectedRoundId) {
@@ -342,13 +342,13 @@ export default function AdminDashboard() {
       },
       onRoundSettled: async (payload) => {
         if (!active) return
-        if (payload?.cameraId !== embedConfig.cameraId) return
+        if (payload?.cameraId !== activeCameraId) return
         setCurrentRound(payload)
         await loadRounds(selectedRoundId || payload?.roundId)
       },
       onRoundVoided: async (payload) => {
         if (!active) return
-        if (payload?.cameraId !== embedConfig.cameraId) return
+        if (payload?.cameraId !== activeCameraId) return
         setCurrentRound(payload)
         await loadRounds(selectedRoundId || payload?.roundId)
       },
@@ -360,7 +360,7 @@ export default function AdminDashboard() {
       active = false
       stopRoundConnection().catch(console.error)
     }
-  }, [embedConfig.cameraId, loadRoundArtifacts, loadRounds, selectedRoundId])
+  }, [activeCameraId, loadRoundArtifacts, loadRounds, selectedRoundId])
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -451,7 +451,7 @@ export default function AdminDashboard() {
           <h1>Backoffice operacional do Traffic Counter</h1>
           <p>
             Investigue rounds oficiais, confira crossings persistidos e acompanhe a saude operacional da camera{' '}
-            <strong>{embedConfig.cameraId}</strong>.
+            <strong>{activeCameraId}</strong>.
           </p>
         </div>
 

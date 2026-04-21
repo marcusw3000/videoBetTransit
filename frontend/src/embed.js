@@ -195,6 +195,8 @@ export function emitEmbedEvent(eventName, payload, config = getEmbedConfig()) {
   const win = getWindowRef()
   if (!win) return
 
+  const eventCameraId = payload?.cameraId || config.cameraId
+
   const detail = {
     source: 'videobettransit',
     event: eventName,
@@ -202,7 +204,7 @@ export function emitEmbedEvent(eventName, payload, config = getEmbedConfig()) {
     config: {
       brand: config.brand,
       locale: config.locale,
-      cameraId: config.cameraId,
+      cameraId: eventCameraId,
       currency: config.currency,
       timezone: config.timezone,
       mode: config.mode,

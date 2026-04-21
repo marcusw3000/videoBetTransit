@@ -22,13 +22,15 @@ async function withRetry(fn, attempt = 0) {
   }
 }
 
-export async function getCurrentRound() {
-  const { data } = await withRetry(() => api.get('/rounds/current'))
+export async function getCurrentRound(cameraId) {
+  const params = cameraId ? { cameraId } : undefined
+  const { data } = await withRetry(() => api.get('/rounds/current', { params }))
   return normalizeRoundContract(data)
 }
 
-export async function getRoundHistory() {
-  const { data } = await withRetry(() => api.get('/rounds/history'))
+export async function getRoundHistory(cameraId) {
+  const params = cameraId ? { cameraId } : undefined
+  const { data } = await withRetry(() => api.get('/rounds/history', { params }))
   return Array.isArray(data) ? data.map(normalizeRoundContract).filter(Boolean) : []
 }
 

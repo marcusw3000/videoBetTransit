@@ -160,6 +160,7 @@ function MarketPage() {
   const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
   const activeStreamPath = workerHealth?.processedStreamPath || ''
   const activeCameraId = workerHealth?.cameraId || embedConfig.cameraId
+  const activeCameraLabel = workerHealth?.streamRotation?.activeProfileLabel || embedConfig.cameraLabel
   const webrtcSrc = useMemo(
     () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
     [activeCameraId, activeStreamPath],
@@ -192,23 +193,23 @@ function MarketPage() {
 
   const loadCurrentRound = useCallback(async () => {
     try {
-      const data = await getCurrentRound(embedConfig.cameraId)
+      const data = await getCurrentRound(activeCameraId)
       updateRound(data)
       setError('')
     } catch (err) {
       console.error(err)
       setError('Falha ao carregar o round atual.')
     }
-  }, [embedConfig.cameraId, updateRound])
+  }, [activeCameraId, updateRound])
 
   const loadHistory = useCallback(async () => {
     try {
-      const data = await getRoundHistory(embedConfig.cameraId)
+      const data = await getRoundHistory(activeCameraId)
       setHistory(data)
     } catch (err) {
       console.error(err)
     }
-  }, [embedConfig.cameraId])
+  }, [activeCameraId])
 
   const reconcileRecentBets = useCallback((roundData) => {
     setRecentBets((current) => current.map((bet) => reconcileBetWithRound(bet, roundData)))
@@ -234,8 +235,8 @@ function MarketPage() {
       displayName: round.displayName,
       betCloseAt: round.betCloseAt,
       endsAt: round.endsAt,
-      cameraId: embedConfig.cameraId,
-      cameraLabel: embedConfig.cameraLabel,
+      cameraId: activeCameraId,
+      cameraLabel: activeCameraLabel,
       currency: embedConfig.currency,
       locale: embedConfig.locale,
       timezone: embedConfig.timezone,
@@ -258,8 +259,8 @@ function MarketPage() {
       playerRef: embedConfig.playerRef || null,
       operatorRef: embedConfig.operatorRef || null,
       metadataJson: JSON.stringify({
-        cameraId: embedConfig.cameraId,
-        cameraLabel: embedConfig.cameraLabel,
+        cameraId: activeCameraId,
+        cameraLabel: activeCameraLabel,
         locale: embedConfig.locale,
       }),
     }
@@ -299,8 +300,8 @@ function MarketPage() {
     async function bootstrap() {
       try {
         const [currentRound, roundHistory] = await Promise.all([
-          getCurrentRound(embedConfig.cameraId),
-          getRoundHistory(embedConfig.cameraId),
+          getCurrentRound(activeCameraId),
+          getRoundHistory(activeCameraId),
         ])
         if (!active) return
         updateRound(currentRound)
@@ -322,17 +323,17 @@ function MarketPage() {
     startRoundConnection({
       onCountUpdated: (data) => {
         if (!active) return
-        if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        if (!isRoundForCamera(data, activeCameraId)) return
         updateRound(data)
       },
       onRoundUpdated: (data) => {
         if (!active) return
-        if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        if (!isRoundForCamera(data, activeCameraId)) return
         updateRound(data)
       },
       onRoundSettled: async (data) => {
         if (!active) return
-        if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        if (!isRoundForCamera(data, activeCameraId)) return
         reconcileRecentBets(data)
         setSelectedMarketId('')
         showToast('Round encerrado! Novo round iniciado.')
@@ -341,7 +342,7 @@ function MarketPage() {
       },
       onRoundVoided: async (data) => {
         if (!active) return
-        if (!isRoundForCamera(data, embedConfig.cameraId)) return
+        if (!isRoundForCamera(data, activeCameraId)) return
         reconcileRecentBets(data)
         setSelectedMarketId('')
         showToast('Round anulado. Carregando proximo round oficial.')
@@ -359,7 +360,7 @@ function MarketPage() {
       clearInterval(pollId)
       stopRoundConnection().catch(console.error)
     }
-  }, [embedConfig.cameraId, loadCurrentRound, loadHistory, reconcileRecentBets, updateRound])
+  }, [activeCameraId, loadCurrentRound, loadHistory, reconcileRecentBets, updateRound])
 
   useEffect(() => {
     let active = true
@@ -398,12 +399,12 @@ function MarketPage() {
 
   useEffect(() => {
     applyEmbedTheme(embedConfig)
-    document.title = `${embedConfig.brand} | ${embedConfig.cameraLabel}`
+    document.title = `${embedConfig.brand} | ${activeCameraLabel}`
     emitEmbedEvent('ready', {
       brand: embedConfig.brand,
       locale: embedConfig.locale,
-      cameraId: embedConfig.cameraId,
-      cameraLabel: embedConfig.cameraLabel,
+      cameraId: activeCameraId,
+      cameraLabel: activeCameraLabel,
       currency: embedConfig.currency,
       timezone: embedConfig.timezone,
       gameSessionId: embedConfig.gameSessionId,
@@ -411,7 +412,7 @@ function MarketPage() {
       defaultStake: embedConfig.defaultStake,
       mode: embedConfig.mode,
     }, embedConfig)
-  }, [embedConfig])
+  }, [activeCameraId, activeCameraLabel, embedConfig])
 
   useEffect(() => {
     const syncTimeLeft = () => {
@@ -443,9 +444,9 @@ function MarketPage() {
       voidReason: round.voidReason,
       finalCount: round.finalCount,
       markets: round.markets,
-      cameraId: embedConfig.cameraId,
+      cameraId: activeCameraId,
     }, embedConfig)
-  }, [displayCount, embedConfig, round])
+  }, [activeCameraId, displayCount, embedConfig, round])
 
   useEffect(() => {
     if (!hasValidStake) return
@@ -507,7 +508,7 @@ function MarketPage() {
                 webrtcSrc={webrtcSrc}
                 src={hlsSrc}
                 fallbackSrc={mjpegSrc}
-                title={embedConfig.cameraLabel || 'Transmissão ao vivo'}
+                title={activeCameraLabel || 'Transmissão ao vivo'}
                 countValue={displayCount}
               />
             </div>

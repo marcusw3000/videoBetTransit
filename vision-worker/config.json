@@ -59,7 +59,13 @@
   "stream_rotation": {
     "enabled": false,
     "mode": "round_boundary",
-    "strategy": "uniform_excluding_current"
+    "strategy": "uniform_excluding_current",
+    "min_rounds_per_stream": 8,
+    "max_rounds_per_stream": 15,
+    "current_stream_profile_id": "stream_1776744835421",
+    "rounds_on_current_stream": 0,
+    "target_rounds_for_current_stream": 0,
+    "last_counted_round_id": ""
   },
   "stream_profiles": [
     {

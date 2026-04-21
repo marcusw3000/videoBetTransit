@@ -79,7 +79,11 @@ public class InternalController : ControllerBase
 
         try
         {
-            await _roundService.NotifyStreamProfileActivatedAsync(dto.CameraId, dto.StreamProfileId, dto.AllowSettling);
+            await _roundService.NotifyStreamProfileActivatedAsync(
+                dto.CameraId,
+                dto.StreamProfileId,
+                dto.AllowSettling,
+                dto.AutoSwitchRound);
             return Ok(new { received = true });
         }
         catch (InvalidOperationException ex)

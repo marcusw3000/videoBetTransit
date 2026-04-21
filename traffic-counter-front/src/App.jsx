@@ -13,6 +13,20 @@ import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } f
 const MAX_HISTORY_POINTS = 30
 const RECENT_HISTORY_LIMIT = 6
 
+function isRoundForCamera(round, cameraId) {
+  const expected = String(cameraId || '').trim().toLowerCase()
+  if (!expected) return true
+
+  const directCameraId = String(round?.cameraId || '').trim().toLowerCase()
+  if (directCameraId) return directCameraId === expected
+
+  const cameraIds = Array.isArray(round?.cameraIds)
+    ? round.cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  return cameraIds.length === 0 || cameraIds.includes(expected)
+}
+
 function formatCurrency(value, locale, currency) {
   return new Intl.NumberFormat(locale, {
     style: 'currency',
@@ -69,6 +83,7 @@ function MarketPage() {
 
   const activeStreamPath = workerHealth?.processedStreamPath || ''
   const activeCameraId = workerHealth?.cameraId || embedConfig.cameraId
+  const activeCameraLabel = workerHealth?.streamRotation?.activeProfileLabel || embedConfig.cameraLabel
   const liveWebRtcUrl = activeStreamPath
     ? buildWebRtcUrlFromPath(activeStreamPath, activeCameraId)
     : WEBRTC_URL
@@ -80,7 +95,7 @@ function MarketPage() {
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
   const markets = round?.markets || []
-  const videoTitle = embedConfig.cameraLabel || 'Transmissao ao vivo'
+  const videoTitle = activeCameraLabel || 'Transmissao ao vivo'
   const numericStakeAmount = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStakeAmount) && numericStakeAmount > 0
 
@@ -92,7 +107,7 @@ function MarketPage() {
 
   async function loadCurrentRound() {
     try {
-      const data = await getCurrentRound()
+      const data = await getCurrentRound(activeCameraId)
       setRound(data)
       setError('')
     } catch (err) {
@@ -103,7 +118,7 @@ function MarketPage() {
 
   async function loadHistory() {
     try {
-      const data = await getRoundHistory()
+      const data = await getRoundHistory(activeCameraId)
       setHistory(data)
     } catch (err) {
       console.error(err)
@@ -132,8 +147,8 @@ function MarketPage() {
       displayName: round.displayName,
       betCloseAt: round.betCloseAt,
       endsAt: round.endsAt,
-      cameraId: embedConfig.cameraId,
-      cameraLabel: embedConfig.cameraLabel,
+      cameraId: activeCameraId,
+      cameraLabel: activeCameraLabel,
       currency: embedConfig.currency,
       locale: embedConfig.locale,
       timezone: embedConfig.timezone,
@@ -146,13 +161,15 @@ function MarketPage() {
 
     startRoundConnection({
       onCountUpdated: (data) => {
+        if (!isRoundForCamera(data, activeCameraId)) return
         setRound(data)
         setCountHistory((prev) => {
           const next = [...prev, data.currentCount]
           return next.length > MAX_HISTORY_POINTS ? next.slice(-MAX_HISTORY_POINTS) : next
         })
       },
-      onRoundSettled: async () => {
+      onRoundSettled: async (data) => {
+        if (!isRoundForCamera(data, activeCameraId)) return
         setSelectedMarketId('')
         showToast('Round encerrado! Novo round iniciado.')
         setCountHistory([])
@@ -167,7 +184,7 @@ function MarketPage() {
     return () => {
       stopRoundConnection().catch(console.error)
     }
-  }, [])
+  }, [activeCameraId])
 
   useEffect(() => {
     const handleConfigUpdate = () => {
@@ -203,20 +220,20 @@ function MarketPage() {
 
   useEffect(() => {
     applyEmbedTheme(embedConfig)
-    document.title = `${embedConfig.brand} | ${embedConfig.cameraLabel}`
+    document.title = `${embedConfig.brand} | ${activeCameraLabel}`
     setStakeAmount(String(embedConfig.defaultStake))
     emitEmbedEvent('ready', {
       brand: embedConfig.brand,
       locale: embedConfig.locale,
-      cameraId: embedConfig.cameraId,
-      cameraLabel: embedConfig.cameraLabel,
+      cameraId: activeCameraId,
+      cameraLabel: activeCameraLabel,
       currency: embedConfig.currency,
       timezone: embedConfig.timezone,
       stakeOptions: embedConfig.stakeOptions,
       defaultStake: embedConfig.defaultStake,
       mode: embedConfig.mode,
     }, embedConfig)
-  }, [embedConfig])
+  }, [activeCameraId, activeCameraLabel, embedConfig])
 
   useEffect(() => {
     setSelectedMarketId('')
@@ -250,9 +267,9 @@ function MarketPage() {
       voidReason: round.voidReason,
       finalCount: round.finalCount,
       markets: round.markets,
-      cameraId: embedConfig.cameraId,
+      cameraId: activeCameraId,
     }, embedConfig)
-  }, [embedConfig, round])
+  }, [activeCameraId, embedConfig, round])
 
   useEffect(() => {
     if (!hasValidStake) return
@@ -292,7 +309,7 @@ function MarketPage() {
           </div>
 
           <div className="hero-actions">
-            <div className="hero-camera-pill">{embedConfig.cameraLabel}</div>
+            <div className="hero-camera-pill">{activeCameraLabel}</div>
           </div>
         </header>
 

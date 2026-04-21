@@ -786,6 +786,41 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
+    public async Task NotifyStreamProfileActivated_with_auto_switch_voids_active_round_and_opens_next()
+    {
+        var activeRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_auto_profile");
+        Assert.NotNull(activeRound);
+
+        var response = await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_auto_profile",
+            StreamProfileId = "profile-auto",
+            AutoSwitchRound = true,
+        });
+
+        response.EnsureSuccessStatusCode();
+
+        var currentRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_auto_profile");
+        Assert.NotNull(currentRound);
+        Assert.NotEqual(activeRound!.RoundId, currentRound!.RoundId);
+        Assert.Equal("open", currentRound.Status);
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDbFactory = verifyScope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var verifyDb = await verifyDbFactory.CreateDbContextAsync();
+
+        var oldRound = await verifyDb.Rounds.SingleAsync(r => r.RoundId == Guid.Parse(activeRound.RoundId));
+        Assert.Equal(RoundStatus.Void, oldRound.Status);
+        Assert.Equal("Stream profile changed during active round", oldRound.VoidReason);
+        Assert.True(await verifyDb.RoundEvents.AnyAsync(e => e.RoundId == oldRound.RoundId && e.EventType == "stream_profile_changed"));
+
+        var state = await verifyDb.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_auto_profile");
+        Assert.Equal("profile-auto", state.ActiveStreamProfileId);
+        Assert.Equal(1, state.RoundsSinceProfileSwitch);
+        Assert.NotNull(state.LastProfileChangedAt);
+    }
+
+    [Fact]
     public async Task NotifyStreamProfileActivated_with_boundary_flag_updates_state_during_settling()
     {
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_boundary_profile");

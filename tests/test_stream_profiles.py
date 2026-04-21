@@ -4,19 +4,33 @@ from app import (
     DEFAULT_LINE,
     DEFAULT_ROI,
     StreamProfileStore,
+    choose_stream_rotation_target,
+    count_settled_round_for_stream_rotation,
     consume_pipeline_commands,
     create_mjpeg_app,
+    ensure_stream_rotation_profile_state,
     format_stream_profile_table_row,
     is_round_safe_for_stream_rotation,
     normalize_config,
     select_random_stream_profile,
     should_apply_pending_stream_rotation,
+    stream_rotation_target_reached,
 )
 
 
 class _FirstChoiceRandom:
     def choice(self, values):
         return values[0]
+
+
+class _FixedRandIntRandom:
+    def __init__(self, value):
+        self.value = value
+
+    def randint(self, start, end):
+        if not start <= self.value <= end:
+            raise AssertionError(f"{self.value} outside {start}..{end}")
+        return self.value
 
 
 def make_cfg():
@@ -167,6 +181,12 @@ class StreamProfileStoreTests(unittest.TestCase):
                 "enabled": False,
                 "mode": "round_boundary",
                 "strategy": "uniform_excluding_current",
+                "min_rounds_per_stream": 8,
+                "max_rounds_per_stream": 15,
+                "current_stream_profile_id": "",
+                "rounds_on_current_stream": 0,
+                "target_rounds_for_current_stream": 0,
+                "last_counted_round_id": "",
             },
             cfg["stream_rotation"],
         )
@@ -233,6 +253,83 @@ class StreamProfileStoreTests(unittest.TestCase):
 
 
 class StreamRotationTests(unittest.TestCase):
+    def test_rotation_target_is_drawn_inside_configured_range(self):
+        rotation = {
+            "min_rounds_per_stream": 8,
+            "max_rounds_per_stream": 15,
+        }
+
+        target = choose_stream_rotation_target(rotation, rng=_FixedRandIntRandom(12))
+
+        self.assertEqual(12, target)
+
+    def test_profile_state_resets_counter_when_stream_changes(self):
+        rotation = {
+            "current_stream_profile_id": "profile-a",
+            "rounds_on_current_stream": 7,
+            "target_rounds_for_current_stream": 9,
+            "last_counted_round_id": "round-a",
+            "min_rounds_per_stream": 8,
+            "max_rounds_per_stream": 15,
+        }
+
+        changed = ensure_stream_rotation_profile_state(
+            rotation,
+            "profile-b",
+            rng=_FixedRandIntRandom(10),
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual("profile-b", rotation["current_stream_profile_id"])
+        self.assertEqual(0, rotation["rounds_on_current_stream"])
+        self.assertEqual(10, rotation["target_rounds_for_current_stream"])
+        self.assertEqual("", rotation["last_counted_round_id"])
+
+    def test_profile_state_draws_target_when_missing_without_resetting_same_stream(self):
+        rotation = {
+            "current_stream_profile_id": "profile-a",
+            "rounds_on_current_stream": 3,
+            "target_rounds_for_current_stream": 0,
+            "last_counted_round_id": "round-a",
+            "min_rounds_per_stream": 8,
+            "max_rounds_per_stream": 15,
+        }
+
+        changed = ensure_stream_rotation_profile_state(
+            rotation,
+            "profile-a",
+            rng=_FixedRandIntRandom(11),
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(3, rotation["rounds_on_current_stream"])
+        self.assertEqual("round-a", rotation["last_counted_round_id"])
+        self.assertEqual(11, rotation["target_rounds_for_current_stream"])
+
+    def test_rotation_counts_only_settled_round_once(self):
+        rotation = {
+            "rounds_on_current_stream": 0,
+            "target_rounds_for_current_stream": 2,
+            "last_counted_round_id": "",
+        }
+
+        for status in ["open", "closing", "settling", "void"]:
+            self.assertFalse(count_settled_round_for_stream_rotation(rotation, {"roundId": f"round-{status}", "status": status}))
+
+        self.assertTrue(count_settled_round_for_stream_rotation(rotation, {"roundId": "round-1", "status": "settled"}))
+        self.assertFalse(count_settled_round_for_stream_rotation(rotation, {"roundId": "round-1", "status": "settled"}))
+        self.assertEqual(1, rotation["rounds_on_current_stream"])
+
+    def test_rotation_target_reached_when_counter_reaches_drawn_target(self):
+        rotation = {
+            "rounds_on_current_stream": 7,
+            "target_rounds_for_current_stream": 8,
+        }
+
+        self.assertFalse(stream_rotation_target_reached(rotation))
+        rotation["rounds_on_current_stream"] = 8
+        self.assertTrue(stream_rotation_target_reached(rotation))
+
     def test_random_selection_excludes_current_profile(self):
         cfg = make_cfg()
         store = StreamProfileStore(cfg)

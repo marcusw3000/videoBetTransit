@@ -282,19 +282,24 @@ public class RoundService
     public async Task NotifyStreamProfileActivatedAsync(
         string cameraId,
         string? streamProfileId,
-        bool allowSettling = false)
+        bool allowSettling = false,
+        bool autoSwitchRound = false)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var normalizedCameraId = NormalizeCameraId(cameraId);
-        var locked = allowSettling
-            ? await IsCameraLockedForBoundaryChangeAsync(normalizedCameraId, db)
-            : await IsCameraLockedForRoundAsync(normalizedCameraId, db);
-        if (locked)
-            throw new InvalidOperationException(CameraLockedMessage);
+        if (!autoSwitchRound)
+        {
+            var locked = allowSettling
+                ? await IsCameraLockedForBoundaryChangeAsync(normalizedCameraId, db)
+                : await IsCameraLockedForRoundAsync(normalizedCameraId, db);
+            if (locked)
+                throw new InvalidOperationException(CameraLockedMessage);
+        }
 
         var normalizedProfileId = NormalizeOptional(streamProfileId);
         var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+        var previousProfileId = state.ActiveStreamProfileId;
 
         if (string.Equals(state.ActiveStreamProfileId, normalizedProfileId, StringComparison.Ordinal))
             return;
@@ -304,7 +309,30 @@ public class RoundService
         state.LastProfileChangedAt = DateTime.UtcNow;
         state.UpdatedAt = DateTime.UtcNow;
 
-        await db.SaveChangesAsync();
+        var activeRound = autoSwitchRound
+            ? await db.Rounds
+                .Include(r => r.Markets)
+                .Where(r => r.CameraId == normalizedCameraId)
+                .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync()
+            : null;
+
+        if (activeRound is null)
+        {
+            await db.SaveChangesAsync();
+            return;
+        }
+
+        var reason =
+            $"previousProfileId={previousProfileId ?? "none"};newProfileId={normalizedProfileId ?? "none"}";
+        await VoidRoundAsync(
+            db,
+            activeRound,
+            "Stream profile changed during active round",
+            "stream_profile_activation",
+            "stream_profile_changed",
+            reason);
     }
 
     public async Task HandleCameraSourceActivationAsync(string cameraId, string sourceUrl)
