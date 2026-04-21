@@ -1,5 +1,5 @@
 {
-  "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
+  "stream_url": "https://stream.myt.mu/prod/LA_CHAUSSEE_STREET.stream_720p/playlist.m3u8",
   "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct",
   "stream_buffer_size": 1,
   "stream_open_timeout_ms": 5000,
@@ -18,7 +18,7 @@
   "backend_url": "http://127.0.0.1:8080/rounds/current?cameraId=cam_001",
   "api_key": "CHANGE_ME",
   "mjpeg_token": "CHANGE_ME",
-  "camera_id": "cam_001",
+  "camera_id": "cam_006",
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
@@ -30,16 +30,16 @@
   "operator_preview_max_width": 960,
   "operator_preview_fps_limit": 10,
   "line": {
-    "x1": 258,
-    "y1": 333,
-    "x2": 609,
-    "y2": 258
+    "x1": 215,
+    "y1": 413,
+    "x2": 641,
+    "y2": 467
   },
   "roi": {
-    "x": 214,
-    "y": 164,
-    "w": 479,
-    "h": 298
+    "x": 230,
+    "y": 313,
+    "w": 474,
+    "h": 241
   },
   "count_direction": "any",
   "show_window": true,
@@ -82,24 +82,24 @@
       "count_direction": "any"
     },
     {
-      "id": "stream_1776743677079",
-      "name": "teste4",
-      "stream_url": "https://s18.us-east-1.skyvdn.com/rtplive/60078/chunklist_w1423634665.m3u8",
-      "camera_id": "cam_005",
+      "id": "stream_1776744835421",
+      "name": "cam_006",
+      "stream_url": "https://stream.myt.mu/prod/LA_CHAUSSEE_STREET.stream_720p/playlist.m3u8",
+      "camera_id": "cam_006",
       "roi": {
-        "x": 428,
-        "y": 302,
-        "w": 623,
-        "h": 274
+        "x": 230,
+        "y": 313,
+        "w": 474,
+        "h": 241
       },
       "line": {
-        "x1": 804,
-        "y1": 484,
-        "x2": 579,
-        "y2": 405
+        "x1": 215,
+        "y1": 413,
+        "x2": 641,
+        "y2": 467
       },
       "count_direction": "any"
     }
   ],
-  "selected_stream_profile_id": "stream_default"
+  "selected_stream_profile_id": "stream_1776744835421"
 }
