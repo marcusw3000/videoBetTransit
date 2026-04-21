@@ -1,6 +1,8 @@
 import unittest
 
 from app import (
+    DEFAULT_LINE,
+    DEFAULT_ROI,
     StreamProfileStore,
     consume_pipeline_commands,
     create_mjpeg_app,
@@ -40,7 +42,7 @@ def make_cfg():
 
 
 class StreamProfileStoreTests(unittest.TestCase):
-    def test_apply_stream_url_creates_profile_with_camera_id_and_current_geometry(self):
+    def test_apply_stream_url_creates_profile_with_camera_id_and_default_geometry(self):
         cfg = make_cfg()
         store = StreamProfileStore(cfg)
 
@@ -53,9 +55,9 @@ class StreamProfileStoreTests(unittest.TestCase):
         self.assertTrue(created)
         self.assertEqual("cam_b", profile["camera_id"])
         self.assertEqual("rtsp://camera-b/live", profile["stream_url"])
-        self.assertEqual({"x": 1, "y": 2, "w": 100, "h": 80}, profile["roi"])
-        self.assertEqual({"x1": 10, "y1": 20, "x2": 90, "y2": 20}, profile["line"])
-        self.assertEqual("down", profile["count_direction"])
+        self.assertEqual(DEFAULT_ROI, profile["roi"])
+        self.assertEqual(DEFAULT_LINE, profile["line"])
+        self.assertEqual("any", profile["count_direction"])
         self.assertEqual("cam_b", cfg["camera_id"])
         self.assertEqual(profile["id"], cfg["selected_stream_profile_id"])
 
@@ -96,15 +98,21 @@ class StreamProfileStoreTests(unittest.TestCase):
             name="Camera B",
             camera_id="cam_b",
         )
-        store.save_selected_profile(count_direction="left")
+        store.save_selected_profile(
+            roi={"x": 5, "y": 6, "w": 70, "h": 40},
+            line={"x1": 100, "y1": 10, "x2": 100, "y2": 90},
+            count_direction="left",
+        )
 
         store.select_profile("profile-a")
         profile = store.select_profile(selected["id"])
 
         self.assertEqual("left", profile["count_direction"])
+        self.assertEqual({"x": 5, "y": 6, "w": 70, "h": 40}, profile["roi"])
+        self.assertEqual({"x1": 100, "y1": 10, "x2": 100, "y2": 90}, profile["line"])
         self.assertEqual("left", cfg["count_direction"])
 
-    def test_save_profile_entry_adds_inactive_next_stream_without_selecting_it(self):
+    def test_save_profile_entry_adds_inactive_next_stream_with_default_geometry(self):
         cfg = make_cfg()
         store = StreamProfileStore(cfg)
 
@@ -112,16 +120,44 @@ class StreamProfileStoreTests(unittest.TestCase):
             name="Camera B",
             camera_id="cam_b",
             stream_url="rtsp://camera-b/live",
-            roi={"x": 5, "y": 6, "w": 70, "h": 40},
-            line={"x1": 100, "y1": 10, "x2": 100, "y2": 90},
-            count_direction="right",
         )
 
         self.assertTrue(created)
         self.assertEqual("cam_b", profile["camera_id"])
-        self.assertEqual("right", profile["count_direction"])
+        self.assertEqual(DEFAULT_ROI, profile["roi"])
+        self.assertEqual(DEFAULT_LINE, profile["line"])
+        self.assertEqual("any", profile["count_direction"])
         self.assertEqual("profile-a", cfg["selected_stream_profile_id"])
         self.assertEqual("cam_a", cfg["camera_id"])
+
+    def test_save_profile_entry_preserves_existing_geometry_and_direction(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+        selected, _created = store.apply_stream_url(
+            "rtsp://camera-b/live",
+            name="Camera B",
+            camera_id="cam_b",
+        )
+        saved = store.save_selected_profile(
+            roi={"x": 5, "y": 6, "w": 70, "h": 40},
+            line={"x1": 100, "y1": 10, "x2": 100, "y2": 90},
+            count_direction="right",
+        )
+        store.select_profile("profile-a")
+
+        profile, created = store.save_profile_entry(
+            name="Camera B Renomeada",
+            camera_id="cam_b",
+            stream_url="rtsp://camera-b/live",
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(selected["id"], profile["id"])
+        self.assertEqual("Camera B Renomeada", profile["name"])
+        self.assertEqual(saved["roi"], profile["roi"])
+        self.assertEqual(saved["line"], profile["line"])
+        self.assertEqual("right", profile["count_direction"])
+        self.assertEqual("profile-a", cfg["selected_stream_profile_id"])
 
     def test_normalize_config_adds_disabled_stream_rotation_defaults(self):
         cfg = normalize_config(make_cfg())

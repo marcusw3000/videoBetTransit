@@ -1,5 +1,5 @@
 {
-  "stream_url": "https://s9.nysdot.skyvdn.com/rtplive/R11_302/playlist.m3u8",
+  "stream_url": "https://s20.us-east-1.skyvdn.com/rtplive/60066/chunklist_w1833024201.m3u8",
   "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct",
   "stream_buffer_size": 1,
   "stream_open_timeout_ms": 5000,
@@ -18,7 +18,7 @@
   "backend_url": "http://127.0.0.1:8080/rounds/current?cameraId=cam_001",
   "api_key": "CHANGE_ME",
   "mjpeg_token": "CHANGE_ME",
-  "camera_id": "cam_002",
+  "camera_id": "cam_004",
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
@@ -30,18 +30,18 @@
   "operator_preview_max_width": 960,
   "operator_preview_fps_limit": 10,
   "line": {
-    "x1": 226,
-    "y1": 110,
-    "x2": 298,
-    "y2": 127
+    "x1": 229,
+    "y1": 330,
+    "x2": 470,
+    "y2": 368
   },
   "roi": {
-    "x": 188,
-    "y": 77,
-    "w": 118,
-    "h": 97
+    "x": 170,
+    "y": 151,
+    "w": 334,
+    "h": 322
   },
-  "count_direction": "any",
+  "count_direction": "up",
   "show_window": true,
   "save_snapshots": true,
   "snapshot_queue_size": 64,
@@ -68,38 +68,38 @@
       "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
       "camera_id": "cam_001",
       "roi": {
-        "x": 188,
-        "y": 77,
-        "w": 118,
-        "h": 97
+        "x": 214,
+        "y": 164,
+        "w": 479,
+        "h": 298
       },
       "line": {
-        "x1": 226,
-        "y1": 110,
-        "x2": 298,
-        "y2": 127
+        "x1": 258,
+        "y1": 333,
+        "x2": 609,
+        "y2": 258
       },
       "count_direction": "any"
     },
     {
-      "id": "stream_1776737500326",
-      "name": "teste",
-      "stream_url": "https://s9.nysdot.skyvdn.com/rtplive/R11_302/playlist.m3u8",
-      "camera_id": "cam_002",
+      "id": "stream_1776738742960",
+      "name": "teste3",
+      "stream_url": "https://s20.us-east-1.skyvdn.com/rtplive/60066/chunklist_w1833024201.m3u8",
+      "camera_id": "cam_004",
       "roi": {
-        "x": 188,
-        "y": 77,
-        "w": 118,
-        "h": 97
+        "x": 170,
+        "y": 151,
+        "w": 334,
+        "h": 322
       },
       "line": {
-        "x1": 226,
-        "y1": 110,
-        "x2": 298,
-        "y2": 127
+        "x1": 229,
+        "y1": 330,
+        "x2": 470,
+        "y2": 368
       },
-      "count_direction": "any"
+      "count_direction": "up"
     }
   ],
-  "selected_stream_profile_id": "stream_1776737500326"
+  "selected_stream_profile_id": "stream_1776738742960"
 }

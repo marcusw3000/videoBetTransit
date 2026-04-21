@@ -1336,9 +1336,6 @@ class StreamProfileStore:
         name: str | None = None,
         camera_id: str | None = None,
         stream_url: str | None = None,
-        roi: dict | None = None,
-        line: dict | None = None,
-        count_direction: str | None = None,
     ) -> tuple[dict, bool]:
         target_url = str(stream_url or "").strip()
         target_camera_id = str(camera_id or "").strip()
@@ -1363,9 +1360,9 @@ class StreamProfileStore:
                 "name": "",
                 "stream_url": target_url,
                 "camera_id": target_camera_id,
-                "roi": dict(self.cfg.get("roi") or DEFAULT_ROI),
-                "line": dict(self.cfg.get("line") or DEFAULT_LINE),
-                "count_direction": self.cfg.get("count_direction", "any"),
+                "roi": dict(DEFAULT_ROI),
+                "line": dict(DEFAULT_LINE),
+                "count_direction": "any",
             }
             self.cfg.setdefault("stream_profiles", []).append(current)
 
@@ -1375,12 +1372,6 @@ class StreamProfileStore:
             current["name"] = guess_stream_profile_name(target_url, target_camera_id)
         current["stream_url"] = target_url
         current["camera_id"] = target_camera_id
-        if roi is not None:
-            current["roi"] = normalize_roi_config(roi, current.get("roi"))
-        if line is not None:
-            current["line"] = normalize_line_config(line, current.get("line"))
-        if count_direction is not None:
-            current["count_direction"] = normalize_count_direction(count_direction)
 
         return dict(current), created
 
@@ -1417,9 +1408,9 @@ class StreamProfileStore:
             ),
             "stream_url": target_url,
             "camera_id": target_camera_id,
-            "roi": normalize_roi_config(self.cfg.get("roi")),
-            "line": normalize_line_config(self.cfg.get("line")),
-            "count_direction": normalize_count_direction(self.cfg.get("count_direction", "any")),
+            "roi": dict(DEFAULT_ROI),
+            "line": dict(DEFAULT_LINE),
+            "count_direction": "any",
         }
         self.cfg.setdefault("stream_profiles", []).append(profile)
         return dict(sync_config_with_selected_profile(self.cfg, profile)), True
@@ -2897,14 +2888,6 @@ def main():
         if editor is None:
             return
 
-        unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "salvar calibracao")
-        if not unlocked:
-            editor.message = (
-                "Alteracao bloqueada: troque perfil/ROI/line apenas apos o fechamento oficial do round. "
-                f"Detalhe: {reason}"
-            )
-            return
-
         stream_store.save_selected_profile(
             roi=editor.roi,
             line=editor.line,
@@ -2917,21 +2900,7 @@ def main():
         if control_panel is not None:
             control_panel.set_active_stream_profile(stream_store.get_selected_profile())
 
-        saved_backend = backend.save_camera_config(
-            camera_id=cfg["camera_id"],
-            roi=roi,
-            line={
-                "x1": line["x1"],
-                "y1": line["y1"],
-                "x2": line["x2"],
-                "y2": line["y2"],
-            },
-            count_direction=count_direction,
-        )
-        if saved_backend:
-            editor.message = f"Saved locally and synced to backend ({cfg['camera_id']})"
-        else:
-            editor.message = "Saved locally, but backend sync failed"
+        editor.message = f"Calibracao salva para {cfg['camera_id']} (round ativo permitido)"
 
     def set_count_direction(direction: str):
         nonlocal count_direction
@@ -3020,19 +2989,16 @@ def main():
                     stream_name = stream_name or str(existing_profile.get("name") or "").strip()
                     break
 
+        current_camera_id = str(cfg.get("camera_id") or "").strip()
         profile, _created = stream_store.save_profile_entry(
             name=stream_name,
             camera_id=target_camera_id or cfg.get("camera_id", ""),
             stream_url=target_url or cfg.get("stream_url", ""),
-            roi=editor.roi if editor is not None else roi,
-            line=editor.line if editor is not None else line,
-            count_direction=count_direction,
         )
         profile = stream_store.select_profile(profile["id"])
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
 
-        current_camera_id = str(cfg.get("camera_id") or "").strip()
         target_camera_id = str(profile.get("camera_id") or "").strip()
         reason = (
             "Vision worker forced camera switch "
@@ -3075,9 +3041,6 @@ def main():
                 name=stream_name,
                 camera_id=target_camera_id,
                 stream_url=target_url,
-                roi=editor.roi if editor is not None else roi,
-                line=editor.line if editor is not None else line,
-                count_direction=count_direction,
             )
             save_config(config_path, cfg)
             sync_stream_profiles_to_supabase(cfg, supabase_sync)
@@ -3123,9 +3086,6 @@ def main():
                 name=stream_name,
                 camera_id=target_camera_id,
                 stream_url=target_url,
-                roi=editor.roi if editor is not None else roi,
-                line=editor.line if editor is not None else line,
-                count_direction=count_direction,
             )
             save_config(config_path, cfg)
             sync_stream_profiles_to_supabase(cfg, supabase_sync)
