@@ -54,6 +54,7 @@ class BackendClient:
         self.round_count_url = f"{self.base_url}/internal/round-count-event"
         self.current_round_url = f"{self.base_url}/rounds/current"
         self.profile_activation_url = f"{self.base_url}/internal/rounds/profile-activated"
+        self.void_round_url_template = f"{self.base_url}/internal/rounds/{{round_id}}/void"
         self.round_lock_url_template = f"{self.base_url}/internal/cameras/{{camera_id}}/round-lock"
         self.camera_config_validation_url = f"{self.base_url}/internal/camera-config/validate-change"
         self.health_report_url = f"{self.base_url}/internal/health-report"
@@ -133,6 +134,43 @@ class BackendClient:
             self._mark_error(f"unexpected fetch_current_round error: {exc}")
             logger.warning("[BACKEND] Erro ao buscar round atual: %s", exc)
             return None
+
+    def void_current_round(self, camera_id: str, reason: str) -> bool:
+        round_payload = self.fetch_current_round(camera_id)
+        if not isinstance(round_payload, dict):
+            return False
+
+        round_id = str(round_payload.get("roundId") or "").strip()
+        round_status = str(round_payload.get("status") or "").strip().lower()
+        if not round_id or round_status in {"settled", "void"}:
+            return False
+
+        try:
+            resp = self._session.post(
+                self.void_round_url_template.format(round_id=quote(round_id)),
+                json={"reason": str(reason or "Vision worker forced camera switch").strip()},
+                headers=self._default_headers,
+                timeout=5,
+            )
+            if resp.status_code >= 400:
+                self._mark_error(f"void round HTTP {resp.status_code}: {resp.text[:200]}")
+                logger.warning("[BACKEND] Falha ao anular round (%s): %s", resp.status_code, resp.text[:200])
+                return False
+
+            self._mark_success()
+            return True
+        except requests.ConnectionError:
+            self._mark_error("connection error voiding round")
+            logger.error("[BACKEND] Sem conexao ao anular round")
+            return False
+        except requests.Timeout:
+            self._mark_error("timeout voiding round")
+            logger.error("[BACKEND] Timeout ao anular round")
+            return False
+        except Exception as exc:
+            self._mark_error(f"unexpected void round error: {exc}")
+            logger.error("[BACKEND] Erro ao anular round: %s", exc)
+            return False
 
     def fetch_camera_config(self, _camera_id: str) -> dict | None:
         return None

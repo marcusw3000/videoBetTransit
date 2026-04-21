@@ -3,7 +3,9 @@ import unittest
 from app import (
     bbox_area,
     crossed_horizontal_segment,
+    crossed_vertical_segment,
     inside_roi,
+    normalize_count_direction,
     resolve_round_sync,
     should_count_track,
 )
@@ -116,6 +118,98 @@ class CrossedHorizontalSegmentTests(unittest.TestCase):
         )
 
 
+class CrossedVerticalSegmentTests(unittest.TestCase):
+    def test_counts_rightward_crossing_inside_segment(self):
+        self.assertTrue(
+            crossed_vertical_segment(
+                prev_x=90,
+                curr_x=110,
+                line_x=100,
+                cy=50,
+                y1=10,
+                y2=90,
+                direction="right",
+            )
+        )
+
+    def test_counts_leftward_crossing_inside_segment(self):
+        self.assertTrue(
+            crossed_vertical_segment(
+                prev_x=110,
+                curr_x=90,
+                line_x=100,
+                cy=50,
+                y1=10,
+                y2=90,
+                direction="left",
+            )
+        )
+
+    def test_any_direction_accepts_both_vertical_crossings(self):
+        self.assertTrue(
+            crossed_vertical_segment(
+                prev_x=110,
+                curr_x=90,
+                line_x=100,
+                cy=50,
+                y1=10,
+                y2=90,
+                direction="any",
+            )
+        )
+        self.assertTrue(
+            crossed_vertical_segment(
+                prev_x=90,
+                curr_x=110,
+                line_x=100,
+                cy=50,
+                y1=10,
+                y2=90,
+                direction="any",
+            )
+        )
+
+    def test_does_not_count_without_vertical_crossing(self):
+        self.assertFalse(
+            crossed_vertical_segment(
+                prev_x=90,
+                curr_x=95,
+                line_x=100,
+                cy=50,
+                y1=10,
+                y2=90,
+                direction="right",
+            )
+        )
+
+    def test_does_not_count_outside_vertical_segment(self):
+        self.assertFalse(
+            crossed_vertical_segment(
+                prev_x=90,
+                curr_x=110,
+                line_x=100,
+                cy=5,
+                y1=10,
+                y2=90,
+                direction="right",
+            )
+        )
+
+
+class CountDirectionNormalizationTests(unittest.TestCase):
+    def test_accepts_new_horizontal_directions(self):
+        self.assertEqual("left", normalize_count_direction("left"))
+        self.assertEqual("right", normalize_count_direction("right"))
+
+    def test_maps_legacy_vertical_names(self):
+        self.assertEqual("up", normalize_count_direction("down_to_up"))
+        self.assertEqual("down", normalize_count_direction("up_to_down"))
+
+    def test_maps_legacy_horizontal_names(self):
+        self.assertEqual("right", normalize_count_direction("left_to_right"))
+        self.assertEqual("left", normalize_count_direction("right_to_left"))
+
+
 class BboxAreaTests(unittest.TestCase):
     def test_returns_positive_area(self):
         self.assertEqual(bbox_area(10, 10, 25, 30), 300)
@@ -132,9 +226,8 @@ class ShouldCountTrackTests(unittest.TestCase):
     def test_requires_previous_position(self):
         self.assertFalse(
             should_count_track(
-                prev_y=None,
-                curr_y=110,
-                cx=50,
+                prev_position=None,
+                curr_position=(50, 110),
                 line=self.line,
                 direction="down",
                 hits=4,
@@ -146,9 +239,8 @@ class ShouldCountTrackTests(unittest.TestCase):
     def test_requires_minimum_hits(self):
         self.assertFalse(
             should_count_track(
-                prev_y=90,
-                curr_y=110,
-                cx=50,
+                prev_position=(50, 90),
+                curr_position=(50, 110),
                 line=self.line,
                 direction="down",
                 hits=3,
@@ -160,9 +252,8 @@ class ShouldCountTrackTests(unittest.TestCase):
     def test_prevents_double_counting(self):
         self.assertFalse(
             should_count_track(
-                prev_y=90,
-                curr_y=110,
-                cx=50,
+                prev_position=(50, 90),
+                curr_position=(50, 110),
                 line=self.line,
                 direction="down",
                 hits=4,
@@ -174,9 +265,8 @@ class ShouldCountTrackTests(unittest.TestCase):
     def test_counts_valid_crossing(self):
         self.assertTrue(
             should_count_track(
-                prev_y=90,
-                curr_y=110,
-                cx=50,
+                prev_position=(50, 90),
+                curr_position=(50, 110),
                 line=self.line,
                 direction="down",
                 hits=4,
@@ -188,11 +278,25 @@ class ShouldCountTrackTests(unittest.TestCase):
     def test_respects_direction(self):
         self.assertFalse(
             should_count_track(
-                prev_y=90,
-                curr_y=110,
-                cx=50,
+                prev_position=(50, 90),
+                curr_position=(50, 110),
                 line=self.line,
                 direction="up",
+                hits=4,
+                min_hits_to_count=4,
+                already_counted=False,
+            )
+        )
+
+    def test_counts_vertical_line_crossing(self):
+        vertical_line = {"x1": 100, "y1": 10, "x2": 100, "y2": 90}
+
+        self.assertTrue(
+            should_count_track(
+                prev_position=(90, 50),
+                curr_position=(110, 50),
+                line=vertical_line,
+                direction="right",
                 hits=4,
                 min_hits_to_count=4,
                 already_counted=False,

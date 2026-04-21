@@ -702,7 +702,7 @@ def create_mjpeg_app() -> Flask:
             source_url=source_url,
             raw_stream_path=str(data.get("rawStreamPath") or "").strip(),
             processed_stream_path=processed_stream_path,
-            direction=str(data.get("direction") or "any").strip(),
+            direction=normalize_count_direction(data.get("direction")),
             count_line=data.get("countLine") if isinstance(data.get("countLine"), dict) else None,
         ))
 
@@ -908,7 +908,14 @@ def normalize_line_config(value, fallback: dict | None = None) -> dict:
 
 def normalize_count_direction(value) -> str:
     direction = str(value or "any").strip().lower()
-    if direction in {"up", "down", "any", "down_to_up", "up_to_down"}:
+    aliases = {
+        "down_to_up": "up",
+        "up_to_down": "down",
+        "left_to_right": "right",
+        "right_to_left": "left",
+    }
+    direction = aliases.get(direction, direction)
+    if direction in {"up", "down", "left", "right", "any"}:
         return direction
     return "any"
 
@@ -1022,6 +1029,16 @@ def format_stream_profile_label(profile: dict) -> str:
     if hint and hint != name:
         return f"{name} | {hint}"
     return name
+
+
+def format_stream_profile_table_row(profile: dict, *, active: bool = False) -> tuple[str, str, str, str]:
+    name = str(profile.get("name") or "").strip() or guess_stream_profile_name(
+        profile.get("stream_url", ""),
+        profile.get("camera_id", ""),
+    )
+    camera_id = str(profile.get("camera_id") or "").strip()
+    stream_url = shorten_text(str(profile.get("stream_url") or "").strip(), max_len=72)
+    return ("*" if active else "", name, camera_id, stream_url)
 
 
 def make_stream_profile_id(existing_ids: set[str]) -> str:
@@ -1241,6 +1258,25 @@ class StreamProfileStore:
                 return dict(sync_config_with_selected_profile(self.cfg, profile))
         raise ValueError("Stream selecionada nao encontrada.")
 
+    def delete_profile(self, profile_id: str) -> dict:
+        target_id = str(profile_id or "").strip()
+        profiles = self.cfg.get("stream_profiles", [])
+        if len(profiles) <= 1:
+            raise ValueError("A esteira precisa manter pelo menos uma stream salva.")
+
+        selected_id = str(self.cfg.get("selected_stream_profile_id") or "").strip()
+        if target_id == selected_id:
+            raise ValueError("Carregue outra stream antes de apagar esta.")
+
+        for index, profile in enumerate(profiles):
+            if str(profile.get("id") or "") == target_id:
+                deleted = dict(profile)
+                del profiles[index]
+                self.cfg["stream_profiles"] = profiles
+                return deleted
+
+        raise ValueError("Stream selecionada nao encontrada.")
+
     def save_selected_profile(
         self,
         *,
@@ -1293,6 +1329,60 @@ class StreamProfileStore:
             current["count_direction"] = normalize_count_direction(count_direction)
 
         return dict(sync_config_with_selected_profile(self.cfg, current))
+
+    def save_profile_entry(
+        self,
+        *,
+        name: str | None = None,
+        camera_id: str | None = None,
+        stream_url: str | None = None,
+        roi: dict | None = None,
+        line: dict | None = None,
+        count_direction: str | None = None,
+    ) -> tuple[dict, bool]:
+        target_url = str(stream_url or "").strip()
+        target_camera_id = str(camera_id or "").strip()
+        if not target_url:
+            raise ValueError("Informe uma URL de stream antes de salvar.")
+        if not target_camera_id:
+            raise ValueError("Informe um camera_id antes de salvar.")
+
+        current = None
+        for profile in self.cfg.get("stream_profiles", []):
+            if (
+                str(profile.get("stream_url") or "").strip() == target_url
+                and str(profile.get("camera_id") or "").strip() == target_camera_id
+            ):
+                current = profile
+                break
+
+        created = current is None
+        if current is None:
+            current = {
+                "id": make_stream_profile_id({str(profile.get("id") or "") for profile in self.cfg.get("stream_profiles", [])}),
+                "name": "",
+                "stream_url": target_url,
+                "camera_id": target_camera_id,
+                "roi": dict(self.cfg.get("roi") or DEFAULT_ROI),
+                "line": dict(self.cfg.get("line") or DEFAULT_LINE),
+                "count_direction": self.cfg.get("count_direction", "any"),
+            }
+            self.cfg.setdefault("stream_profiles", []).append(current)
+
+        if name is not None:
+            current["name"] = str(name).strip()
+        if not current.get("name"):
+            current["name"] = guess_stream_profile_name(target_url, target_camera_id)
+        current["stream_url"] = target_url
+        current["camera_id"] = target_camera_id
+        if roi is not None:
+            current["roi"] = normalize_roi_config(roi, current.get("roi"))
+        if line is not None:
+            current["line"] = normalize_line_config(line, current.get("line"))
+        if count_direction is not None:
+            current["count_direction"] = normalize_count_direction(count_direction)
+
+        return dict(current), created
 
     def apply_stream_url(
         self,
@@ -1517,6 +1607,12 @@ def crossed_horizontal_segment(
     if not inside_segment:
         return False
 
+    raw_direction = str(direction or "").strip().lower()
+    if raw_direction not in {"up", "down", "any", "down_to_up", "up_to_down"}:
+        return False
+
+    direction = normalize_count_direction(direction)
+
     if direction == "down":
         return prev_y < line_y <= curr_y
 
@@ -1529,28 +1625,86 @@ def crossed_horizontal_segment(
     return False
 
 
+def crossed_vertical_segment(
+    prev_x: int,
+    curr_x: int,
+    line_x: int,
+    cy: int,
+    y1: int,
+    y2: int,
+    direction: str,
+) -> bool:
+    inside_segment = min(y1, y2) <= cy <= max(y1, y2)
+    if not inside_segment:
+        return False
+
+    raw_direction = str(direction or "").strip().lower()
+    if raw_direction not in {"left", "right", "any", "left_to_right", "right_to_left"}:
+        return False
+
+    direction = normalize_count_direction(direction)
+
+    if direction == "right":
+        return prev_x < line_x <= curr_x
+
+    if direction == "left":
+        return prev_x > line_x >= curr_x
+
+    if direction == "any":
+        return (prev_x < line_x <= curr_x) or (prev_x > line_x >= curr_x)
+
+    return False
+
+
+def count_line_is_horizontal(line: dict) -> bool:
+    return abs(int(line["x2"]) - int(line["x1"])) >= abs(int(line["y2"]) - int(line["y1"]))
+
+
 def should_count_track(
-    prev_y: int | None,
-    curr_y: int,
-    cx: int,
+    prev_position: tuple[int, int] | None,
+    curr_position: tuple[int, int],
     line: dict,
     direction: str,
     hits: int,
     min_hits_to_count: int,
     already_counted: bool,
 ) -> bool:
-    if prev_y is None or already_counted or hits < min_hits_to_count:
+    if prev_position is None or already_counted or hits < min_hits_to_count:
         return False
 
-    return crossed_horizontal_segment(
-        prev_y=prev_y,
-        curr_y=curr_y,
-        line_y=line["y1"],
-        cx=cx,
-        x1=line["x1"],
-        x2=line["x2"],
+    prev_x, prev_y = prev_position
+    curr_x, curr_y = curr_position
+
+    if count_line_is_horizontal(line):
+        return crossed_horizontal_segment(
+            prev_y=prev_y,
+            curr_y=curr_y,
+            line_y=line["y1"],
+            cx=curr_x,
+            x1=line["x1"],
+            x2=line["x2"],
+            direction=direction,
+        )
+
+    return crossed_vertical_segment(
+        prev_x=prev_x,
+        curr_x=curr_x,
+        line_x=line["x1"],
+        cy=curr_y,
+        y1=line["y1"],
+        y2=line["y2"],
         direction=direction,
     )
+
+
+def count_direction_display_name(direction: str) -> str:
+    return {
+        "any": "any",
+        "up": "up",
+        "down": "down",
+        "left": "left",
+        "right": "right",
+    }.get(normalize_count_direction(direction), "any")
 
 
 def anchor_point(x1: int, y1: int, x2: int, y2: int) -> tuple[int, int]:
@@ -1952,6 +2106,9 @@ class EditorControlPanel:
         on_select_stream,
         on_open_stream,
         on_save_stream_profile,
+        on_delete_stream_profile,
+        on_force_stream_switch,
+        on_set_count_direction,
         on_toggle_stream_rotation,
         on_queue_random_stream,
         stream_rotation_enabled: bool = False,
@@ -1963,6 +2120,9 @@ class EditorControlPanel:
         self.on_select_stream = on_select_stream
         self.on_open_stream = on_open_stream
         self.on_save_stream_profile = on_save_stream_profile
+        self.on_delete_stream_profile = on_delete_stream_profile
+        self.on_force_stream_switch = on_force_stream_switch
+        self.on_set_count_direction = on_set_count_direction
         self.on_toggle_stream_rotation = on_toggle_stream_rotation
         self.on_queue_random_stream = on_queue_random_stream
         self.should_close = False
@@ -1983,6 +2143,7 @@ class EditorControlPanel:
         self._stream_name_var = tk.StringVar()
         self._stream_camera_id_var = tk.StringVar()
         self._stream_url_var = tk.StringVar()
+        self._count_direction_var = tk.StringVar(value="any")
         self._stream_rotation_enabled_var = tk.BooleanVar(value=bool(stream_rotation_enabled))
         self._stream_selector = ttk.Combobox(frame, state="readonly", width=48)
         self._stream_selector.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
@@ -1990,27 +2151,51 @@ class EditorControlPanel:
         ttk.Button(frame, text="Carregar", command=self.load_selected_stream).grid(
             row=1, column=1, sticky="ew", pady=(0, 6)
         )
-        ttk.Label(frame, text="Nome da stream").grid(row=2, column=0, columnspan=2, sticky="w")
+        self._stream_table = ttk.Treeview(
+            frame,
+            columns=("active", "name", "camera_id", "url"),
+            show="headings",
+            height=5,
+            selectmode="browse",
+        )
+        self._stream_table.heading("active", text="")
+        self._stream_table.heading("name", text="Stream")
+        self._stream_table.heading("camera_id", text="Camera ID")
+        self._stream_table.heading("url", text="URL")
+        self._stream_table.column("active", width=24, minwidth=24, stretch=False, anchor="center")
+        self._stream_table.column("name", width=130, minwidth=90, stretch=False)
+        self._stream_table.column("camera_id", width=92, minwidth=80, stretch=False)
+        self._stream_table.column("url", width=190, minwidth=120, stretch=True)
+        self._stream_table.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self._stream_table.bind("<<TreeviewSelect>>", self._handle_profile_table_select)
+
+        ttk.Label(frame, text="Apelido da stream").grid(row=3, column=0, columnspan=2, sticky="w")
         ttk.Entry(frame, textvariable=self._stream_name_var).grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=4, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
-        ttk.Label(frame, text="Camera ID").grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text="Camera ID").grid(row=5, column=0, columnspan=2, sticky="w")
         ttk.Entry(frame, textvariable=self._stream_camera_id_var).grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=6, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
-        ttk.Label(frame, text="URL da stream").grid(row=6, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text="URL da stream").grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Entry(frame, textvariable=self._stream_url_var).grid(
-            row=7, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=8, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Abrir URL", command=self.open_stream_url).grid(
-            row=8, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
+            row=9, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Salvar na Esteira", command=self.save_stream_profile).grid(
-            row=8, column=1, sticky="ew", pady=(0, 10)
+            row=9, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(frame, text="Apagar da Esteira", command=self.delete_stream_profile).grid(
+            row=10, column=0, columnspan=2, sticky="ew", pady=(0, 10)
+        )
+        ttk.Button(frame, text="Forcar Troca", command=self.force_stream_switch).grid(
+            row=11, column=0, columnspan=2, sticky="ew", pady=(0, 10)
         )
 
         ttk.Label(frame, text="Rotacao Randômica", font=("Segoe UI", 11, "bold")).grid(
-            row=9, column=0, columnspan=2, sticky="w", pady=(0, 8)
+            row=12, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
         ttk.Checkbutton(
             frame,
@@ -2018,46 +2203,57 @@ class EditorControlPanel:
             variable=self._stream_rotation_enabled_var,
             command=self.toggle_stream_rotation,
         ).grid(
-            row=10, column=0, sticky="w", padx=(0, 6), pady=(0, 10)
+            row=13, column=0, sticky="w", padx=(0, 6), pady=(0, 10)
         )
         ttk.Button(frame, text="Sortear Proxima", command=self.queue_random_stream).grid(
-            row=10, column=1, sticky="ew", pady=(0, 10)
+            row=13, column=1, sticky="ew", pady=(0, 10)
         )
 
         ttk.Label(frame, text="Ajuste de ROI e Linha", font=("Segoe UI", 11, "bold")).grid(
-            row=11, column=0, columnspan=2, sticky="w", pady=(0, 8)
+            row=14, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
+        ttk.Label(frame, text="Direcao de contagem").grid(row=15, column=0, columnspan=2, sticky="w")
+        self._count_direction_selector = ttk.Combobox(
+            frame,
+            state="readonly",
+            values=("any", "up", "down", "left", "right"),
+            textvariable=self._count_direction_var,
+        )
+        self._count_direction_selector.grid(
+            row=16, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        self._count_direction_selector.bind("<<ComboboxSelected>>", self._handle_direction_change)
 
         ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
-            row=12, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=17, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
-            row=12, column=1, sticky="ew", pady=(0, 6)
+            row=17, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Salvar", command=self.save).grid(
-            row=13, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=18, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
-            row=13, column=1, sticky="ew", pady=(0, 6)
+            row=18, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
-            row=14, column=0, columnspan=2, sticky="ew"
+            row=19, column=0, columnspan=2, sticky="ew"
         )
         ttk.Button(frame, text="Fechar", command=self.request_close).grid(
-            row=15, column=0, columnspan=2, sticky="ew", pady=(6, 0)
+            row=20, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
 
         self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
         self._message_var = tk.StringVar(value=self.editor.message)
         ttk.Label(frame, textvariable=self._mode_var).grid(
-            row=16, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=21, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         ttk.Label(frame, textvariable=self._message_var, wraplength=360).grid(
-            row=17, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=22, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
         ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, T, Q").grid(
-            row=18, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=23, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         self._refresh_stream_profiles()
         self.set_active_stream_profile(self.stream_store.get_selected_profile())
@@ -2072,7 +2268,9 @@ class EditorControlPanel:
             self.should_close = True
 
     def save(self):
+        self._commit_count_direction()
         self.on_save()
+        self.set_active_stream_profile(self.stream_store.get_selected_profile())
 
     def cancel(self):
         self.editor.cancel()
@@ -2081,13 +2279,13 @@ class EditorControlPanel:
         self.on_reset_stream()
 
     def load_selected_stream(self):
-        index = self._stream_selector.current()
-        if index < 0 or index >= len(self._stream_profile_ids):
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
             self.editor.message = "Selecione uma stream salva na esteira."
             return
 
         try:
-            profile = self.on_select_stream(self._stream_profile_ids[index])
+            profile = self.on_select_stream(profile_id)
         except (ValueError, RuntimeError) as exc:
             self.editor.message = str(exc)
             return
@@ -2109,7 +2307,38 @@ class EditorControlPanel:
 
     def save_stream_profile(self):
         try:
+            self._commit_count_direction()
             profile = self.on_save_stream_profile(
+                self._stream_name_var.get(),
+                self._stream_url_var.get(),
+                self._stream_camera_id_var.get(),
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+
+        self.set_active_stream_profile(profile)
+
+    def delete_stream_profile(self):
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
+            self.editor.message = "Selecione uma stream salva na esteira."
+            return
+
+        try:
+            deleted = self.on_delete_stream_profile(profile_id)
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+
+        self._refresh_stream_profiles()
+        self.editor.message = f"Stream apagada da esteira: {format_stream_profile_label(deleted)}"
+
+    def force_stream_switch(self):
+        try:
+            self._commit_count_direction()
+            profile = self.on_force_stream_switch(
+                self._get_selected_stream_profile_id(),
                 self._stream_name_var.get(),
                 self._stream_url_var.get(),
                 self._stream_camera_id_var.get(),
@@ -2126,6 +2355,9 @@ class EditorControlPanel:
         except (ValueError, RuntimeError) as exc:
             self.editor.message = str(exc)
 
+    def refresh_stream_profiles(self, selected_profile_id: str | None = None):
+        self._refresh_stream_profiles(selected_profile_id=selected_profile_id)
+
     def queue_random_stream(self):
         try:
             profile = self.on_queue_random_stream()
@@ -2141,17 +2373,35 @@ class EditorControlPanel:
         self._stream_name_var.set(str(profile.get("name") or ""))
         self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
         self._stream_url_var.set(str(profile.get("stream_url") or ""))
+        self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
 
     def _refresh_stream_profiles(self, selected_profile_id: str | None = None):
         profiles = self.stream_store.list_profiles()
         self._stream_profile_ids = [str(profile.get("id") or "") for profile in profiles]
         self._stream_selector["values"] = [format_stream_profile_label(profile) for profile in profiles]
 
-        target_id = selected_profile_id or str(self.stream_store.get_selected_profile().get("id") or "")
+        active_id = str(self.stream_store.get_selected_profile().get("id") or "")
+        target_id = selected_profile_id or active_id
+        for item_id in self._stream_table.get_children():
+            self._stream_table.delete(item_id)
+        for profile in profiles:
+            profile_id = str(profile.get("id") or "")
+            self._stream_table.insert(
+                "",
+                "end",
+                iid=profile_id,
+                values=format_stream_profile_table_row(profile, active=profile_id == active_id),
+            )
+
         if target_id in self._stream_profile_ids:
             self._stream_selector.current(self._stream_profile_ids.index(target_id))
+            self._stream_table.selection_set(target_id)
+            self._stream_table.focus(target_id)
+            self._stream_table.see(target_id)
         elif self._stream_profile_ids:
             self._stream_selector.current(0)
+            self._stream_table.selection_set(self._stream_profile_ids[0])
+            self._stream_table.focus(self._stream_profile_ids[0])
 
     def _handle_profile_preview(self, _event=None):
         index = self._stream_selector.current()
@@ -2159,12 +2409,47 @@ class EditorControlPanel:
             return
 
         profile_id = self._stream_profile_ids[index]
+        if profile_id in self._stream_table.get_children():
+            self._stream_table.selection_set(profile_id)
+            self._stream_table.focus(profile_id)
         for profile in self.stream_store.list_profiles():
             if str(profile.get("id") or "") == profile_id:
                 self._stream_name_var.set(str(profile.get("name") or ""))
                 self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
                 self._stream_url_var.set(str(profile.get("stream_url") or ""))
+                self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
                 break
+
+    def _handle_profile_table_select(self, _event=None):
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
+            return
+        if profile_id in self._stream_profile_ids:
+            self._stream_selector.current(self._stream_profile_ids.index(profile_id))
+        for profile in self.stream_store.list_profiles():
+            if str(profile.get("id") or "") == profile_id:
+                self._stream_name_var.set(str(profile.get("name") or ""))
+                self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
+                self._stream_url_var.set(str(profile.get("stream_url") or ""))
+                self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
+                break
+
+    def _handle_direction_change(self, _event=None):
+        self._commit_count_direction()
+
+    def _commit_count_direction(self):
+        direction = normalize_count_direction(self._count_direction_var.get())
+        self._count_direction_var.set(count_direction_display_name(direction))
+        self.on_set_count_direction(direction)
+
+    def _get_selected_stream_profile_id(self) -> str:
+        table_selection = self._stream_table.selection()
+        if table_selection:
+            return str(table_selection[0])
+        index = self._stream_selector.current()
+        if 0 <= index < len(self._stream_profile_ids):
+            return self._stream_profile_ids[index]
+        return ""
 
     def request_close(self):
         self.should_close = True
@@ -2648,6 +2933,12 @@ def main():
         else:
             editor.message = "Saved locally, but backend sync failed"
 
+    def set_count_direction(direction: str):
+        nonlocal count_direction
+
+        count_direction = normalize_count_direction(direction)
+        cfg["count_direction"] = count_direction
+
     def request_stream_reset():
         queue_pipeline_refresh()
         if editor is not None:
@@ -2666,6 +2957,24 @@ def main():
         if control_panel is not None:
             control_panel.set_active_stream_profile(profile)
         publish_rotation_status(message)
+
+    def queue_saved_profile_for_next_window(profile: dict, *, message: str):
+        nonlocal pending_rotation_profile
+
+        pending_rotation_profile = dict(profile)
+        pending_rotation_profile["_activation_allow_settling"] = True
+        publish_rotation_status(message)
+        if editor is not None:
+            editor.message = message
+        if control_panel is not None:
+            control_panel.refresh_stream_profiles(selected_profile_id=profile.get("id"))
+
+    def is_selected_stream_target(stream_url: str, camera_id: str) -> bool:
+        selected = stream_store.get_selected_profile()
+        return (
+            str(selected.get("stream_url") or "").strip() == str(stream_url or "").strip()
+            and str(selected.get("camera_id") or "").strip() == str(camera_id or "").strip()
+        )
 
     def select_stream_profile(profile_id: str) -> dict:
         target_camera_id = cfg.get("camera_id", "")
@@ -2693,16 +3002,94 @@ def main():
         )
         return profile
 
+    def force_stream_switch(
+        profile_id: str,
+        stream_name: str,
+        stream_url: str,
+        camera_id: str,
+    ) -> dict:
+        nonlocal pending_rotation_profile
+
+        target_url = str(stream_url or "").strip()
+        target_camera_id = str(camera_id or "").strip()
+        if profile_id and (not target_url or not target_camera_id):
+            for existing_profile in stream_store.list_profiles():
+                if str(existing_profile.get("id") or "") == str(profile_id or ""):
+                    target_url = target_url or str(existing_profile.get("stream_url") or "").strip()
+                    target_camera_id = target_camera_id or str(existing_profile.get("camera_id") or "").strip()
+                    stream_name = stream_name or str(existing_profile.get("name") or "").strip()
+                    break
+
+        profile, _created = stream_store.save_profile_entry(
+            name=stream_name,
+            camera_id=target_camera_id or cfg.get("camera_id", ""),
+            stream_url=target_url or cfg.get("stream_url", ""),
+            roi=editor.roi if editor is not None else roi,
+            line=editor.line if editor is not None else line,
+            count_direction=count_direction,
+        )
+        profile = stream_store.select_profile(profile["id"])
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+
+        current_camera_id = str(cfg.get("camera_id") or "").strip()
+        target_camera_id = str(profile.get("camera_id") or "").strip()
+        reason = (
+            "Vision worker forced camera switch "
+            f"from {current_camera_id or 'unknown'} to {target_camera_id or 'unknown'} "
+            f"profile={profile.get('id', '')}"
+        )
+        voided_current = backend.void_current_round(current_camera_id, reason) if current_camera_id else False
+        voided_target = False
+        if target_camera_id and target_camera_id != current_camera_id:
+            voided_target = backend.void_current_round(target_camera_id, reason)
+
+        pending_rotation_profile = None
+        forced_profile = dict(profile)
+        forced_profile["_activation_skip_notify"] = True
+        queue_stream_profile(
+            forced_profile,
+            message=(
+                "Troca forcada enviada ao vision: "
+                f"{format_stream_profile_label(profile)} | "
+                f"round atual resetado={voided_current}; destino resetado={voided_target}"
+            ),
+        )
+        return profile
+
     def open_stream_url(stream_url: str, stream_name: str, camera_id: str) -> dict:
         unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "alterar stream")
         if not unlocked:
-            message = (
-                "Alteracao de stream bloqueada ate o fechamento oficial do round. "
-                f"Detalhe: {reason}"
+            target_url = stream_url or cfg.get("stream_url", "")
+            target_camera_id = camera_id or cfg.get("camera_id", "")
+            if is_selected_stream_target(target_url, target_camera_id):
+                message = (
+                    "Configuracao da stream ativa bloqueada ate o fechamento oficial do round. "
+                    f"Detalhe: {reason}"
+                )
+                if editor is not None:
+                    editor.message = message
+                raise RuntimeError(message)
+
+            profile, created = stream_store.save_profile_entry(
+                name=stream_name,
+                camera_id=target_camera_id,
+                stream_url=target_url,
+                roi=editor.roi if editor is not None else roi,
+                line=editor.line if editor is not None else line,
+                count_direction=count_direction,
             )
-            if editor is not None:
-                editor.message = message
-            raise RuntimeError(message)
+            save_config(config_path, cfg)
+            sync_stream_profiles_to_supabase(cfg, supabase_sync)
+            action = "salva" if created else "atualizada"
+            queue_saved_profile_for_next_window(
+                profile,
+                message=(
+                    f"Stream {action} na esteira e pendente para a proxima janela segura: "
+                    f"{format_stream_profile_label(profile)}"
+                ),
+            )
+            return profile
 
         profile, created = stream_store.apply_stream_url(
             stream_url,
@@ -2721,13 +3108,36 @@ def main():
     def save_stream_profile(stream_name: str, stream_url: str, camera_id: str) -> dict:
         unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "salvar stream profile")
         if not unlocked:
-            message = (
-                "Configuracao bloqueada ate o fechamento oficial do round. "
-                f"Detalhe: {reason}"
+            target_url = stream_url or cfg.get("stream_url", "")
+            target_camera_id = camera_id or cfg.get("camera_id", "")
+            if is_selected_stream_target(target_url, target_camera_id):
+                message = (
+                    "Configuracao da stream ativa bloqueada ate o fechamento oficial do round. "
+                    f"Detalhe: {reason}"
+                )
+                if editor is not None:
+                    editor.message = message
+                raise RuntimeError(message)
+
+            profile, created = stream_store.save_profile_entry(
+                name=stream_name,
+                camera_id=target_camera_id,
+                stream_url=target_url,
+                roi=editor.roi if editor is not None else roi,
+                line=editor.line if editor is not None else line,
+                count_direction=count_direction,
             )
-            if editor is not None:
-                editor.message = message
-            raise RuntimeError(message)
+            save_config(config_path, cfg)
+            sync_stream_profiles_to_supabase(cfg, supabase_sync)
+            action = "salva" if created else "atualizada"
+            queue_saved_profile_for_next_window(
+                profile,
+                message=(
+                    f"Configuracao {action} na esteira e pendente para a proxima janela segura: "
+                    f"{format_stream_profile_label(profile)}"
+                ),
+            )
+            return profile
 
         target_url = stream_url or cfg.get("stream_url", "")
         profile = stream_store.save_selected_profile(
@@ -2761,6 +3171,16 @@ def main():
         )
         return profile
 
+    def delete_stream_profile(profile_id: str) -> dict:
+        deleted = stream_store.delete_profile(profile_id)
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        if control_panel is not None:
+            control_panel.set_active_stream_profile(stream_store.get_selected_profile())
+        if editor is not None:
+            editor.message = f"Stream apagada da esteira: {format_stream_profile_label(deleted)}"
+        return deleted
+
     if round_sync_enabled:
         backend_round = backend.fetch_current_round(cfg.get("camera_id", ""))
         current_round_id, total, round_changed = resolve_round_sync(
@@ -2787,6 +3207,9 @@ def main():
             select_stream_profile,
             open_stream_url,
             save_stream_profile,
+            delete_stream_profile,
+            force_stream_switch,
+            set_count_direction,
             set_rotation_enabled,
             lambda: queue_random_stream_profile(reason="manual"),
             stream_rotation_enabled=bool(stream_rotation.get("enabled")),
@@ -2904,8 +3327,8 @@ def main():
             if next_pipeline_start.camera_id:
                 cfg["camera_id"] = next_pipeline_start.camera_id
             if next_pipeline_start.direction:
-                cfg["count_direction"] = next_pipeline_start.direction
-                count_direction = next_pipeline_start.direction
+                cfg["count_direction"] = normalize_count_direction(next_pipeline_start.direction)
+                count_direction = cfg["count_direction"]
             if isinstance(next_pipeline_start.count_line, dict):
                 line = {
                     "x1": int(next_pipeline_start.count_line.get("x1", line["x1"])),
@@ -2972,11 +3395,12 @@ def main():
                 format_stream_profile_label(profile),
                 cfg["stream_url"],
             )
-            backend.notify_stream_profile_activated(
-                cfg.get("camera_id", ""),
-                profile.get("id", ""),
-                allow_settling=bool(profile.get("_activation_allow_settling")),
-            )
+            if not bool(profile.get("_activation_skip_notify")):
+                backend.notify_stream_profile_activated(
+                    cfg.get("camera_id", ""),
+                    profile.get("id", ""),
+                    allow_settling=bool(profile.get("_activation_allow_settling")),
+                )
             publish_rotation_status(f"Perfil ativo: {format_stream_profile_label(profile)}")
 
         poll_round_state_if_needed()
@@ -3022,7 +3446,7 @@ def main():
                     }
 
                 if admin_cfg.get("countDirection"):
-                    count_direction = admin_cfg["countDirection"]
+                    count_direction = normalize_count_direction(admin_cfg["countDirection"])
 
                 stream_store.save_selected_profile(
                     roi=roi,
@@ -3060,7 +3484,6 @@ def main():
         runtime_stats.record_inference_ms((time.perf_counter() - inference_start) * 1000)
 
         h, w = frame.shape[:2]
-        line_y = line["y1"]
         detections_list = []
         boxes = None
 
@@ -3068,7 +3491,6 @@ def main():
             editor.set_frame_size(w, h)
             roi = dict(editor.roi)
             line = dict(editor.line)
-            line_y = line["y1"]
 
         boxes = results[0].boxes
 
@@ -3131,11 +3553,9 @@ def main():
                     last_seen[track_id] = frame_count
 
                     prev = last_positions.get(track_id)
-                    prev_y = prev[1] if prev else None
                     if should_count_track(
-                        prev_y=prev_y,
-                        curr_y=cy,
-                        cx=cx,
+                        prev_position=prev,
+                        curr_position=(cx, cy),
                         line=line,
                         direction=count_direction,
                         hits=track_hits.get(track_id, 0),

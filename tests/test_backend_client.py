@@ -17,9 +17,15 @@ class _FakeSession:
     def __init__(self, response):
         self.response = response
         self.last_url = None
+        self.last_json = None
 
     def get(self, url, headers=None, timeout=None):
         self.last_url = url
+        return self.response
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.last_url = url
+        self.last_json = json
         return self.response
 
 
@@ -81,6 +87,32 @@ class BackendClientRoundFetchTests(unittest.TestCase):
 
         self.assertEqual({"roundId": "rnd_1"}, payload)
         self.assertEqual("http://localhost:8080/rounds/current?cameraId=cam_001", fake_session.last_url)
+
+    def test_void_current_round_posts_to_internal_void_endpoint(self):
+        client = BackendClient(
+            "http://localhost:8080/internal/round-count-event",
+            "SUA_API_KEY",
+            start_workers=False,
+        )
+
+        class _RoundThenVoidSession(_FakeSession):
+            def get(self, url, headers=None, timeout=None):
+                self.last_url = url
+                return _FakeResponse(payload={"roundId": "round-123", "status": "open"})
+
+            def post(self, url, json=None, headers=None, timeout=None):
+                self.last_url = url
+                self.last_json = json
+                return _FakeResponse(status_code=200, payload={"voided": True})
+
+        fake_session = _RoundThenVoidSession(_FakeResponse())
+        client._session = fake_session
+
+        result = client.void_current_round("cam_001", "forced switch")
+
+        self.assertTrue(result)
+        self.assertEqual("http://localhost:8080/internal/rounds/round-123/void", fake_session.last_url)
+        self.assertEqual({"reason": "forced switch"}, fake_session.last_json)
 
 
 if __name__ == "__main__":

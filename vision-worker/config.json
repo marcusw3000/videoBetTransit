@@ -1,5 +1,5 @@
 {
-  "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
+  "stream_url": "https://s9.nysdot.skyvdn.com/rtplive/R11_302/playlist.m3u8",
   "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct",
   "stream_buffer_size": 1,
   "stream_open_timeout_ms": 5000,
@@ -15,10 +15,10 @@
   "mediamtx_rtsp_url": "rtsp://127.0.0.1:8554",
   "model": "../yolov8s.pt",
   "tracker": "botsort_traffic.yaml",
-  "backend_url": "http://127.0.0.1:8080/internal/crossing-events",
+  "backend_url": "http://127.0.0.1:8080/rounds/current?cameraId=cam_001",
   "api_key": "CHANGE_ME",
   "mjpeg_token": "CHANGE_ME",
-  "camera_id": "cam_001",
+  "camera_id": "cam_002",
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
@@ -30,16 +30,16 @@
   "operator_preview_max_width": 960,
   "operator_preview_fps_limit": 10,
   "line": {
-    "x1": 300,
-    "y1": 346,
-    "x2": 601,
-    "y2": 288
+    "x1": 226,
+    "y1": 110,
+    "x2": 298,
+    "y2": 127
   },
   "roi": {
-    "x": 220,
-    "y": 86,
-    "w": 476,
-    "h": 385
+    "x": 188,
+    "y": 77,
+    "w": 118,
+    "h": 97
   },
   "count_direction": "any",
   "show_window": true,
@@ -68,19 +68,38 @@
       "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
       "camera_id": "cam_001",
       "roi": {
-        "x": 220,
-        "y": 86,
-        "w": 476,
-        "h": 385
+        "x": 188,
+        "y": 77,
+        "w": 118,
+        "h": 97
       },
       "line": {
-        "x1": 300,
-        "y1": 346,
-        "x2": 601,
-        "y2": 288
+        "x1": 226,
+        "y1": 110,
+        "x2": 298,
+        "y2": 127
+      },
+      "count_direction": "any"
+    },
+    {
+      "id": "stream_1776737500326",
+      "name": "teste",
+      "stream_url": "https://s9.nysdot.skyvdn.com/rtplive/R11_302/playlist.m3u8",
+      "camera_id": "cam_002",
+      "roi": {
+        "x": 188,
+        "y": 77,
+        "w": 118,
+        "h": 97
+      },
+      "line": {
+        "x1": 226,
+        "y1": 110,
+        "x2": 298,
+        "y2": 127
       },
       "count_direction": "any"
     }
   ],
-  "selected_stream_profile_id": "stream_default"
+  "selected_stream_profile_id": "stream_1776737500326"
 }

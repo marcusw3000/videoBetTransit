@@ -4,6 +4,7 @@ from app import (
     StreamProfileStore,
     consume_pipeline_commands,
     create_mjpeg_app,
+    format_stream_profile_table_row,
     is_round_safe_for_stream_rotation,
     normalize_config,
     select_random_stream_profile,
@@ -54,6 +55,7 @@ class StreamProfileStoreTests(unittest.TestCase):
         self.assertEqual("rtsp://camera-b/live", profile["stream_url"])
         self.assertEqual({"x": 1, "y": 2, "w": 100, "h": 80}, profile["roi"])
         self.assertEqual({"x1": 10, "y1": 20, "x2": 90, "y2": 20}, profile["line"])
+        self.assertEqual("down", profile["count_direction"])
         self.assertEqual("cam_b", cfg["camera_id"])
         self.assertEqual(profile["id"], cfg["selected_stream_profile_id"])
 
@@ -77,6 +79,50 @@ class StreamProfileStoreTests(unittest.TestCase):
         self.assertEqual("up", profile["count_direction"])
         self.assertEqual("cam_a_adjusted", cfg["camera_id"])
 
+    def test_save_selected_profile_accepts_horizontal_count_direction(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+
+        profile = store.save_selected_profile(count_direction="left_to_right")
+
+        self.assertEqual("right", profile["count_direction"])
+        self.assertEqual("right", cfg["count_direction"])
+
+    def test_select_profile_applies_saved_count_direction(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+        selected, _created = store.apply_stream_url(
+            "rtsp://camera-b/live",
+            name="Camera B",
+            camera_id="cam_b",
+        )
+        store.save_selected_profile(count_direction="left")
+
+        store.select_profile("profile-a")
+        profile = store.select_profile(selected["id"])
+
+        self.assertEqual("left", profile["count_direction"])
+        self.assertEqual("left", cfg["count_direction"])
+
+    def test_save_profile_entry_adds_inactive_next_stream_without_selecting_it(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+
+        profile, created = store.save_profile_entry(
+            name="Camera B",
+            camera_id="cam_b",
+            stream_url="rtsp://camera-b/live",
+            roi={"x": 5, "y": 6, "w": 70, "h": 40},
+            line={"x1": 100, "y1": 10, "x2": 100, "y2": 90},
+            count_direction="right",
+        )
+
+        self.assertTrue(created)
+        self.assertEqual("cam_b", profile["camera_id"])
+        self.assertEqual("right", profile["count_direction"])
+        self.assertEqual("profile-a", cfg["selected_stream_profile_id"])
+        self.assertEqual("cam_a", cfg["camera_id"])
+
     def test_normalize_config_adds_disabled_stream_rotation_defaults(self):
         cfg = normalize_config(make_cfg())
 
@@ -88,6 +134,66 @@ class StreamProfileStoreTests(unittest.TestCase):
             },
             cfg["stream_rotation"],
         )
+
+    def test_list_profiles_preserves_multiple_saved_streams(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+
+        store.apply_stream_url("rtsp://camera-b/live", name="Camera B", camera_id="cam_b")
+
+        profiles = store.list_profiles()
+        self.assertEqual(["Camera A", "Camera B"], [profile["name"] for profile in profiles])
+        self.assertEqual(["cam_a", "cam_b"], [profile["camera_id"] for profile in profiles])
+        self.assertEqual(
+            ["rtsp://camera-a/live", "rtsp://camera-b/live"],
+            [profile["stream_url"] for profile in profiles],
+        )
+
+    def test_format_stream_profile_table_row_includes_name_camera_id_and_url(self):
+        profile = {
+            "name": "Camera B",
+            "camera_id": "cam_b",
+            "stream_url": "rtsp://camera-b/live",
+        }
+
+        row = format_stream_profile_table_row(profile, active=True)
+
+        self.assertEqual(("*", "Camera B", "cam_b", "rtsp://camera-b/live"), row)
+
+    def test_delete_non_active_profile_preserves_selected_profile(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+        selected, _created = store.apply_stream_url(
+            "rtsp://camera-b/live",
+            name="Camera B",
+            camera_id="cam_b",
+        )
+
+        deleted = store.delete_profile("profile-a")
+
+        self.assertEqual("Camera A", deleted["name"])
+        self.assertEqual(selected["id"], cfg["selected_stream_profile_id"])
+        self.assertEqual(["Camera B"], [profile["name"] for profile in store.list_profiles()])
+        self.assertEqual("cam_b", cfg["camera_id"])
+
+    def test_delete_active_profile_is_blocked(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+        selected, _created = store.apply_stream_url(
+            "rtsp://camera-b/live",
+            name="Camera B",
+            camera_id="cam_b",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Carregue outra stream"):
+            store.delete_profile(selected["id"])
+
+    def test_delete_last_profile_is_blocked(self):
+        cfg = make_cfg()
+        store = StreamProfileStore(cfg)
+
+        with self.assertRaisesRegex(ValueError, "pelo menos uma stream"):
+            store.delete_profile("profile-a")
 
 
 class StreamRotationTests(unittest.TestCase):
@@ -149,7 +255,7 @@ class WorkerApiContractTests(unittest.TestCase):
                 "sourceUrl": "rtsp://camera-contract/live",
                 "rawStreamPath": "raw/cam_contract",
                 "processedStreamPath": "processed/cam_contract",
-                "direction": "down",
+                "direction": "left",
                 "countLine": {"x1": 1, "y1": 2, "x2": 3, "y2": 4},
             },
         )
@@ -160,6 +266,7 @@ class WorkerApiContractTests(unittest.TestCase):
         self.assertFalse(should_refresh)
         self.assertEqual("cam_contract", queued.camera_id)
         self.assertEqual("rtsp://camera-contract/live", queued.source_url)
+        self.assertEqual("left", queued.direction)
         self.assertEqual({"x1": 1, "y1": 2, "x2": 3, "y2": 4}, queued.count_line)
 
 
