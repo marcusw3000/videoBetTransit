@@ -12,7 +12,7 @@ import SessionStatus from './SessionStatus'
 import TimerCard from './TimerCard'
 import VideoPlayer from './VideoPlayer'
 import { getEmbedConfig } from '../embed'
-import { buildHlsUrl, buildMjpegUrl, buildWebRtcWrapperUrl } from '../config'
+import { buildHlsUrlFromPath, buildMjpegUrl, buildWebRtcWrapperUrlFromPath } from '../config'
 import { voidRound } from '../services/adminApi'
 import { startMetricsConnection, stopMetricsConnection } from '../services/metricsSignalr'
 import { getOperationsHealth } from '../services/operationsApi'
@@ -124,8 +124,16 @@ export default function AdminDashboard() {
   const roundPhase = getRoundPhase(currentRound)
   const streamState = frontendTransportState
   const roundTimerLabel = roundPhase === 'open' ? 'Fechamento das Apostas' : 'Tempo Restante da Rodada'
-  const webrtcSrc = useMemo(() => buildWebRtcWrapperUrl(embedConfig.cameraId), [embedConfig.cameraId])
-  const hlsSrc = useMemo(() => buildHlsUrl(embedConfig.cameraId), [embedConfig.cameraId])
+  const activeStreamPath = operations?.processedStreamPath || operations?.health?.processedStreamPath || ''
+  const activeCameraId = operations?.cameraId || operations?.health?.cameraId || embedConfig.cameraId
+  const webrtcSrc = useMemo(
+    () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
+    [activeCameraId, activeStreamPath],
+  )
+  const hlsSrc = useMemo(
+    () => buildHlsUrlFromPath(activeStreamPath, activeCameraId),
+    [activeCameraId, activeStreamPath],
+  )
   const mjpegSrc = useMemo(() => buildMjpegUrl(), [])
 
   const evidenceEvents = useMemo(

@@ -27,20 +27,41 @@ function buildProcessedPath(cameraId) {
   return `processed/${normalizeCameraId(cameraId)}`
 }
 
-function buildWebRtcPlayerUrl(cameraId) {
-  const path = buildProcessedPath(cameraId)
-  return `${WEBRTC_BASE_URL}/${path}/`
+function normalizeStreamPath(path, fallbackCameraId = '') {
+  const normalized = String(path || '').trim().replace(/^\/+|\/+$/g, '')
+  return normalized || buildProcessedPath(fallbackCameraId)
 }
 
-function buildWebRtcWrapperUrl(cameraId) {
-  const playerUrl = buildWebRtcPlayerUrl(cameraId)
+function buildWebRtcPlayerUrlFromPath(path) {
+  const normalizedPath = normalizeStreamPath(path)
+  return `${WEBRTC_BASE_URL}/${normalizedPath}/`
+}
+
+function buildWebRtcPlayerUrl(cameraId) {
+  const path = buildProcessedPath(cameraId)
+  return buildWebRtcPlayerUrlFromPath(path)
+}
+
+function buildWebRtcWrapperUrlFromPath(path, cameraId = '') {
+  const normalizedPath = normalizeStreamPath(path, cameraId)
+  const playerUrl = buildWebRtcPlayerUrlFromPath(normalizedPath)
   const wrapperBase = '/webrtc-wrapper.html'
   return `${wrapperBase}?src=${encodeURIComponent(playerUrl)}&cameraId=${encodeURIComponent(normalizeCameraId(cameraId))}`
 }
 
+function buildWebRtcWrapperUrl(cameraId) {
+  const path = buildProcessedPath(cameraId)
+  return buildWebRtcWrapperUrlFromPath(path, cameraId)
+}
+
+function buildHlsUrlFromPath(path, fallbackCameraId = '') {
+  const normalizedPath = normalizeStreamPath(path, fallbackCameraId)
+  return `${HLS_BASE_URL}/${normalizedPath}/index.m3u8`
+}
+
 function buildHlsUrl(cameraId) {
   const path = buildProcessedPath(cameraId)
-  return `${HLS_BASE_URL}/${path}/index.m3u8`
+  return buildHlsUrlFromPath(path, cameraId)
 }
 
 function buildMjpegUrl() {
@@ -59,9 +80,13 @@ export {
   MJPEG_TOKEN,
   MJPEG_URL,
   normalizeCameraId,
+  normalizeStreamPath,
   buildProcessedPath,
   buildWebRtcPlayerUrl,
+  buildWebRtcPlayerUrlFromPath,
   buildWebRtcWrapperUrl,
+  buildWebRtcWrapperUrlFromPath,
   buildHlsUrl,
+  buildHlsUrlFromPath,
   buildMjpegUrl,
 }

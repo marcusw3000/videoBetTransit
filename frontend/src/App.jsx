@@ -10,7 +10,7 @@ import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds, parseTimestampMs } from './utils/time'
-import { buildHlsUrl, buildMjpegUrl, buildWebRtcWrapperUrl } from './config'
+import { buildHlsUrlFromPath, buildMjpegUrl, buildWebRtcWrapperUrlFromPath } from './config'
 import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } from './embed'
 
 const RECENT_HISTORY_LIMIT = 6
@@ -158,8 +158,16 @@ function MarketPage() {
     [markets, selectedMarketId],
   )
   const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
-  const webrtcSrc = useMemo(() => buildWebRtcWrapperUrl(embedConfig.cameraId), [embedConfig.cameraId])
-  const hlsSrc = useMemo(() => buildHlsUrl(embedConfig.cameraId), [embedConfig.cameraId])
+  const activeStreamPath = workerHealth?.processedStreamPath || ''
+  const activeCameraId = workerHealth?.cameraId || embedConfig.cameraId
+  const webrtcSrc = useMemo(
+    () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
+    [activeCameraId, activeStreamPath],
+  )
+  const hlsSrc = useMemo(
+    () => buildHlsUrlFromPath(activeStreamPath, activeCameraId),
+    [activeCameraId, activeStreamPath],
+  )
   const mjpegSrc = useMemo(() => buildMjpegUrl(), [])
 
   const gameTitle = useMemo(() => {

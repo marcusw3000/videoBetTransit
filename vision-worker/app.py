@@ -5,6 +5,7 @@ import queue
 import random
 import requests
 import subprocess
+import sys
 import threading
 import time
 import atexit
@@ -1053,11 +1054,11 @@ def make_stream_profile_id(existing_ids: set[str]) -> str:
 
 def build_stream_profile(source: dict | None, fallback_cfg: dict, *, index: int) -> dict:
     source = source if isinstance(source, dict) else {}
-    stream_url = str(
+    stream_url = validate_stream_url(
         source.get("stream_url")
         or source.get("url")
         or fallback_cfg.get("stream_url", "")
-    ).strip()
+    )
     camera_id = str(source.get("camera_id") or fallback_cfg.get("camera_id", "")).strip()
     profile = {
         "id": str(source.get("id") or "").strip(),
@@ -1082,7 +1083,7 @@ def sync_config_with_selected_profile(cfg: dict, profile: dict) -> dict:
         profile.get("count_direction") or cfg.get("count_direction", "any")
     )
     profile["camera_id"] = str(profile.get("camera_id") or cfg.get("camera_id", "")).strip()
-    profile["stream_url"] = str(profile.get("stream_url") or "").strip()
+    profile["stream_url"] = validate_stream_url(profile.get("stream_url") or "")
     if not profile["name"]:
         profile["name"] = guess_stream_profile_name(profile["stream_url"], profile["camera_id"])
 
@@ -1103,12 +1104,21 @@ def normalize_config(cfg: dict | None) -> dict:
 
     if isinstance(raw_profiles, list):
         for index, raw_profile in enumerate(raw_profiles, start=1):
-            profile = build_stream_profile(raw_profile, cfg, index=index)
+            try:
+                profile = build_stream_profile(raw_profile, cfg, index=index)
+            except ValueError as exc:
+                logger.warning("Stream profile ignorado: %s", exc)
+                continue
             if profile["stream_url"]:
                 profiles.append(profile)
 
     if not profiles:
-        profiles.append(build_stream_profile({}, cfg, index=1))
+        try:
+            profiles.append(build_stream_profile({}, cfg, index=1))
+        except ValueError:
+            fallback_cfg = dict(cfg)
+            fallback_cfg["stream_url"] = ""
+            profiles.append(build_stream_profile({}, fallback_cfg, index=1))
 
     existing_ids: set[str] = set()
     for index, profile in enumerate(profiles, start=1):
@@ -1126,7 +1136,7 @@ def normalize_config(cfg: dict | None) -> dict:
     selected_profile_id = str(cfg.get("selected_stream_profile_id") or "").strip()
     selected_profile = next((profile for profile in profiles if profile["id"] == selected_profile_id), None)
     if selected_profile is None:
-        current_stream_url = str(cfg.get("stream_url") or "").strip()
+        current_stream_url = validate_stream_url(cfg.get("stream_url") or "")
         selected_profile = next((profile for profile in profiles if profile["stream_url"] == current_stream_url), None)
     if selected_profile is None:
         selected_profile = profiles[0]
@@ -1288,7 +1298,7 @@ class StreamProfileStore:
         count_direction: str | None = None,
     ) -> dict:
         current = get_selected_stream_profile(self.cfg)
-        target_url = str(stream_url or current.get("stream_url") or "").strip()
+        target_url = validate_stream_url(stream_url or current.get("stream_url") or "")
         target_camera_id = str(camera_id or current.get("camera_id") or self.cfg.get("camera_id") or "").strip()
         if not target_url:
             raise ValueError("Informe uma URL de stream antes de salvar.")
@@ -1337,7 +1347,7 @@ class StreamProfileStore:
         camera_id: str | None = None,
         stream_url: str | None = None,
     ) -> tuple[dict, bool]:
-        target_url = str(stream_url or "").strip()
+        target_url = validate_stream_url(stream_url or "")
         target_camera_id = str(camera_id or "").strip()
         if not target_url:
             raise ValueError("Informe uma URL de stream antes de salvar.")
@@ -1382,7 +1392,7 @@ class StreamProfileStore:
         name: str | None = None,
         camera_id: str | None = None,
     ) -> tuple[dict, bool]:
-        target_url = str(stream_url or "").strip()
+        target_url = validate_stream_url(stream_url or "")
         target_camera_id = str(camera_id or self.cfg.get("camera_id") or "").strip()
         if not target_url:
             raise ValueError("Informe uma URL de stream.")
@@ -1450,6 +1460,74 @@ def normalize_ffmpeg_capture_options(options) -> str:
         return "|".join(parts)
 
     return ""
+
+
+@dataclass(frozen=True)
+class StreamUrlResolution:
+    original_url: str
+    capture_url: str
+    resolved: bool = False
+
+
+def is_blob_url(value: str) -> bool:
+    return str(value or "").strip().lower().startswith("blob:")
+
+
+def is_youtube_url(value: str) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    host = parsed.netloc.lower()
+    return host.endswith("youtube.com") or host.endswith("youtu.be") or host.endswith("youtube-nocookie.com")
+
+
+def validate_stream_url(value: str) -> str:
+    stream_url = str(value or "").strip()
+    if is_blob_url(stream_url):
+        raise ValueError("URL blob do navegador nao pode ser usada. Cole a URL normal do YouTube.")
+    return stream_url
+
+
+def resolve_youtube_stream_url(stream_url: str, *, timeout_seconds: int = 20) -> str:
+    command = [
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        "--no-warnings",
+        "--no-playlist",
+        "-f",
+        "best[protocol^=m3u8]/best",
+        "-g",
+        stream_url,
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=max(5, int(timeout_seconds)),
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"yt-dlp nao conseguiu resolver a URL do YouTube. {detail[:240]}")
+
+    for line in (result.stdout or "").splitlines():
+        candidate = line.strip()
+        if candidate.startswith(("http://", "https://", "rtsp://", "rtmp://")):
+            return candidate
+
+    raise RuntimeError("yt-dlp nao retornou uma URL reproduzivel para esta stream.")
+
+
+def resolve_stream_source_url(stream_url: str, cfg: dict | None = None) -> StreamUrlResolution:
+    original_url = validate_stream_url(stream_url)
+    if not original_url:
+        return StreamUrlResolution(original_url="", capture_url="", resolved=False)
+
+    if not is_youtube_url(original_url):
+        return StreamUrlResolution(original_url=original_url, capture_url=original_url, resolved=False)
+
+    timeout_seconds = int((cfg or {}).get("youtube_resolve_timeout_seconds", 20) or 20)
+    capture_url = resolve_youtube_stream_url(original_url, timeout_seconds=timeout_seconds)
+    return StreamUrlResolution(original_url=original_url, capture_url=capture_url, resolved=True)
 
 
 def normalize_media_path_name(value: str, fallback: str = "cam_001") -> str:
@@ -1540,19 +1618,21 @@ def build_pipeline_config(cfg: dict, *, source_url: str | None = None, camera_id
         camera_id or cfg.get("camera_id", "") or "cam_001"
     )
     original_source_url = str(source_url or cfg.get("stream_url") or "").strip()
+    resolved_source = resolve_stream_source_url(original_source_url, cfg)
     raw_path = str(raw_stream_path or f"raw/{normalized_camera_id}").strip()
     processed_path = str(processed_stream_path or f"processed/{normalized_camera_id}").strip()
     rtsp_base = str(cfg.get("mediamtx_rtsp_url") or "rtsp://localhost:8554").strip().rstrip("/")
 
-    capture_source_url = original_source_url
-    if original_source_url and ensure_mediamtx_source_path(cfg, raw_path, original_source_url):
+    capture_source_url = resolved_source.capture_url
+    if capture_source_url and ensure_mediamtx_source_path(cfg, raw_path, capture_source_url):
         capture_source_url = f"{rtsp_base}/{raw_path}"
 
     pipeline_cfg["camera_id"] = normalized_camera_id
     pipeline_cfg["raw_stream_path"] = raw_path
     pipeline_cfg["processed_stream_path"] = processed_path
-    pipeline_cfg["stream_url"] = original_source_url
+    pipeline_cfg["stream_url"] = resolved_source.original_url
     pipeline_cfg["capture_source_url"] = capture_source_url
+    pipeline_cfg["source_url_resolved"] = resolved_source.resolved
     pipeline_cfg["publisher_rtsp_url"] = f"{rtsp_base}/{processed_path}"
     pipeline_cfg.setdefault("publisher_fps", 10)
     pipeline_cfg.setdefault("publisher_ffmpeg_bin", "ffmpeg")
@@ -2684,8 +2764,12 @@ def main():
         port=int(cfg.get("mjpeg_port", 8090)),
     )
     active_mjpeg_server_ref = mjpeg_server
-    current_pipeline_cfg = build_pipeline_config(cfg)
-    pipeline_runtime.start(current_pipeline_cfg)
+    try:
+        current_pipeline_cfg = build_pipeline_config(cfg)
+        pipeline_runtime.start(current_pipeline_cfg)
+    except Exception as exc:
+        logger.warning("Pipeline inicial nao iniciada: %s", exc)
+        current_pipeline_cfg = dict(cfg)
     active_stream_ref = None
 
     class_names = build_class_names(cfg["allowed_classes"])
@@ -2720,6 +2804,7 @@ def main():
     pending_rotation_profile = None
     last_rotation_round_id = ""
     pending_stream_refresh_started_at = None
+    youtube_retry_after = 0.0
     current_round_id = str(cfg.get("round_id", "")).strip()
     last_visual_detections: list[dict] = []
     last_operator_preview = None
@@ -3242,34 +3327,37 @@ def main():
                 remove_ok = remove_mediamtx_source_path(cfg, refresh_raw_path)
                 if editor is not None:
                     editor.message = "Reconectando captura..."
-                add_ok = ensure_mediamtx_source_path(cfg, refresh_raw_path, refresh_source_url)
-                refresh_ready = add_ok
                 logger.info(
-                    "Refresh upstream MediaMTX | raw_path=%s | remove_ok=%s | add_ok=%s",
+                    "Refresh upstream MediaMTX | raw_path=%s | remove_ok=%s",
                     refresh_raw_path or "<none>",
                     remove_ok,
-                    add_ok,
                 )
 
             if refresh_ready:
-                current_pipeline_cfg = build_pipeline_config(
-                    cfg,
-                    source_url=refresh_source_url or cfg.get("stream_url"),
-                    camera_id=refresh_camera_id or cfg.get("camera_id"),
-                    raw_stream_path=refresh_raw_path or None,
-                    processed_stream_path=refresh_processed_path or None,
-                )
-                pipeline_runtime.start(current_pipeline_cfg)
-                pending_stream_refresh_started_at = time.time()
-                elapsed_ms = (time.perf_counter() - refresh_started_at) * 1000.0
-                logger.info(
-                    "Refresh upstream concluido | source=%s | raw_path=%s | duracao=%.1f ms",
-                    refresh_source_url or "<none>",
-                    refresh_raw_path or "<none>",
-                    elapsed_ms,
-                )
-                if editor is not None:
-                    editor.message = "Stream reposicionada no ponto mais atual disponivel"
+                try:
+                    current_pipeline_cfg = build_pipeline_config(
+                        cfg,
+                        source_url=refresh_source_url or cfg.get("stream_url"),
+                        camera_id=refresh_camera_id or cfg.get("camera_id"),
+                        raw_stream_path=refresh_raw_path or None,
+                        processed_stream_path=refresh_processed_path or None,
+                    )
+                    pipeline_runtime.start(current_pipeline_cfg)
+                    pending_stream_refresh_started_at = time.time()
+                    elapsed_ms = (time.perf_counter() - refresh_started_at) * 1000.0
+                    logger.info(
+                        "Refresh upstream concluido | source=%s | raw_path=%s | duracao=%.1f ms",
+                        refresh_source_url or "<none>",
+                        refresh_raw_path or "<none>",
+                        elapsed_ms,
+                    )
+                    if editor is not None:
+                        editor.message = "Stream reposicionada no ponto mais atual disponivel"
+                except Exception as exc:
+                    refresh_ready = False
+                    logger.warning("Refresh upstream falhou ao resolver/iniciar source: %s", exc)
+                    if editor is not None:
+                        editor.message = f"Falha ao resolver/reconectar source: {exc}"
             else:
                 elapsed_ms = (time.perf_counter() - refresh_started_at) * 1000.0
                 logger.warning(
@@ -3300,25 +3388,30 @@ def main():
                 if editor is not None:
                     editor.line = dict(line)
 
-            current_pipeline_cfg = build_pipeline_config(
-                cfg,
-                source_url=next_pipeline_start.source_url or cfg.get("stream_url"),
-                camera_id=next_pipeline_start.camera_id or cfg.get("camera_id"),
-                raw_stream_path=next_pipeline_start.raw_stream_path or None,
-                processed_stream_path=next_pipeline_start.processed_stream_path or None,
-            )
-            pipeline_runtime.start(current_pipeline_cfg)
-            reset_tracking_state()
-            last_track_results = None
-            last_visual_detections = []
-            last_operator_preview = None
-            last_operator_preview_at = 0.0
-            frame_count = 0
-            last_raw_seq = 0
-            fps_frame_count = 0
-            fps_start_ts = time.time()
-            if editor is not None:
-                editor.message = f"Pipeline ativa em {current_pipeline_cfg['processed_stream_path']}"
+            try:
+                current_pipeline_cfg = build_pipeline_config(
+                    cfg,
+                    source_url=next_pipeline_start.source_url or cfg.get("stream_url"),
+                    camera_id=next_pipeline_start.camera_id or cfg.get("camera_id"),
+                    raw_stream_path=next_pipeline_start.raw_stream_path or None,
+                    processed_stream_path=next_pipeline_start.processed_stream_path or None,
+                )
+                pipeline_runtime.start(current_pipeline_cfg)
+                reset_tracking_state()
+                last_track_results = None
+                last_visual_detections = []
+                last_operator_preview = None
+                last_operator_preview_at = 0.0
+                frame_count = 0
+                last_raw_seq = 0
+                fps_frame_count = 0
+                fps_start_ts = time.time()
+                if editor is not None:
+                    editor.message = f"Pipeline ativa em {current_pipeline_cfg['processed_stream_path']}"
+            except Exception as exc:
+                logger.warning("Falha ao iniciar pipeline solicitada: %s", exc)
+                if editor is not None:
+                    editor.message = f"Falha ao resolver/iniciar stream: {exc}"
 
         if pending_stream_profile is not None:
             profile = pending_stream_profile
@@ -3340,28 +3433,33 @@ def main():
             roi = dict(profile["roi"])
             line = dict(profile["line"])
             count_direction = profile["count_direction"]
-            current_pipeline_cfg = build_pipeline_config(cfg)
-            pipeline_runtime.start(current_pipeline_cfg)
-            last_track_results = None
-            last_visual_detections = []
-            last_operator_preview = None
-            last_operator_preview_at = 0.0
-            frame_count = 0
-            last_raw_seq = 0
-            fps_frame_count = 0
-            fps_start_ts = time.time()
-            logger.info(
-                "Perfil de stream aplicado: %s | url=%s",
-                format_stream_profile_label(profile),
-                cfg["stream_url"],
-            )
-            if not bool(profile.get("_activation_skip_notify")):
-                backend.notify_stream_profile_activated(
-                    cfg.get("camera_id", ""),
-                    profile.get("id", ""),
-                    allow_settling=bool(profile.get("_activation_allow_settling")),
+            try:
+                current_pipeline_cfg = build_pipeline_config(cfg)
+                pipeline_runtime.start(current_pipeline_cfg)
+                last_track_results = None
+                last_visual_detections = []
+                last_operator_preview = None
+                last_operator_preview_at = 0.0
+                frame_count = 0
+                last_raw_seq = 0
+                fps_frame_count = 0
+                fps_start_ts = time.time()
+                logger.info(
+                    "Perfil de stream aplicado: %s | url=%s",
+                    format_stream_profile_label(profile),
+                    cfg["stream_url"],
                 )
-            publish_rotation_status(f"Perfil ativo: {format_stream_profile_label(profile)}")
+                if not bool(profile.get("_activation_skip_notify")):
+                    backend.notify_stream_profile_activated(
+                        cfg.get("camera_id", ""),
+                        profile.get("id", ""),
+                        allow_settling=bool(profile.get("_activation_allow_settling")),
+                    )
+                publish_rotation_status(f"Perfil ativo: {format_stream_profile_label(profile)}")
+            except Exception as exc:
+                logger.warning("Falha ao aplicar perfil de stream: %s", exc)
+                if editor is not None:
+                    editor.message = f"Falha ao resolver/iniciar perfil: {exc}"
 
         poll_round_state_if_needed()
 
@@ -3373,9 +3471,16 @@ def main():
         if frame is None or captured_at is None:
             if frame_count == 0:
                 logger.warning("Nenhum frame recebido ainda do stream...")
+            active_pipeline_cfg = pipeline_runtime.get_config() or current_pipeline_cfg
+            active_source_url = str(active_pipeline_cfg.get("stream_url") or cfg.get("stream_url") or "").strip()
+            if is_youtube_url(active_source_url) and time.time() >= youtube_retry_after:
+                youtube_retry_after = time.time() + 30.0
+                logger.info("Stream YouTube sem frames; solicitando nova resolucao da URL.")
+                queue_pipeline_refresh()
             continue
 
         frame_count += 1
+        youtube_retry_after = 0.0
 
         if frame_count == 1 and pending_stream_refresh_started_at is not None:
             logger.info(

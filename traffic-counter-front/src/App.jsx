@@ -5,8 +5,9 @@ import MarketCard from './components/MarketCard'
 import VideoPlayer from './components/VideoPlayer'
 import { getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
+import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds } from './utils/time'
-import { WEBRTC_URL, HLS_URL, MJPEG_URL } from './config'
+import { HLS_URL, MJPEG_URL, WEBRTC_URL, buildHlsUrlFromPath, buildWebRtcUrlFromPath } from './config'
 import { applyEmbedTheme, EMBED_CONFIG_EVENT, emitEmbedEvent, getEmbedConfig } from './embed'
 
 const MAX_HISTORY_POINTS = 30
@@ -64,9 +65,16 @@ function MarketPage() {
   const [toast, setToast] = useState(null)
   const [selectedMarketId, setSelectedMarketId] = useState('')
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
+  const [workerHealth, setWorkerHealth] = useState(null)
 
-  const liveWebRtcUrl = WEBRTC_URL
-  const liveStreamUrl = HLS_URL
+  const activeStreamPath = workerHealth?.processedStreamPath || ''
+  const activeCameraId = workerHealth?.cameraId || embedConfig.cameraId
+  const liveWebRtcUrl = activeStreamPath
+    ? buildWebRtcUrlFromPath(activeStreamPath, activeCameraId)
+    : WEBRTC_URL
+  const liveStreamUrl = activeStreamPath
+    ? buildHlsUrlFromPath(activeStreamPath, activeCameraId)
+    : HLS_URL
   const liveFallbackUrl = MJPEG_URL
   const roundPhase = getRoundPhase(round)
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
@@ -168,6 +176,29 @@ function MarketPage() {
 
     window.addEventListener(EMBED_CONFIG_EVENT, handleConfigUpdate)
     return () => window.removeEventListener(EMBED_CONFIG_EVENT, handleConfigUpdate)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    async function loadWorkerHealth() {
+      try {
+        const data = await getWorkerHealth()
+        if (active) setWorkerHealth(data)
+      } catch {
+        if (active) setWorkerHealth(null)
+      }
+    }
+
+    void loadWorkerHealth()
+    const intervalId = setInterval(() => {
+      void loadWorkerHealth()
+    }, 2000)
+
+    return () => {
+      active = false
+      clearInterval(intervalId)
+    }
   }, [])
 
   useEffect(() => {
