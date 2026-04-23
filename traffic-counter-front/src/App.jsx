@@ -203,7 +203,7 @@ function MarketPage() {
         const data = await getWorkerHealth()
         if (active) setWorkerHealth(data)
       } catch {
-        if (active) setWorkerHealth(null)
+        if (active) setWorkerHealth((current) => current)
       }
     }
 
@@ -324,7 +324,6 @@ function MarketPage() {
               fallbackSrc={liveFallbackUrl}
               title={videoTitle}
               countValue={round?.currentCount}
-              resetKey={round?.roundId}
             />
           </div>
 

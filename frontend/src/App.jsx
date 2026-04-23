@@ -372,7 +372,7 @@ function MarketPage() {
         setWorkerHealth(data)
       } catch {
         if (!active) return
-        setWorkerHealth(null)
+        setWorkerHealth((current) => current)
       }
     }
 
@@ -504,7 +504,6 @@ function MarketPage() {
 
             <div className="video-wrapper">
               <VideoPlayer
-                key={round?.roundId || 'live-player'}
                 webrtcSrc={webrtcSrc}
                 src={hlsSrc}
                 fallbackSrc={mjpegSrc}

@@ -181,8 +181,8 @@ class StreamProfileStoreTests(unittest.TestCase):
                 "enabled": False,
                 "mode": "round_boundary",
                 "strategy": "uniform_excluding_current",
-                "min_rounds_per_stream": 8,
-                "max_rounds_per_stream": 15,
+                "min_rounds_per_stream": 6,
+                "max_rounds_per_stream": 11,
                 "current_stream_profile_id": "",
                 "rounds_on_current_stream": 0,
                 "target_rounds_for_current_stream": 0,
@@ -255,13 +255,13 @@ class StreamProfileStoreTests(unittest.TestCase):
 class StreamRotationTests(unittest.TestCase):
     def test_rotation_target_is_drawn_inside_configured_range(self):
         rotation = {
-            "min_rounds_per_stream": 8,
-            "max_rounds_per_stream": 15,
+            "min_rounds_per_stream": 6,
+            "max_rounds_per_stream": 11,
         }
 
-        target = choose_stream_rotation_target(rotation, rng=_FixedRandIntRandom(12))
+        target = choose_stream_rotation_target(rotation, rng=_FixedRandIntRandom(9))
 
-        self.assertEqual(12, target)
+        self.assertEqual(9, target)
 
     def test_profile_state_resets_counter_when_stream_changes(self):
         rotation = {
@@ -269,8 +269,8 @@ class StreamRotationTests(unittest.TestCase):
             "rounds_on_current_stream": 7,
             "target_rounds_for_current_stream": 9,
             "last_counted_round_id": "round-a",
-            "min_rounds_per_stream": 8,
-            "max_rounds_per_stream": 15,
+            "min_rounds_per_stream": 6,
+            "max_rounds_per_stream": 11,
         }
 
         changed = ensure_stream_rotation_profile_state(
@@ -291,8 +291,8 @@ class StreamRotationTests(unittest.TestCase):
             "rounds_on_current_stream": 3,
             "target_rounds_for_current_stream": 0,
             "last_counted_round_id": "round-a",
-            "min_rounds_per_stream": 8,
-            "max_rounds_per_stream": 15,
+            "min_rounds_per_stream": 6,
+            "max_rounds_per_stream": 11,
         }
 
         changed = ensure_stream_rotation_profile_state(
