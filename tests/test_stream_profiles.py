@@ -306,17 +306,17 @@ class StreamRotationTests(unittest.TestCase):
         self.assertEqual("round-a", rotation["last_counted_round_id"])
         self.assertEqual(11, rotation["target_rounds_for_current_stream"])
 
-    def test_rotation_counts_only_settled_round_once(self):
+    def test_rotation_counts_safe_round_once_when_settling_starts(self):
         rotation = {
             "rounds_on_current_stream": 0,
             "target_rounds_for_current_stream": 2,
             "last_counted_round_id": "",
         }
 
-        for status in ["open", "closing", "settling", "void"]:
+        for status in ["open", "closing", "void"]:
             self.assertFalse(count_settled_round_for_stream_rotation(rotation, {"roundId": f"round-{status}", "status": status}))
 
-        self.assertTrue(count_settled_round_for_stream_rotation(rotation, {"roundId": "round-1", "status": "settled"}))
+        self.assertTrue(count_settled_round_for_stream_rotation(rotation, {"roundId": "round-1", "status": "settling"}))
         self.assertFalse(count_settled_round_for_stream_rotation(rotation, {"roundId": "round-1", "status": "settled"}))
         self.assertEqual(1, rotation["rounds_on_current_stream"])
 

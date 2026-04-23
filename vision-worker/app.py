@@ -1042,7 +1042,7 @@ def ensure_stream_rotation_profile_state(
 
 
 def count_settled_round_for_stream_rotation(rotation: dict, backend_round: dict | None) -> bool:
-    if get_round_status(backend_round) != "settled":
+    if get_round_status(backend_round) not in {"settling", "settled"}:
         return False
 
     round_id = get_round_id(backend_round)
@@ -1066,6 +1066,8 @@ def stream_rotation_target_reached(rotation: dict) -> bool:
 
 
 def format_stream_rotation_progress(rotation: dict) -> str:
+    if not rotation.get("enabled"):
+        return "Rotacao randômica desativada."
     rounds = int(rotation.get("rounds_on_current_stream", 0) or 0)
     target = int(rotation.get("target_rounds_for_current_stream", 0) or 0)
     if target <= 0:
@@ -2894,6 +2896,7 @@ def main():
     pending_stream_profile = None
     pending_rotation_profile = None
     last_rotation_round_id = ""
+    rotation_boundary_consumed = False
     pending_stream_refresh_started_at = None
     youtube_retry_after = 0.0
     current_round_id = str(cfg.get("round_id", "")).strip()
@@ -2986,13 +2989,16 @@ def main():
         return pending_rotation_profile
 
     def maybe_schedule_stream_rotation(backend_round: dict | None):
-        nonlocal pending_rotation_profile, last_rotation_round_id
+        nonlocal pending_rotation_profile, last_rotation_round_id, rotation_boundary_consumed
 
         if pending_rotation_profile is None and not stream_rotation.get("enabled"):
             publish_rotation_status()
             return
 
         round_id = get_round_id(backend_round)
+        if not is_round_safe_for_stream_rotation(backend_round):
+            rotation_boundary_consumed = False
+
         if stream_rotation.get("enabled"):
             if ensure_stream_rotation_profile_state(
                 stream_rotation,
@@ -3011,19 +3017,18 @@ def main():
             and stream_rotation.get("enabled")
             and is_round_safe_for_stream_rotation(backend_round)
             and round_id
-            and round_id != last_rotation_round_id
+            and not rotation_boundary_consumed
             and stream_rotation_target_reached(stream_rotation)
         ):
             try:
                 queue_random_stream_profile(reason="auto")
                 publish_rotation_status(
-                    "Alvo atingido: "
-                    f"{stream_rotation.get('rounds_on_current_stream', 0)}/"
-                    f"{stream_rotation.get('target_rounds_for_current_stream', 0)}; "
+                    "Alvo de rounds atingido; "
                     f"proxima stream sorteada: {format_stream_profile_label(pending_rotation_profile)}"
                 )
             except ValueError:
                 last_rotation_round_id = round_id
+                rotation_boundary_consumed = True
                 return
 
         if pending_rotation_profile is None:
@@ -3053,6 +3058,7 @@ def main():
         profile["_activation_allow_settling"] = True
         pending_rotation_profile = None
         last_rotation_round_id = round_id or last_rotation_round_id
+        rotation_boundary_consumed = True
         queue_stream_profile(
             profile,
             message=f"Rotacao aplicada em janela segura: {format_stream_profile_label(profile)}",
@@ -3543,6 +3549,7 @@ def main():
 
             cfg["stream_url"] = profile["stream_url"]
             cfg["camera_id"] = profile["camera_id"]
+            cfg["selected_stream_profile_id"] = str(profile.get("id") or "")
             cfg["roi"] = dict(profile["roi"])
             cfg["line"] = dict(profile["line"])
             cfg["count_direction"] = profile["count_direction"]

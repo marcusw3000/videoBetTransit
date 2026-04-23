@@ -27,30 +27,39 @@ public class DynamicMarketLineService
     {
         var templates = CloneTemplates(baseTemplates);
         if (templates.Count == 0)
-            return new DynamicMarketLineResult([], 0, 0, 0, null, "fallback");
+            return new DynamicMarketLineResult([], 0, 0, 0, null, "fallback", 0, null, 0, 0);
 
         var fallbackCenter = ClampCenter(ResolveFallbackCenter(templates));
+        var fallbackHalfRange = ResolveStaticHalfRange();
         if (!_options.Enabled)
         {
             return new DynamicMarketLineResult(
-                ApplyCenterToTemplates(templates, fallbackCenter),
+                ApplyCenterToTemplates(templates, fallbackCenter, fallbackHalfRange),
                 fallbackCenter,
                 0,
                 0,
                 null,
-                "fallback");
+                "fallback",
+                fallbackHalfRange,
+                null,
+                0,
+                0);
         }
 
         var historyLimit = Math.Min(Math.Max(0, _options.HistoryWindow), Math.Max(0, roundsSinceProfileSwitch));
         if (historyLimit <= 0)
         {
             return new DynamicMarketLineResult(
-                ApplyCenterToTemplates(templates, fallbackCenter),
+                ApplyCenterToTemplates(templates, fallbackCenter, fallbackHalfRange),
                 fallbackCenter,
                 0,
                 0,
                 null,
-                "fallback");
+                "fallback",
+                fallbackHalfRange,
+                null,
+                0,
+                0);
         }
 
         var historyQuery = db.Rounds
@@ -73,12 +82,16 @@ public class DynamicMarketLineService
         if (rounds.Count == 0)
         {
             return new DynamicMarketLineResult(
-                ApplyCenterToTemplates(templates, fallbackCenter),
+                ApplyCenterToTemplates(templates, fallbackCenter, fallbackHalfRange),
                 fallbackCenter,
                 0,
                 0,
                 null,
-                "fallback");
+                "fallback",
+                fallbackHalfRange,
+                null,
+                0,
+                0);
         }
 
         var samples = rounds
@@ -89,27 +102,35 @@ public class DynamicMarketLineService
                 r.FinalCount.Value / ResolveDurationSeconds(r)))
             .ToList();
 
-        var lastRate = samples[^1].RatePerSecond;
-        var emaRate = CalculateExponentialMovingAverage(samples.Select(s => s.RatePerSecond).ToList(), ToDouble(_options.EmaAlpha));
-        var medianRate = CalculateMedian(samples.Select(s => s.RatePerSecond).ToList());
+        var adjustedRates = AdjustOutlierRates(samples.Select(s => s.RatePerSecond).ToList());
+        var lastRate = adjustedRates.Rates[^1];
+        var emaRate = CalculateExponentialMovingAverage(adjustedRates.Rates, ToDouble(_options.EmaAlpha));
+        var medianRate = CalculateMedian(adjustedRates.Rates);
         var hybridRate = CombineRates(lastRate, emaRate, medianRate);
-        var confidence = CalculateConfidence(samples.Count);
+        var targetDuration = Math.Max(1, targetDurationSeconds);
+        var historyProjectedCenter = hybridRate * targetDuration;
+        var volatilityCount = CalculateMedianAbsoluteDeviation(adjustedRates.Rates) * targetDuration;
+        var confidence = CalculateConfidence(samples.Count, historyProjectedCenter, volatilityCount);
         var projectedCenter = confidence * hybridRate * Math.Max(1, targetDurationSeconds)
             + (1 - confidence) * fallbackCenter;
         var forecastCenter = ClampCenter((int)Math.Round(projectedCenter, MidpointRounding.AwayFromZero));
+        var halfRange = ResolveDynamicHalfRange(volatilityCount);
 
         return new DynamicMarketLineResult(
-            ApplyCenterToTemplates(templates, forecastCenter),
+            ApplyCenterToTemplates(templates, forecastCenter, halfRange),
             forecastCenter,
             samples.Count,
             confidence,
             samples[^1].FinalCount,
-            "history");
+            "history",
+            halfRange,
+            hybridRate,
+            volatilityCount,
+            adjustedRates.OutlierAdjustedSamples);
     }
 
-    private List<MarketTemplate> ApplyCenterToTemplates(IReadOnlyList<MarketTemplate> baseTemplates, int center)
+    private List<MarketTemplate> ApplyCenterToTemplates(IReadOnlyList<MarketTemplate> baseTemplates, int center, int halfRange)
     {
-        var halfRange = Math.Max(0, _options.HalfRange);
         var underThreshold = Math.Max(1, center - halfRange);
         var rangeMin = underThreshold;
         var rangeMax = center + halfRange;
@@ -167,13 +188,17 @@ public class DynamicMarketLineService
         return ((lastWeight * lastRate) + (emaWeight * emaRate) + (medianWeight * medianRate)) / totalWeight;
     }
 
-    private double CalculateConfidence(int sampleSize)
+    private double CalculateConfidence(int sampleSize, double projectedCenter, double volatilityCount)
     {
         if (sampleSize <= 0)
             return 0;
 
         var minSamples = Math.Max(1, _options.MinSamplesForFullConfidence);
-        return Math.Min(1d, sampleSize / (double)minSamples);
+        var sampleConfidence = Math.Min(1d, sampleSize / (double)minSamples);
+        var volatilityDenominator = Math.Max(6d, Math.Abs(projectedCenter));
+        var volatilityConfidence = 1d / (1d + (Math.Max(0d, volatilityCount) / volatilityDenominator * 0.5d));
+
+        return Math.Clamp(sampleConfidence * volatilityConfidence, 0d, 1d);
     }
 
     private static double CalculateExponentialMovingAverage(IReadOnlyList<double> values, double alpha)
@@ -199,6 +224,64 @@ public class DynamicMarketLineService
         return ordered.Count % 2 == 0
             ? (ordered[middle - 1] + ordered[middle]) / 2d
             : ordered[middle];
+    }
+
+    private AdjustedHistoricalRates AdjustOutlierRates(IReadOnlyList<double> rates)
+    {
+        var adjustedRates = rates.ToList();
+        if (rates.Count < Math.Max(1, _options.MinSamplesForOutlierAdjustment))
+            return new AdjustedHistoricalRates(adjustedRates, 0);
+
+        var median = CalculateMedian(rates);
+        var mad = CalculateMedianAbsoluteDeviation(rates);
+        if (mad <= 0)
+            return new AdjustedHistoricalRates(adjustedRates, 0);
+
+        var multiplier = Math.Max(0d, ToDouble(_options.OutlierMadMultiplier));
+        if (multiplier <= 0)
+            return new AdjustedHistoricalRates(adjustedRates, 0);
+
+        var lowerBound = median - (mad * multiplier);
+        var upperBound = median + (mad * multiplier);
+        var adjustedCount = 0;
+
+        for (var index = 0; index < adjustedRates.Count; index++)
+        {
+            var original = adjustedRates[index];
+            var adjusted = Math.Clamp(original, lowerBound, upperBound);
+            if (Math.Abs(adjusted - original) > double.Epsilon)
+            {
+                adjustedRates[index] = adjusted;
+                adjustedCount++;
+            }
+        }
+
+        return new AdjustedHistoricalRates(adjustedRates, adjustedCount);
+    }
+
+    private static double CalculateMedianAbsoluteDeviation(IReadOnlyList<double> values)
+    {
+        if (values.Count == 0)
+            return 0;
+
+        var median = CalculateMedian(values);
+        return CalculateMedian(values.Select(value => Math.Abs(value - median)).ToList());
+    }
+
+    private int ResolveStaticHalfRange()
+    {
+        return Math.Max(0, _options.HalfRange);
+    }
+
+    private int ResolveDynamicHalfRange(double volatilityCount)
+    {
+        var baseHalfRange = ResolveStaticHalfRange();
+        var minHalfRange = Math.Max(0, _options.MinHalfRange);
+        var maxHalfRange = Math.Max(minHalfRange, _options.MaxHalfRange);
+        var volatilityHalfRange = (int)Math.Ceiling(Math.Max(0d, volatilityCount) * ToDouble(_options.VolatilityRangeMultiplier));
+        var preferredHalfRange = Math.Max(Math.Max(baseHalfRange, minHalfRange), volatilityHalfRange);
+
+        return Math.Clamp(preferredHalfRange, minHalfRange, maxHalfRange);
     }
 
     private int ResolveFallbackCenter(IReadOnlyList<MarketTemplate> templates)
@@ -266,13 +349,19 @@ public sealed record DynamicMarketLineResult(
     int SampleSize,
     double Confidence,
     int? LastFinalCount,
-    string ForecastSource)
+    string ForecastSource,
+    int HalfRange,
+    double? ForecastRatePerSecond,
+    double VolatilityCount,
+    int OutlierAdjustedSamples)
 {
     public string ToAuditReason()
     {
         var confidenceValue = Confidence.ToString("0.####", CultureInfo.InvariantCulture);
         var lastFinalCountValue = LastFinalCount?.ToString(CultureInfo.InvariantCulture) ?? "none";
-        return $"center={Center};sampleSize={SampleSize};confidence={confidenceValue};lastFinalCount={lastFinalCountValue};forecastSource={ForecastSource}";
+        var forecastRateValue = ForecastRatePerSecond?.ToString("0.####", CultureInfo.InvariantCulture) ?? "none";
+        var volatilityValue = VolatilityCount.ToString("0.####", CultureInfo.InvariantCulture);
+        return $"center={Center};halfRange={HalfRange};sampleSize={SampleSize};confidence={confidenceValue};lastFinalCount={lastFinalCountValue};forecastSource={ForecastSource};forecastRatePerSecond={forecastRateValue};volatilityCount={volatilityValue};outlierAdjustedSamples={OutlierAdjustedSamples}";
     }
 }
 
@@ -280,3 +369,7 @@ internal sealed record HistoricalRoundSample(
     int FinalCount,
     double DurationSeconds,
     double RatePerSecond);
+
+internal sealed record AdjustedHistoricalRates(
+    List<double> Rates,
+    int OutlierAdjustedSamples);

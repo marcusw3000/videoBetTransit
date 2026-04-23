@@ -49,9 +49,12 @@
   "max_track_history_age": 300,
   "min_bbox_area": 100,
   "stream_rotation": {
-    "enabled": false,
+    "enabled": true,
     "mode": "round_boundary",
-    "strategy": "uniform_excluding_current"
+    "strategy": "uniform_excluding_current",
+    "min_rounds_per_stream": 2,
+    "max_rounds_per_stream": 2,
+    "target_rounds_for_current_stream": 2
   },
   "stream_profiles": [
     {
