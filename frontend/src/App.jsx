@@ -432,15 +432,16 @@ function MarketPage() {
     }
 
     void loadWorkerHealth()
+    const intervalMs = isCameraTransitioning ? 500 : 2000
     const intervalId = setInterval(() => {
       void loadWorkerHealth()
-    }, 2000)
+    }, intervalMs)
 
     return () => {
       active = false
       clearInterval(intervalId)
     }
-  }, [])
+  }, [isCameraTransitioning])
 
   useEffect(() => {
     const handleConfigUpdate = () => {

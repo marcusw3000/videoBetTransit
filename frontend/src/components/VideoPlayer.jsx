@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Hls from 'hls.js'
 
 const WEBRTC_BOOT_TIMEOUT_MS = 3500
-const CAMERA_TRANSITION_TIMEOUT_MS = 15000
-const CAMERA_TRANSITION_MIN_VISIBLE_MS = 450
+const CAMERA_TRANSITION_TIMEOUT_MS = 5000
+const CAMERA_TRANSITION_MIN_VISIBLE_MS = 250
 const WRAPPER_SOURCE = 'videobettransit-webrtc-wrapper'
 
 function buildReloadedSrc(src, reloadToken) {
@@ -35,6 +35,7 @@ export default function VideoPlayer({
   const transitionTimeoutRef = useRef(null)
   const transitionStartedAtRef = useRef(0)
   const previousSourceSignatureRef = useRef('')
+  const previousExternalTransitioningRef = useRef(false)
   const [mode, setMode] = useState(() => getPreferredMode(webrtcSrc, src, fallbackSrc))
   const [hasError, setHasError] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
@@ -153,16 +154,23 @@ export default function VideoPlayer({
 
   useEffect(() => {
     const previous = previousSourceSignatureRef.current
+    const previousExternalTransitioning = previousExternalTransitioningRef.current
     previousSourceSignatureRef.current = sourceSignature
+    previousExternalTransitioningRef.current = Boolean(transitioning)
 
     if (!previous) {
       return
     }
 
-    if (previous !== sourceSignature && (webrtcSrc || src || fallbackSrc)) {
+    if (
+      previous !== sourceSignature
+      && (webrtcSrc || src || fallbackSrc)
+      && !transitioning
+      && !previousExternalTransitioning
+    ) {
       beginCameraTransition()
     }
-  }, [beginCameraTransition, fallbackSrc, sourceSignature, src, webrtcSrc])
+  }, [beginCameraTransition, fallbackSrc, sourceSignature, src, transitioning, webrtcSrc])
 
   useEffect(() => {
     if (!reloadedWebRtcSrc || mode !== 'webrtc') return undefined

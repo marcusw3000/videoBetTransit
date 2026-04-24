@@ -317,13 +317,13 @@ export default function AdminDashboard() {
       void loadOperations().catch(console.error)
       void loadRounds(selectedRoundId).catch(console.error)
       void loadSessions().catch(console.error)
-    }, 5000)
+    }, isCameraTransitioning ? 750 : 5000)
 
     return () => {
       active = false
       clearInterval(intervalId)
     }
-  }, [loadOperations, loadRounds, loadSessions, selectedRoundId])
+  }, [isCameraTransitioning, loadOperations, loadRounds, loadSessions, selectedRoundId])
 
   useEffect(() => {
     void loadSessionDetails(selectedSessionId).catch((err) => {
