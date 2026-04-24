@@ -935,7 +935,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task NotifyStreamProfileActivated_with_auto_switch_voids_active_round_and_opens_next()
+    public async Task NotifyStreamProfileActivated_with_auto_switch_voids_active_round_and_waits_for_ready_phase()
     {
         var activeRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_auto_profile");
         Assert.NotNull(activeRound);
@@ -949,11 +949,6 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         response.EnsureSuccessStatusCode();
 
-        var currentRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_auto_profile");
-        Assert.NotNull(currentRound);
-        Assert.NotEqual(activeRound!.RoundId, currentRound!.RoundId);
-        Assert.Equal("open", currentRound.Status);
-
         using var verifyScope = _factory.Services.CreateScope();
         var verifyDbFactory = verifyScope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var verifyDb = await verifyDbFactory.CreateDbContextAsync();
@@ -962,11 +957,16 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.Equal(RoundStatus.Void, oldRound.Status);
         Assert.Equal("Stream profile changed during active round", oldRound.VoidReason);
         Assert.True(await verifyDb.RoundEvents.AnyAsync(e => e.RoundId == oldRound.RoundId && e.EventType == "stream_profile_changed"));
+        Assert.False(await verifyDb.Rounds.AnyAsync(r =>
+            r.CameraId == "cam_auto_profile" &&
+            (r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)));
 
         var state = await verifyDb.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_auto_profile");
         Assert.Equal("profile-auto", state.ActiveStreamProfileId);
-        Assert.Equal(1, state.RoundsSinceProfileSwitch);
+        Assert.Equal(0, state.RoundsSinceProfileSwitch);
         Assert.NotNull(state.LastProfileChangedAt);
+        Assert.Equal("waiting_stream", state.ActivationPhase);
+        Assert.False(state.ReadyForRounds);
     }
 
     [Fact]
@@ -1213,6 +1213,143 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.Single(history!);
         Assert.Equal("void", history![0].Status);
         Assert.Contains("Duplicate active round repaired", history[0].VoidReason);
+    }
+
+    [Fact]
+    public async Task NotifyStreamProfileActivated_auto_switch_round_restarts_even_when_profile_is_the_same()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+
+        await roundService.EnsureActiveRoundAsync("cam_profile_reactivate");
+
+        Guid initialRoundId;
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var currentRound = await db.Rounds
+                .Where(r => r.CameraId == "cam_profile_reactivate" && r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstAsync();
+            initialRoundId = currentRound.RoundId;
+        }
+
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_profile_reactivate",
+            "stream_same_profile",
+            allowSettling: true,
+            autoSwitchRound: true);
+
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_profile_reactivate",
+            "stream_same_profile",
+            allowSettling: true,
+            autoSwitchRound: true,
+            phase: "ready");
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var activeRounds = await db.Rounds
+                .Where(r => r.CameraId == "cam_profile_reactivate" && r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+                .OrderByDescending(r => r.CreatedAt)
+                .ToListAsync();
+
+            var voidedRounds = await db.Rounds
+                .Where(r => r.CameraId == "cam_profile_reactivate" && r.Status == RoundStatus.Void)
+                .OrderByDescending(r => r.CreatedAt)
+                .ToListAsync();
+
+            var activeRound = Assert.Single(activeRounds);
+            var reactivatedRound = Assert.Single(voidedRounds);
+
+            Assert.NotEqual(initialRoundId, activeRound.RoundId);
+            Assert.Equal(initialRoundId, reactivatedRound.RoundId);
+            Assert.Equal("Stream activated for fresh round boundary", reactivatedRound.VoidReason);
+            Assert.NotNull(reactivatedRound.VoidedAt);
+        }
+    }
+
+    [Fact]
+    public async Task NotifyStreamProfileActivated_auto_switch_round_voids_other_camera_rounds_without_restarting_them()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+
+        await roundService.EnsureActiveRoundAsync("cam_switch_primary");
+        await roundService.EnsureActiveRoundAsync("cam_switch_secondary");
+
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_switch_primary",
+            "stream_primary",
+            allowSettling: true,
+            autoSwitchRound: true);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+
+        var primaryActiveRounds = await db.Rounds
+            .Where(r => r.CameraId == "cam_switch_primary" && r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+            .ToListAsync();
+
+        var secondaryActiveRounds = await db.Rounds
+            .Where(r => r.CameraId == "cam_switch_secondary" && r.Status != RoundStatus.Settled && r.Status != RoundStatus.Void)
+            .ToListAsync();
+
+        var secondaryVoidedRound = await db.Rounds
+            .Where(r => r.CameraId == "cam_switch_secondary" && r.Status == RoundStatus.Void)
+            .OrderByDescending(r => r.VoidedAt)
+            .FirstOrDefaultAsync();
+
+        Assert.Empty(primaryActiveRounds);
+        Assert.Empty(secondaryActiveRounds);
+        Assert.NotNull(secondaryVoidedRound);
+        Assert.Equal("Camera deactivated due to stream activation on cam_switch_primary", secondaryVoidedRound!.VoidReason);
+    }
+
+    [Fact]
+    public async Task NotifyStreamProfileActivated_ready_phase_creates_round_only_after_stream_is_ready()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+
+        await roundService.EnsureActiveRoundAsync("cam_ready_phase");
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_ready_phase",
+            "profile-ready-phase",
+            allowSettling: true,
+            autoSwitchRound: true);
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var stateWaiting = await db.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_ready_phase");
+            Assert.Equal("waiting_stream", stateWaiting.ActivationPhase);
+            Assert.False(stateWaiting.ReadyForRounds);
+            Assert.False(await db.Rounds.AnyAsync(r =>
+                r.CameraId == "cam_ready_phase" &&
+                (r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)));
+        }
+
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_ready_phase",
+            "profile-ready-phase",
+            allowSettling: true,
+            autoSwitchRound: true,
+            phase: "ready");
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var stateReady = await db.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_ready_phase");
+            var activeRound = await db.Rounds
+                .Where(r => r.CameraId == "cam_ready_phase")
+                .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)
+                .SingleAsync();
+
+            Assert.Equal("ready", stateReady.ActivationPhase);
+            Assert.True(stateReady.ReadyForRounds);
+            Assert.Equal("profile-ready-phase", stateReady.ActiveStreamProfileId);
+            Assert.Equal(RoundStatus.Open, activeRound.Status);
+        }
     }
 
     [Fact]

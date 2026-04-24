@@ -10,6 +10,7 @@ internal static class SqliteSchemaRepair
     private const string MigrationRoundEvents = "20260408223627_AddRoundEventsAndOptionalSessionCrossingEvents";
     private const string MigrationCrossingAudit = "20260408224557_AddCrossingEventAuditFieldsAndTimelineSupport";
     private const string MigrationRoundOperationalFields = "20260409152004_AddRoundCountEventOperationalFields";
+    private const string MigrationCameraActivationReadiness = "20260424030000_AddCameraRoundStateActivationReadiness";
 
     public static async Task TryRepairLegacySchemaAsync(AppDbContext db, ILogger logger, CancellationToken cancellationToken = default)
     {
@@ -38,6 +39,7 @@ internal static class SqliteSchemaRepair
             if (!roundEventsNeedsRepair && !crossingEventsNeedsRepair)
             {
                 await EnsureOperationalFieldMigrationAsync(connection, logger, cancellationToken);
+                await EnsureCameraRoundActivationFieldsAsync(connection, logger, cancellationToken);
                 return;
             }
 
@@ -151,6 +153,7 @@ internal static class SqliteSchemaRepair
             await transaction.CommitAsync(cancellationToken);
 
             await EnsureOperationalFieldMigrationAsync(connection, logger, cancellationToken);
+            await EnsureCameraRoundActivationFieldsAsync(connection, logger, cancellationToken);
         }
         finally
         {
@@ -258,6 +261,43 @@ internal static class SqliteSchemaRepair
 
         var productVersion = await GetLatestProductVersionAsync(connection, transaction, cancellationToken) ?? "8.0.0";
         await EnsureMigrationRowAsync(connection, transaction, MigrationRoundOperationalFields, productVersion, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task EnsureCameraRoundActivationFieldsAsync(
+        SqliteConnection connection,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(connection, "CameraRoundStates", cancellationToken))
+            return;
+
+        var existingColumns = await GetColumnNamesAsync(connection, "CameraRoundStates", cancellationToken);
+        var requiredColumns = new[] { "ActivationPhase", "ReadyForRounds" };
+
+        if (requiredColumns.All(existingColumns.Contains))
+            return;
+
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        foreach (var column in requiredColumns.Where(column => !existingColumns.Contains(column)))
+        {
+            var columnSql = column switch
+            {
+                "ActivationPhase" => """ALTER TABLE CameraRoundStates ADD COLUMN ActivationPhase TEXT NOT NULL DEFAULT 'ready';""",
+                "ReadyForRounds" => """ALTER TABLE CameraRoundStates ADD COLUMN ReadyForRounds INTEGER NOT NULL DEFAULT 1;""",
+                _ => null,
+            };
+
+            if (columnSql is null)
+                continue;
+
+            logger.LogWarning("SQLite schema estava parcialmente atualizado. Adicionando coluna ausente {Column} em CameraRoundStates.", column);
+            await ExecuteNonQueryAsync(connection, transaction, columnSql, cancellationToken);
+        }
+
+        var productVersion = await GetLatestProductVersionAsync(connection, transaction, cancellationToken) ?? "8.0.0";
+        await EnsureMigrationRowAsync(connection, transaction, MigrationCameraActivationReadiness, productVersion, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 

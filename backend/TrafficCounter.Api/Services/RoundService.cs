@@ -50,6 +50,10 @@ public class RoundService
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var normalizedCameraId = NormalizeCameraId(cameraId);
+        var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+        if (!CanCreateRounds(state))
+            return false;
+
         var active = await db.Rounds.AnyAsync(r =>
             r.CameraId == normalizedCameraId &&
             r.Status != RoundStatus.Settled &&
@@ -58,8 +62,7 @@ public class RoundService
         if (active)
             return false;
 
-        await CreateNewRoundAsync(db, normalizedCameraId);
-        return true;
+        return await CreateNewRoundAsync(db, normalizedCameraId) is not null;
     }
 
     public async Task<bool> TickAsync()
@@ -289,11 +292,13 @@ public class RoundService
         string cameraId,
         string? streamProfileId,
         bool allowSettling = false,
-        bool autoSwitchRound = false)
+        bool autoSwitchRound = false,
+        string phase = "requested")
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var normalizedCameraId = NormalizeCameraId(cameraId);
+        var normalizedPhase = NormalizeActivationPhase(phase);
         if (!autoSwitchRound)
         {
             var locked = allowSettling
@@ -306,15 +311,7 @@ public class RoundService
         var normalizedProfileId = NormalizeOptional(streamProfileId);
         var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
         var previousProfileId = state.ActiveStreamProfileId;
-
-        if (string.Equals(state.ActiveStreamProfileId, normalizedProfileId, StringComparison.Ordinal))
-            return;
-
-        state.ActiveStreamProfileId = normalizedProfileId;
-        state.RoundsSinceProfileSwitch = 0;
-        state.LastProfileChangedAt = DateTime.UtcNow;
-        state.UpdatedAt = DateTime.UtcNow;
-
+        var sameProfile = string.Equals(state.ActiveStreamProfileId, normalizedProfileId, StringComparison.Ordinal);
         var activeRound = autoSwitchRound
             ? await db.Rounds
                 .Include(r => r.Markets)
@@ -324,6 +321,59 @@ public class RoundService
                 .FirstOrDefaultAsync()
             : null;
 
+        if (sameProfile && !autoSwitchRound)
+            return;
+
+        state.ActiveStreamProfileId = normalizedProfileId;
+        state.RoundsSinceProfileSwitch = 0;
+        state.LastProfileChangedAt = DateTime.UtcNow;
+        state.UpdatedAt = DateTime.UtcNow;
+
+        if (normalizedPhase == "ready")
+        {
+            state.ActivationPhase = "ready";
+            state.ReadyForRounds = true;
+            await db.SaveChangesAsync();
+            await EnsureActiveRoundAsync(normalizedCameraId);
+            return;
+        }
+
+        state.ActivationPhase = "waiting_stream";
+        state.ReadyForRounds = false;
+
+        if (autoSwitchRound)
+        {
+            var otherStates = await db.CameraRoundStates
+                .Where(item => item.CameraId != normalizedCameraId)
+                .ToListAsync();
+            foreach (var otherState in otherStates)
+            {
+                otherState.ReadyForRounds = false;
+                otherState.ActivationPhase = "inactive";
+                otherState.UpdatedAt = DateTime.UtcNow;
+            }
+
+            var otherActiveRounds = await db.Rounds
+                .Include(r => r.Markets)
+                .Where(r => r.CameraId != normalizedCameraId)
+                .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)
+                .OrderBy(r => r.CameraId)
+                .ThenByDescending(r => r.CreatedAt)
+                .ToListAsync();
+
+            foreach (var otherActiveRound in otherActiveRounds)
+            {
+                await VoidRoundAsync(
+                    db,
+                    otherActiveRound,
+                    $"Camera deactivated due to stream activation on {normalizedCameraId}",
+                    "stream_profile_activation",
+                    "inactive_camera_deactivated",
+                    $"activatedCameraId={normalizedCameraId};deactivatedCameraId={otherActiveRound.CameraId}",
+                    createReplacementRound: false);
+            }
+        }
+
         if (activeRound is null)
         {
             await db.SaveChangesAsync();
@@ -331,14 +381,17 @@ public class RoundService
         }
 
         var reason =
-            $"previousProfileId={previousProfileId ?? "none"};newProfileId={normalizedProfileId ?? "none"}";
+            $"previousProfileId={previousProfileId ?? "none"};newProfileId={normalizedProfileId ?? "none"};autoSwitchRound={autoSwitchRound.ToString().ToLowerInvariant()}";
         await VoidRoundAsync(
             db,
             activeRound,
-            "Stream profile changed during active round",
+            sameProfile
+                ? "Stream activated for fresh round boundary"
+                : "Stream profile changed during active round",
             "stream_profile_activation",
-            "stream_profile_changed",
-            reason);
+            sameProfile ? "stream_profile_reactivated" : "stream_profile_changed",
+            reason,
+            createReplacementRound: false);
     }
 
     public async Task HandleCameraSourceActivationAsync(string cameraId, string sourceUrl)
@@ -375,6 +428,8 @@ public class RoundService
 
         var previousFingerprint = state.LastSourceFingerprint;
         state.ActiveStreamProfileId = null;
+        state.ActivationPhase = "waiting_stream";
+        state.ReadyForRounds = false;
         state.RoundsSinceProfileSwitch = 0;
         state.LastProfileChangedAt = now;
         state.LastSourceFingerprint = sourceFingerprint;
@@ -429,7 +484,7 @@ public class RoundService
             throw new InvalidOperationException(CameraLockedMessage);
     }
 
-    private async Task<Round> CreateNewRoundAsync(AppDbContext db, string cameraId)
+    private async Task<Round?> CreateNewRoundAsync(AppDbContext db, string cameraId)
     {
         var normalizedCameraId = NormalizeCameraId(cameraId);
         var creationLock = CameraRoundCreationLocks.GetOrAdd(normalizedCameraId, _ => new SemaphoreSlim(1, 1));
@@ -457,6 +512,16 @@ public class RoundService
 
             var now = DateTime.UtcNow;
             var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+            if (!CanCreateRounds(state))
+            {
+                _logger.LogInformation(
+                    "[Round] Criacao adiada para camera {CameraId} porque activationPhase={Phase} readyForRounds={ReadyForRounds}.",
+                    normalizedCameraId,
+                    state.ActivationPhase,
+                    state.ReadyForRounds);
+                return null;
+            }
+
             var selection = SelectRoundMode(state);
             var timing = GetTiming(selection.RoundMode);
             var marketLine = await _dynamicMarketLineService.BuildTemplatesAsync(
@@ -746,13 +811,29 @@ public class RoundService
         state = new CameraRoundState
         {
             CameraId = cameraId,
+            ActivationPhase = "ready",
             CreatedAt = DateTime.UtcNow,
+            ReadyForRounds = true,
             UpdatedAt = DateTime.UtcNow,
             RoundsSinceProfileSwitch = 0,
         };
 
         db.CameraRoundStates.Add(state);
         return state;
+    }
+
+    private static bool CanCreateRounds(CameraRoundState state) => state.ReadyForRounds;
+
+    private static string NormalizeActivationPhase(string? phase)
+    {
+        var normalized = string.IsNullOrWhiteSpace(phase) ? "requested" : phase.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "ready" => "ready",
+            "requested" => "requested",
+            "waiting_stream" => "waiting_stream",
+            _ => "requested",
+        };
     }
 
     private RoundModeSelection SelectRoundMode(CameraRoundState state)
@@ -818,7 +899,8 @@ public class RoundService
         string reason,
         string source,
         string? preVoidEventType = null,
-        string? preVoidEventReason = null)
+        string? preVoidEventReason = null,
+        bool createReplacementRound = true)
     {
         if (round.Status == RoundStatus.Settled || round.Status == RoundStatus.Void)
             return false;
@@ -846,8 +928,11 @@ public class RoundService
         await _betService.VoidAcceptedBetsForRoundAsync(round.RoundId, voidedAt);
         await BroadcastAsync("round_voided", round);
 
-        await using var db2 = await _dbFactory.CreateDbContextAsync();
-        await CreateNewRoundAsync(db2, round.CameraId);
+        if (createReplacementRound)
+        {
+            await using var db2 = await _dbFactory.CreateDbContextAsync();
+            await CreateNewRoundAsync(db2, round.CameraId);
+        }
 
         return true;
     }

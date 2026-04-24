@@ -127,6 +127,23 @@ function isRoundForCamera(round, cameraId) {
   return cameraIds.length === 0 || cameraIds.includes(expected)
 }
 
+function isRoundForPipeline(round, cameraIds) {
+  const allowed = Array.isArray(cameraIds)
+    ? cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  if (allowed.length === 0) return true
+
+  const directCameraId = String(round?.cameraId || '').trim().toLowerCase()
+  if (directCameraId) return allowed.includes(directCameraId)
+
+  const roundCameraIds = Array.isArray(round?.cameraIds)
+    ? round.cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  return roundCameraIds.some((item) => allowed.includes(item))
+}
+
 function filterHistoryByPipelineCameras(history, cameraIds) {
   const allowed = Array.isArray(cameraIds)
     ? cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
@@ -174,10 +191,18 @@ function MarketPage() {
     () => filterHistoryByPipelineCameras(history, workerHealth?.streamProfileCameraIds),
     [history, workerHealth?.streamProfileCameraIds],
   )
+  const cameraActivation = workerHealth?.cameraActivation || null
+  const pipelineCameraIds = useMemo(
+    () => (Array.isArray(workerHealth?.streamProfileCameraIds) ? workerHealth.streamProfileCameraIds : []),
+    [workerHealth?.streamProfileCameraIds],
+  )
   const recentHistory = useMemo(() => filteredHistory.slice(0, RECENT_HISTORY_LIMIT), [filteredHistory])
-  const activeStreamPath = workerHealth?.processedStreamPath || ''
-  const activeCameraId = workerHealth?.cameraId || embedConfig.cameraId
-  const activeCameraLabel = workerHealth?.streamRotation?.activeProfileLabel || embedConfig.cameraLabel
+  const isCameraTransitioning = Boolean(cameraActivation && cameraActivation.phase !== 'ready')
+  const roundCameraId = cameraActivation?.readyCameraId || workerHealth?.cameraId || embedConfig.cameraId
+  const activeStreamPath = cameraActivation?.readyProcessedStreamPath || workerHealth?.processedStreamPath || ''
+  const activeCameraId = roundCameraId
+  const activeCameraLabel = cameraActivation?.readyProfileLabel || workerHealth?.streamRotation?.activeProfileLabel || embedConfig.cameraLabel
+  const transitionCameraLabel = cameraActivation?.requestedProfileLabel || workerHealth?.streamRotation?.activeProfileLabel || activeCameraLabel
   const webrtcSrc = useMemo(
     () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
     [activeCameraId, activeStreamPath],
@@ -337,6 +362,10 @@ function MarketPage() {
       void loadCurrentRound()
     }, ROUND_POLL_INTERVAL_MS)
 
+    const historyPollId = setInterval(() => {
+      void loadHistory()
+    }, 5000)
+
     startRoundConnection({
       onCountUpdated: (data) => {
         if (!active) return
@@ -350,20 +379,28 @@ function MarketPage() {
       },
       onRoundSettled: async (data) => {
         if (!active) return
-        if (!isRoundForCamera(data, activeCameraId)) return
-        reconcileRecentBets(data)
-        setSelectedMarketId('')
-        showToast('Round encerrado! Novo round iniciado.')
-        await loadCurrentRound()
+        const isActiveCameraRound = isRoundForCamera(data, activeCameraId)
+        const isPipelineRound = isRoundForPipeline(data, pipelineCameraIds)
+        if (!isPipelineRound) return
+        if (isActiveCameraRound) {
+          reconcileRecentBets(data)
+          setSelectedMarketId('')
+          showToast('Round encerrado! Novo round iniciado.')
+          await loadCurrentRound()
+        }
         await loadHistory()
       },
       onRoundVoided: async (data) => {
         if (!active) return
-        if (!isRoundForCamera(data, activeCameraId)) return
-        reconcileRecentBets(data)
-        setSelectedMarketId('')
-        showToast('Round anulado. Carregando proximo round oficial.')
-        await loadCurrentRound()
+        const isActiveCameraRound = isRoundForCamera(data, activeCameraId)
+        const isPipelineRound = isRoundForPipeline(data, pipelineCameraIds)
+        if (!isPipelineRound) return
+        if (isActiveCameraRound) {
+          reconcileRecentBets(data)
+          setSelectedMarketId('')
+          showToast('Round anulado. Carregando proximo round oficial.')
+          await loadCurrentRound()
+        }
         await loadHistory()
       },
     }).catch((err) => {
@@ -375,9 +412,10 @@ function MarketPage() {
     return () => {
       active = false
       clearInterval(pollId)
+      clearInterval(historyPollId)
       stopRoundConnection().catch(console.error)
     }
-  }, [activeCameraId, loadCurrentRound, loadHistory, reconcileRecentBets, updateRound])
+  }, [activeCameraId, loadCurrentRound, loadHistory, pipelineCameraIds, reconcileRecentBets, updateRound])
 
   useEffect(() => {
     let active = true
@@ -525,6 +563,8 @@ function MarketPage() {
                 src={hlsSrc}
                 fallbackSrc={mjpegSrc}
                 title={activeCameraLabel || 'Transmissão ao vivo'}
+                transitionLabel={transitionCameraLabel || 'Nova câmera'}
+                transitioning={isCameraTransitioning}
                 countValue={displayCount}
               />
             </div>

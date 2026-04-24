@@ -80,6 +80,23 @@ function filterHistoryByPipelineCameras(history, cameraIds) {
   })
 }
 
+function isRoundForPipeline(round, cameraIds) {
+  const allowed = Array.isArray(cameraIds)
+    ? cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  if (allowed.length === 0) return true
+
+  const directCameraId = String(round?.cameraId || '').trim().toLowerCase()
+  if (directCameraId) return allowed.includes(directCameraId)
+
+  const roundCameraIds = Array.isArray(round?.cameraIds)
+    ? round.cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  return roundCameraIds.some((item) => allowed.includes(item))
+}
+
 function getRoundStatusLabel(round) {
   const status = String(round?.status || 'desconhecido').toLowerCase()
 
@@ -137,11 +154,18 @@ export default function AdminDashboard() {
   const roundPhase = getRoundPhase(currentRound)
   const streamState = frontendTransportState
   const roundTimerLabel = roundPhase === 'open' ? 'Fechamento das Apostas' : 'Tempo Restante da Rodada'
-  const activeStreamPath = operations?.processedStreamPath || operations?.health?.processedStreamPath || ''
-  const activeCameraId = operations?.cameraId || operations?.health?.cameraId || embedConfig.cameraId
+  const cameraActivation = operations?.cameraActivation || operations?.health?.cameraActivation || null
+  const isCameraTransitioning = Boolean(cameraActivation && cameraActivation.phase !== 'ready')
+  const activeStreamPath = cameraActivation?.readyProcessedStreamPath || operations?.processedStreamPath || operations?.health?.processedStreamPath || ''
+  const activeCameraId = cameraActivation?.readyCameraId || operations?.cameraId || operations?.health?.cameraId || embedConfig.cameraId
+  const transitionCameraLabel = cameraActivation?.requestedProfileLabel || cameraActivation?.requestedCameraId || activeCameraId
   const filteredHistory = useMemo(
     () => filterHistoryByPipelineCameras(history, operations?.streamProfileCameraIds || operations?.health?.streamProfileCameraIds),
     [history, operations?.health?.streamProfileCameraIds, operations?.streamProfileCameraIds],
+  )
+  const pipelineCameraIds = useMemo(
+    () => (operations?.streamProfileCameraIds || operations?.health?.streamProfileCameraIds || []),
+    [operations?.health?.streamProfileCameraIds, operations?.streamProfileCameraIds],
   )
   const webrtcSrc = useMemo(
     () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
@@ -359,14 +383,18 @@ export default function AdminDashboard() {
       },
       onRoundSettled: async (payload) => {
         if (!active) return
-        if (payload?.cameraId !== activeCameraId) return
-        setCurrentRound(payload)
+        if (!isRoundForPipeline(payload, pipelineCameraIds)) return
+        if (payload?.cameraId === activeCameraId) {
+          setCurrentRound(payload)
+        }
         await loadRounds(selectedRoundId || payload?.roundId)
       },
       onRoundVoided: async (payload) => {
         if (!active) return
-        if (payload?.cameraId !== activeCameraId) return
-        setCurrentRound(payload)
+        if (!isRoundForPipeline(payload, pipelineCameraIds)) return
+        if (payload?.cameraId === activeCameraId) {
+          setCurrentRound(payload)
+        }
         await loadRounds(selectedRoundId || payload?.roundId)
       },
     }).catch((err) => {
@@ -377,7 +405,7 @@ export default function AdminDashboard() {
       active = false
       stopRoundConnection().catch(console.error)
     }
-  }, [activeCameraId, loadRoundArtifacts, loadRounds, selectedRoundId])
+  }, [activeCameraId, loadRoundArtifacts, loadRounds, pipelineCameraIds, selectedRoundId])
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -513,6 +541,8 @@ export default function AdminDashboard() {
                 src={hlsSrc}
                 fallbackSrc={mjpegSrc}
                 title={activeSession?.cameraName || embedConfig.cameraLabel || 'Camera ativa'}
+                transitionLabel={transitionCameraLabel}
+                transitioning={isCameraTransitioning}
                 countValue={currentRound?.currentCount ?? operations?.totalCount ?? operations?.health?.totalCount ?? 0}
                 onStreamStatusChange={setFrontendTransportState}
               />

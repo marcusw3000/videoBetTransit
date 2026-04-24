@@ -83,7 +83,8 @@ public class InternalController : ControllerBase
                 dto.CameraId,
                 dto.StreamProfileId,
                 dto.AllowSettling,
-                dto.AutoSwitchRound);
+                dto.AutoSwitchRound,
+                dto.Phase);
             return Ok(new { received = true });
         }
         catch (InvalidOperationException ex)

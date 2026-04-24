@@ -217,6 +217,19 @@ stream_rotation_status_ref = {
     "activeProfileLabel": "",
     "lastMessage": "",
 }
+camera_activation_status_lock = threading.Lock()
+camera_activation_status_ref = {
+    "phase": "ready",
+    "requestedCameraId": "",
+    "readyCameraId": "",
+    "requestedStreamProfileId": "",
+    "readyStreamProfileId": "",
+    "requestedProcessedStreamPath": "",
+    "readyProcessedStreamPath": "",
+    "requestedProfileLabel": "",
+    "readyProfileLabel": "",
+    "readyForRounds": True,
+}
 
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
@@ -648,6 +661,16 @@ def get_stream_rotation_status() -> dict:
         return dict(stream_rotation_status_ref)
 
 
+def update_camera_activation_status(**values):
+    with camera_activation_status_lock:
+        camera_activation_status_ref.update(values)
+
+
+def get_camera_activation_status() -> dict:
+    with camera_activation_status_lock:
+        return dict(camera_activation_status_ref)
+
+
 def is_mjpeg_request_authorized() -> bool:
     if not mjpeg_token_ref:
         return True
@@ -681,13 +704,15 @@ def create_mjpeg_app() -> Flask:
             if str(profile.get("camera_id") or "").strip()
         })
         payload["pipelineRunning"] = pipeline_runtime.is_running()
-        payload["cameraId"] = active_config.get("camera_id", "")
+        activation = get_camera_activation_status()
+        payload["cameraId"] = activation.get("readyCameraId") or active_config.get("camera_id", "")
         payload["sourceUrl"] = active_config.get("stream_url", "")
         payload["captureSourceUrl"] = active_config.get("capture_source_url", "")
-        payload["processedStreamPath"] = active_config.get("processed_stream_path", "")
+        payload["processedStreamPath"] = activation.get("readyProcessedStreamPath") or active_config.get("processed_stream_path", "")
         payload["selectedStreamProfileId"] = active_config.get("selected_stream_profile_id", "")
         payload["streamProfileCameraIds"] = eligible_camera_ids
         payload["streamRotation"] = get_stream_rotation_status()
+        payload["cameraActivation"] = activation
         return jsonify(payload)
 
     @app.post("/pipeline/start")
@@ -2838,6 +2863,22 @@ def main():
         activeProfileLabel=format_stream_profile_label(selected_profile),
         lastMessage="",
     )
+    initial_camera_id = str(cfg.get("camera_id") or selected_profile.get("camera_id") or "").strip()
+    initial_profile_id = str(selected_profile.get("id") or cfg.get("selected_stream_profile_id") or "").strip()
+    initial_processed_path = str(cfg.get("processed_stream_path") or f"processed/{initial_camera_id}" if initial_camera_id else "").strip()
+    initial_profile_label = format_stream_profile_label(selected_profile) if selected_profile else initial_camera_id
+    update_camera_activation_status(
+        phase="ready",
+        requestedCameraId=initial_camera_id,
+        readyCameraId=initial_camera_id,
+        requestedStreamProfileId=initial_profile_id,
+        readyStreamProfileId=initial_profile_id,
+        requestedProcessedStreamPath=initial_processed_path,
+        readyProcessedStreamPath=initial_processed_path,
+        requestedProfileLabel=initial_profile_label,
+        readyProfileLabel=initial_profile_label,
+        readyForRounds=True,
+    )
     streamer.set_jpeg_quality(int(cfg.get("mjpeg_jpeg_quality", 70)))
     streamer.set_fps_limit(float(cfg.get("mjpeg_fps_limit", 0)))
 
@@ -2901,6 +2942,7 @@ def main():
     editor = None
     control_panel = None
     pending_stream_profile = None
+    pending_camera_activation = None
     pending_rotation_profile = None
     last_rotation_round_id = ""
     rotation_boundary_consumed = False
@@ -3566,6 +3608,28 @@ def main():
             try:
                 current_pipeline_cfg = build_pipeline_config(cfg)
                 pipeline_runtime.start(current_pipeline_cfg)
+                requested_camera_id = str(profile.get("camera_id") or "").strip()
+                requested_profile_id = str(profile.get("id") or "").strip()
+                requested_processed_path = str(current_pipeline_cfg.get("processed_stream_path") or "").strip()
+                requested_profile_label = format_stream_profile_label(profile)
+                pending_camera_activation = {
+                    "phase": "waiting_stream",
+                    "requestedCameraId": requested_camera_id,
+                    "requestedStreamProfileId": requested_profile_id,
+                    "requestedProcessedStreamPath": requested_processed_path,
+                    "requestedProfileLabel": requested_profile_label,
+                    "autoSwitchRound": bool(profile.get("_activation_auto_switch_round")),
+                    "requestNotified": False,
+                    "readyNotified": False,
+                }
+                update_camera_activation_status(
+                    phase="waiting_stream",
+                    requestedCameraId=requested_camera_id,
+                    requestedStreamProfileId=requested_profile_id,
+                    requestedProcessedStreamPath=requested_processed_path,
+                    requestedProfileLabel=requested_profile_label,
+                    readyForRounds=False,
+                )
                 if ensure_stream_rotation_profile_state(stream_rotation, str(profile.get("id") or ""), rng=random):
                     cfg["stream_rotation"] = dict(stream_rotation)
                     save_config(config_path, cfg)
@@ -3588,7 +3652,10 @@ def main():
                         profile.get("id", ""),
                         allow_settling=bool(profile.get("_activation_allow_settling")),
                         auto_switch_round=bool(profile.get("_activation_auto_switch_round")),
+                        phase="requested",
                     )
+                    if isinstance(pending_camera_activation, dict):
+                        pending_camera_activation["requestNotified"] = True
                 publish_rotation_status(f"Perfil ativo: {format_stream_profile_label(profile)}")
             except Exception as exc:
                 logger.warning("Falha ao aplicar perfil de stream: %s", exc)
@@ -3627,6 +3694,45 @@ def main():
             h0, w0 = frame.shape[:2]
             logger.info("Resolução do stream: %dx%d", w0, h0)
             logger.info("ROI: %s | Linha: %s | Direção: %s", roi, line, count_direction)
+
+        if isinstance(pending_camera_activation, dict):
+            activation_requested_camera = str(pending_camera_activation.get("requestedCameraId") or "").strip()
+            activation_requested_profile = str(pending_camera_activation.get("requestedStreamProfileId") or "").strip()
+            activation_requested_path = str(pending_camera_activation.get("requestedProcessedStreamPath") or "").strip()
+            activation_requested_label = str(pending_camera_activation.get("requestedProfileLabel") or activation_requested_camera).strip()
+            current_camera_id = str(cfg.get("camera_id") or "").strip()
+            current_profile_id = str(cfg.get("selected_stream_profile_id") or "").strip()
+            runtime_snapshot = runtime_stats.snapshot()
+            stream_ready = (
+                activation_requested_camera
+                and activation_requested_camera == current_camera_id
+                and activation_requested_profile == current_profile_id
+                and bool(runtime_snapshot.get("streamConnected"))
+                and bool(runtime_snapshot.get("publisherHealthy"))
+            )
+            if stream_ready:
+                if not bool(pending_camera_activation.get("readyNotified")):
+                    backend.notify_stream_profile_activated(
+                        activation_requested_camera,
+                        activation_requested_profile,
+                        allow_settling=True,
+                        auto_switch_round=bool(pending_camera_activation.get("autoSwitchRound")),
+                        phase="ready",
+                    )
+                    pending_camera_activation["readyNotified"] = True
+                update_camera_activation_status(
+                    phase="ready",
+                    requestedCameraId=activation_requested_camera,
+                    readyCameraId=activation_requested_camera,
+                    requestedStreamProfileId=activation_requested_profile,
+                    readyStreamProfileId=activation_requested_profile,
+                    requestedProcessedStreamPath=activation_requested_path,
+                    readyProcessedStreamPath=activation_requested_path,
+                    requestedProfileLabel=activation_requested_label,
+                    readyProfileLabel=activation_requested_label,
+                    readyForRounds=True,
+                )
+                pending_camera_activation = None
 
         now_ts = time.time()
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:

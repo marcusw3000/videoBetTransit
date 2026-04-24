@@ -223,12 +223,14 @@ class BackendClient:
         *,
         allow_settling: bool = False,
         auto_switch_round: bool = False,
+        phase: str = "requested",
     ) -> bool:
         payload = {
             "cameraId": str(camera_id or "").strip(),
             "streamProfileId": str(stream_profile_id or "").strip(),
             "allowSettling": bool(allow_settling),
             "autoSwitchRound": bool(auto_switch_round),
+            "phase": str(phase or "requested").strip().lower(),
         }
 
         if not payload["cameraId"]:
