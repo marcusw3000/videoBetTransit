@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.SignalR;
@@ -16,6 +17,7 @@ namespace TrafficCounter.Api.Services;
 public class RoundService
 {
     public const string CameraLockedMessage = "Camera locked while round is active; try again after settlement.";
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> CameraRoundCreationLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IHubContext<RoundHub> _hub;
@@ -64,6 +66,7 @@ public class RoundService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var now = DateTime.UtcNow;
+        var repairedRounds = await CollapseDuplicateActiveRoundsAsync(db, now);
 
         var rounds = await db.Rounds
             .Include(r => r.Markets)
@@ -73,7 +76,7 @@ public class RoundService
             .ToListAsync();
 
         if (rounds.Count == 0)
-            return false;
+            return repairedRounds.Count > 0;
 
         var changed = false;
         var updatedRounds = new List<Round>();
@@ -133,7 +136,10 @@ public class RoundService
             await CreateNewRoundAsync(db2, round.CameraId);
         }
 
-        return changed;
+        foreach (var repairedRound in repairedRounds)
+            await BroadcastAsync("round_voided", repairedRound);
+
+        return changed || repairedRounds.Count > 0;
     }
 
     public async Task<Round?> IncrementCountAsync(string cameraId = "default")
@@ -423,77 +429,107 @@ public class RoundService
             throw new InvalidOperationException(CameraLockedMessage);
     }
 
-    private async Task CreateNewRoundAsync(AppDbContext db, string cameraId)
+    private async Task<Round> CreateNewRoundAsync(AppDbContext db, string cameraId)
     {
-        var now = DateTime.UtcNow;
         var normalizedCameraId = NormalizeCameraId(cameraId);
-        var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
-        var selection = SelectRoundMode(state);
-        var timing = GetTiming(selection.RoundMode);
-        var marketLine = await _dynamicMarketLineService.BuildTemplatesAsync(
-            db,
-            normalizedCameraId,
-            timing.DurationSeconds,
-            selection.RoundsSinceProfileSwitch,
-            state.LastProfileChangedAt,
-            GetMarketTemplates(selection.RoundMode));
-        var round = new Round
+        var creationLock = CameraRoundCreationLocks.GetOrAdd(normalizedCameraId, _ => new SemaphoreSlim(1, 1));
+        await creationLock.WaitAsync();
+
+        try
         {
-            RoundId = Guid.NewGuid(),
-            CameraId = normalizedCameraId,
-            RoundMode = selection.RoundMode,
-            Status = RoundStatus.Open,
-            DisplayName = GetDisplayName(selection.RoundMode),
-            CreatedAt = now,
-            BetCloseAt = now.AddSeconds(timing.BetWindowSeconds),
-            EndsAt = now.AddSeconds(timing.DurationSeconds),
-            CurrentCount = 0,
-        };
+            var existingActiveRound = await db.Rounds
+                .Include(r => r.Markets)
+                .Where(r => r.CameraId == normalizedCameraId)
+                .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)
+                .OrderByDescending(r => r.CurrentCount)
+                .ThenByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
 
-        var markets = marketLine.Templates.Select((t, i) => new RoundMarket
+            if (existingActiveRound is not null)
+            {
+                _logger.LogWarning(
+                    "[Round] Novo round ignorado para camera {CameraId} porque ja existe round ativo {RoundId} em {Status}.",
+                    normalizedCameraId,
+                    existingActiveRound.RoundId,
+                    existingActiveRound.Status);
+                return existingActiveRound;
+            }
+
+            var now = DateTime.UtcNow;
+            var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+            var selection = SelectRoundMode(state);
+            var timing = GetTiming(selection.RoundMode);
+            var marketLine = await _dynamicMarketLineService.BuildTemplatesAsync(
+                db,
+                normalizedCameraId,
+                timing.DurationSeconds,
+                selection.RoundsSinceProfileSwitch,
+                state.LastProfileChangedAt,
+                GetMarketTemplates(selection.RoundMode));
+            var round = new Round
+            {
+                RoundId = Guid.NewGuid(),
+                CameraId = normalizedCameraId,
+                RoundMode = selection.RoundMode,
+                Status = RoundStatus.Open,
+                DisplayName = GetDisplayName(selection.RoundMode),
+                CreatedAt = now,
+                BetCloseAt = now.AddSeconds(timing.BetWindowSeconds),
+                EndsAt = now.AddSeconds(timing.DurationSeconds),
+                CurrentCount = 0,
+            };
+
+            var markets = marketLine.Templates.Select((t, i) => new RoundMarket
+            {
+                MarketId = Guid.NewGuid(),
+                RoundId = round.RoundId,
+                MarketType = t.Type.ToLowerInvariant(),
+                Label = t.Label,
+                Odds = t.Odds,
+                Threshold = t.Threshold,
+                Min = t.Min,
+                Max = t.Max,
+                TargetValue = t.TargetValue,
+                IsWinner = null,
+                SortOrder = i,
+            }).ToList();
+
+            state.RoundsSinceProfileSwitch += 1;
+            state.UpdatedAt = now;
+
+            db.Rounds.Add(round);
+            db.RoundMarkets.AddRange(markets);
+            db.RoundEvents.Add(CreateRoundEvent(
+                round,
+                "round_mode_selected",
+                now,
+                0,
+                $"roundMode={selection.RoundMode.ToString().ToLowerInvariant()};eligible={selection.WasEligibleForTurbo.ToString().ToLowerInvariant()};streamProfileId={state.ActiveStreamProfileId ?? "none"};roundsSinceSwitchBeforeCreate={selection.RoundsSinceProfileSwitch}",
+                "round_manager"));
+            db.RoundEvents.Add(CreateRoundEvent(
+                round,
+                "market_line_computed",
+                now,
+                0,
+                marketLine.ToAuditReason(),
+                "round_manager"));
+            db.RoundEvents.Add(CreateRoundEvent(round, "opened", now, 0, source: "round_manager"));
+            await db.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "[Round {Id}] Iniciado para camera {CameraId} no modo {RoundMode} com {Count} mercado(s). Encerra as {EndsAt:HH:mm:ss} UTC.",
+                round.RoundId,
+                round.CameraId,
+                round.RoundMode,
+                markets.Count,
+                round.EndsAt);
+
+            return round;
+        }
+        finally
         {
-            MarketId = Guid.NewGuid(),
-            RoundId = round.RoundId,
-            MarketType = t.Type.ToLowerInvariant(),
-            Label = t.Label,
-            Odds = t.Odds,
-            Threshold = t.Threshold,
-            Min = t.Min,
-            Max = t.Max,
-            TargetValue = t.TargetValue,
-            IsWinner = null,
-            SortOrder = i,
-        }).ToList();
-
-        state.RoundsSinceProfileSwitch += 1;
-        state.UpdatedAt = now;
-
-        db.Rounds.Add(round);
-        db.RoundMarkets.AddRange(markets);
-        db.RoundEvents.Add(CreateRoundEvent(
-            round,
-            "round_mode_selected",
-            now,
-            0,
-            $"roundMode={selection.RoundMode.ToString().ToLowerInvariant()};eligible={selection.WasEligibleForTurbo.ToString().ToLowerInvariant()};streamProfileId={state.ActiveStreamProfileId ?? "none"};roundsSinceSwitchBeforeCreate={selection.RoundsSinceProfileSwitch}",
-            "round_manager"));
-        db.RoundEvents.Add(CreateRoundEvent(
-            round,
-            "market_line_computed",
-            now,
-            0,
-            marketLine.ToAuditReason(),
-            "round_manager"));
-        db.RoundEvents.Add(CreateRoundEvent(round, "opened", now, 0, source: "round_manager"));
-        await db.SaveChangesAsync();
-
-        _logger.LogInformation(
-            "[Round {Id}] Iniciado para camera {CameraId} no modo {RoundMode} com {Count} mercado(s). Encerra as {EndsAt:HH:mm:ss} UTC.",
-            round.RoundId,
-            round.CameraId,
-            round.RoundMode,
-            markets.Count,
-            round.EndsAt);
+            creationLock.Release();
+        }
     }
 
     private async Task<Round?> ResolveRoundForCountEventAsync(AppDbContext db, string cameraId, string? explicitRoundId)
@@ -537,6 +573,50 @@ public class RoundService
             .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing)
             .OrderByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
+    }
+
+    private async Task<List<Round>> CollapseDuplicateActiveRoundsAsync(AppDbContext db, DateTime now)
+    {
+        var activeRounds = await db.Rounds
+            .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)
+            .OrderBy(r => r.CameraId)
+            .ThenByDescending(r => r.CurrentCount)
+            .ThenByDescending(r => r.CreatedAt)
+            .ToListAsync();
+
+        var repairedRounds = new List<Round>();
+
+        foreach (var cameraGroup in activeRounds.GroupBy(r => r.CameraId, StringComparer.OrdinalIgnoreCase))
+        {
+            var keeper = cameraGroup.FirstOrDefault();
+            if (keeper is null)
+                continue;
+
+            foreach (var duplicate in cameraGroup.Skip(1))
+            {
+                duplicate.Status = RoundStatus.Void;
+                duplicate.VoidedAt = now;
+                duplicate.VoidReason = $"Duplicate active round repaired; superseded by round {keeper.RoundId}";
+                db.RoundEvents.Add(CreateRoundEvent(
+                    duplicate,
+                    "voided",
+                    now,
+                    duplicate.CurrentCount,
+                    duplicate.VoidReason,
+                    "round_repair"));
+                repairedRounds.Add(duplicate);
+                _logger.LogWarning(
+                    "[RoundRepair] Round duplicado {RoundId} da camera {CameraId} foi anulado; mantendo round {KeeperRoundId}.",
+                    duplicate.RoundId,
+                    duplicate.CameraId,
+                    keeper.RoundId);
+            }
+        }
+
+        if (repairedRounds.Count > 0)
+            await db.SaveChangesAsync();
+
+        return repairedRounds;
     }
 
     private static bool EvaluateMarket(RoundMarket market, int finalCount) =>

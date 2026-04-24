@@ -67,6 +67,19 @@ function mergeRounds(...groups) {
   })
 }
 
+function filterHistoryByPipelineCameras(history, cameraIds) {
+  const allowed = Array.isArray(cameraIds)
+    ? cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  if (allowed.length === 0) return Array.isArray(history) ? history : []
+
+  return (Array.isArray(history) ? history : []).filter((item) => {
+    const cameraId = String(item?.cameraId || '').trim().toLowerCase()
+    return cameraId && allowed.includes(cameraId)
+  })
+}
+
 function getRoundStatusLabel(round) {
   const status = String(round?.status || 'desconhecido').toLowerCase()
 
@@ -126,6 +139,10 @@ export default function AdminDashboard() {
   const roundTimerLabel = roundPhase === 'open' ? 'Fechamento das Apostas' : 'Tempo Restante da Rodada'
   const activeStreamPath = operations?.processedStreamPath || operations?.health?.processedStreamPath || ''
   const activeCameraId = operations?.cameraId || operations?.health?.cameraId || embedConfig.cameraId
+  const filteredHistory = useMemo(
+    () => filterHistoryByPipelineCameras(history, operations?.streamProfileCameraIds || operations?.health?.streamProfileCameraIds),
+    [history, operations?.health?.streamProfileCameraIds, operations?.streamProfileCameraIds],
+  )
   const webrtcSrc = useMemo(
     () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
     [activeCameraId, activeStreamPath],
@@ -220,7 +237,7 @@ export default function AdminDashboard() {
   const loadRounds = useCallback(async (preferredRoundId = '') => {
     const [nextCurrentRound, roundHistory, nextRecentRounds] = await Promise.all([
       getCurrentRound(activeCameraId),
-      getRoundHistory(activeCameraId),
+      getRoundHistory(),
       getRecentRounds(activeCameraId, 12),
     ])
 
@@ -719,7 +736,7 @@ export default function AdminDashboard() {
               />
 
               <div className="admin-history-list official-history-list">
-                {history.slice(0, 4).map((item) => (
+                {filteredHistory.slice(0, 4).map((item) => (
                   <HistoryCard
                     key={item.roundId || item.id}
                     item={item}

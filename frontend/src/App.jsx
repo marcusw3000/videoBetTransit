@@ -127,6 +127,19 @@ function isRoundForCamera(round, cameraId) {
   return cameraIds.length === 0 || cameraIds.includes(expected)
 }
 
+function filterHistoryByPipelineCameras(history, cameraIds) {
+  const allowed = Array.isArray(cameraIds)
+    ? cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : []
+
+  if (allowed.length === 0) return Array.isArray(history) ? history : []
+
+  return (Array.isArray(history) ? history : []).filter((item) => {
+    const cameraId = String(item?.cameraId || '').trim().toLowerCase()
+    return cameraId && allowed.includes(cameraId)
+  })
+}
+
 function MarketPage() {
   const [embedConfig, setEmbedConfig] = useState(() => getEmbedConfig())
   const [round, setRound] = useState(null)
@@ -157,7 +170,11 @@ function MarketPage() {
     () => markets.find((market) => (market.marketId || market.id) === selectedMarketId) || null,
     [markets, selectedMarketId],
   )
-  const recentHistory = useMemo(() => history.slice(0, RECENT_HISTORY_LIMIT), [history])
+  const filteredHistory = useMemo(
+    () => filterHistoryByPipelineCameras(history, workerHealth?.streamProfileCameraIds),
+    [history, workerHealth?.streamProfileCameraIds],
+  )
+  const recentHistory = useMemo(() => filteredHistory.slice(0, RECENT_HISTORY_LIMIT), [filteredHistory])
   const activeStreamPath = workerHealth?.processedStreamPath || ''
   const activeCameraId = workerHealth?.cameraId || embedConfig.cameraId
   const activeCameraLabel = workerHealth?.streamRotation?.activeProfileLabel || embedConfig.cameraLabel
@@ -204,12 +221,12 @@ function MarketPage() {
 
   const loadHistory = useCallback(async () => {
     try {
-      const data = await getRoundHistory(activeCameraId)
+      const data = await getRoundHistory()
       setHistory(data)
     } catch (err) {
       console.error(err)
     }
-  }, [activeCameraId])
+  }, [])
 
   const reconcileRecentBets = useCallback((roundData) => {
     setRecentBets((current) => current.map((bet) => reconcileBetWithRound(bet, roundData)))
@@ -301,7 +318,7 @@ function MarketPage() {
       try {
         const [currentRound, roundHistory] = await Promise.all([
           getCurrentRound(activeCameraId),
-          getRoundHistory(activeCameraId),
+          getRoundHistory(),
         ])
         if (!active) return
         updateRound(currentRound)
@@ -512,11 +529,11 @@ function MarketPage() {
               />
             </div>
 
-            <HistoryDropdown
-              history={history}
-              locale={embedConfig.locale}
-              timezone={embedConfig.timezone}
-            />
+              <HistoryDropdown
+                history={filteredHistory}
+                locale={embedConfig.locale}
+                timezone={embedConfig.timezone}
+              />
           </div>
 
           <div className="right-panel">

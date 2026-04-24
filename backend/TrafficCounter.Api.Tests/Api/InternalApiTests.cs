@@ -1142,6 +1142,80 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
+    public async Task RoundHistory_returns_only_rounds_that_are_actually_finished()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+
+        await roundService.EnsureActiveRoundAsync("cam_history_guard");
+        await SeedHistoricalRoundWithStatusAsync(dbFactory, "cam_history_guard", RoundStatus.Settled, 3);
+
+        var history = await _client.GetFromJsonAsync<List<RoundResponse>>("/rounds/history?cameraId=cam_history_guard&limit=20");
+
+        Assert.NotNull(history);
+        Assert.Single(history!);
+        Assert.All(history!, item => Assert.True(item.Status is "settled" or "void"));
+    }
+
+    [Fact]
+    public async Task TickAsync_repairs_duplicate_active_rounds_and_keeps_only_one_active_round_per_camera()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+
+        await roundService.EnsureActiveRoundAsync("cam_duplicate_fix");
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var originalRound = await db.Rounds
+                .FirstAsync(r => r.CameraId == "cam_duplicate_fix" && r.Status == RoundStatus.Open);
+
+            db.Rounds.Add(new Round
+            {
+                RoundId = Guid.NewGuid(),
+                CameraId = originalRound.CameraId,
+                RoundMode = originalRound.RoundMode,
+                Status = RoundStatus.Open,
+                DisplayName = originalRound.DisplayName,
+                CreatedAt = originalRound.CreatedAt.AddMilliseconds(5),
+                BetCloseAt = originalRound.BetCloseAt,
+                EndsAt = originalRound.EndsAt,
+                CurrentCount = 0,
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        await roundService.TickAsync();
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var rounds = await db.Rounds
+                .Where(r => r.CameraId == "cam_duplicate_fix")
+                .OrderBy(r => r.CreatedAt)
+                .ToListAsync();
+
+            Assert.Equal(2, rounds.Count);
+            Assert.Single(rounds, r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling);
+
+            var voidedRound = Assert.Single(rounds, r => r.Status == RoundStatus.Void);
+            var activeRound = Assert.Single(rounds, r => r.Status != RoundStatus.Void);
+            Assert.NotNull(voidedRound.VoidedAt);
+            Assert.Contains("Duplicate active round repaired", voidedRound.VoidReason);
+            Assert.Contains(activeRound.RoundId.ToString(), voidedRound.VoidReason);
+        }
+
+        var history = await _client.GetFromJsonAsync<List<RoundResponse>>("/rounds/history?cameraId=cam_duplicate_fix&limit=20");
+
+        Assert.NotNull(history);
+        Assert.Single(history!);
+        Assert.Equal("void", history![0].Status);
+        Assert.Contains("Duplicate active round repaired", history[0].VoidReason);
+    }
+
+    [Fact]
     public async Task CreateBet_accepts_market_purchase_for_open_round()
     {
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_create");

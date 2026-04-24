@@ -674,12 +674,19 @@ def create_mjpeg_app() -> Flask:
         )
         payload = runtime_stats.snapshot(backend_health)
         active_config = pipeline_runtime.get_config() or {}
+        stream_profiles = active_config.get("stream_profiles", [])
+        eligible_camera_ids = sorted({
+            str(profile.get("camera_id") or "").strip()
+            for profile in stream_profiles
+            if str(profile.get("camera_id") or "").strip()
+        })
         payload["pipelineRunning"] = pipeline_runtime.is_running()
         payload["cameraId"] = active_config.get("camera_id", "")
         payload["sourceUrl"] = active_config.get("stream_url", "")
         payload["captureSourceUrl"] = active_config.get("capture_source_url", "")
         payload["processedStreamPath"] = active_config.get("processed_stream_path", "")
         payload["selectedStreamProfileId"] = active_config.get("selected_stream_profile_id", "")
+        payload["streamProfileCameraIds"] = eligible_camera_ids
         payload["streamRotation"] = get_stream_rotation_status()
         return jsonify(payload)
 
@@ -3044,9 +3051,9 @@ def main():
             publish_rotation_status(f"Rotacao pendente aguardando janela segura ({status}).")
             return
 
-        target_camera_id = str(pending_rotation_profile.get("camera_id") or "").strip()
+        current_camera_id = str(cfg.get("camera_id") or "").strip()
         allowed, reason = backend.ensure_camera_change_allowed(
-            target_camera_id,
+            current_camera_id,
             operation_name="rotacao de stream profile",
             allow_settling=True,
         )

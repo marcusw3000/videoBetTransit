@@ -374,6 +374,7 @@ class WorkerApiContractTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
         self.assertIn("selectedStreamProfileId", payload)
+        self.assertIn("streamProfileCameraIds", payload)
         self.assertIn("streamRotation", payload)
         self.assertIn("pending", payload["streamRotation"])
 

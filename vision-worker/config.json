@@ -63,9 +63,9 @@
     "min_rounds_per_stream": 2,
     "max_rounds_per_stream": 2,
     "current_stream_profile_id": "stream_default",
-    "rounds_on_current_stream": 1,
+    "rounds_on_current_stream": 0,
     "target_rounds_for_current_stream": 2,
-    "last_counted_round_id": "23f9c2c8-cee5-4bac-8542-3124ccdd0d5e"
+    "last_counted_round_id": ""
   },
   "stream_profiles": [
     {
