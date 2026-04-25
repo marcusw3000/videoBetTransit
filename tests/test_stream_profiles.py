@@ -1,10 +1,14 @@
 import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app import (
     DEFAULT_LINE,
     DEFAULT_ROI,
     StreamProfileStore,
+    StreamScheduleStore,
     choose_stream_rotation_target,
+    choose_schedule_enforcement_profile,
     count_settled_round_for_stream_rotation,
     consume_pipeline_commands,
     create_mjpeg_app,
@@ -12,10 +16,13 @@ from app import (
     format_stream_profile_table_row,
     is_round_safe_for_stream_rotation,
     normalize_config,
+    normalize_stream_schedule_config,
+    resolve_stream_schedule_state,
     select_random_stream_profile,
     should_apply_pending_stream_rotation,
     stream_rotation_target_reached,
 )
+from supabase_sync import SupabaseStreamProfileSync
 
 
 class _FirstChoiceRandom:
@@ -53,6 +60,22 @@ def make_cfg():
         ],
         "selected_stream_profile_id": "profile-a",
     }
+
+
+def make_cfg_with_two_profiles():
+    cfg = make_cfg()
+    cfg["stream_profiles"].append(
+        {
+            "id": "profile-b",
+            "name": "Camera B",
+            "stream_url": "rtsp://camera-b/live",
+            "camera_id": "cam_b",
+            "roi": {"x": 5, "y": 6, "w": 70, "h": 40},
+            "line": {"x1": 100, "y1": 10, "x2": 100, "y2": 90},
+            "count_direction": "left",
+        }
+    )
+    return cfg
 
 
 class StreamProfileStoreTests(unittest.TestCase):
@@ -252,6 +275,173 @@ class StreamProfileStoreTests(unittest.TestCase):
             store.delete_profile("profile-a")
 
 
+class StreamScheduleTests(unittest.TestCase):
+    def test_normalize_config_adds_stream_schedule_defaults(self):
+        cfg = normalize_config(make_cfg())
+
+        self.assertEqual(
+            {
+                "timezone": "America/Sao_Paulo",
+                "rules": [],
+            },
+            cfg["stream_schedule"],
+        )
+
+    def test_normalize_stream_schedule_accepts_overnight_window(self):
+        cfg = make_cfg_with_two_profiles()
+
+        schedule = normalize_stream_schedule_config(
+            {
+                "timezone": "America/Sao_Paulo",
+                "rules": [
+                    {
+                        "id": "night",
+                        "name": "Madrugada",
+                        "enabled": True,
+                        "start_time": "23:00",
+                        "end_time": "05:00",
+                        "allowed_profile_ids": ["profile-b"],
+                    }
+                ],
+            },
+            cfg["stream_profiles"],
+        )
+
+        self.assertEqual("America/Sao_Paulo", schedule["timezone"])
+        self.assertEqual("23:00", schedule["rules"][0]["start_time"])
+        self.assertEqual("05:00", schedule["rules"][0]["end_time"])
+
+    def test_normalize_stream_schedule_rejects_missing_profile_ids(self):
+        cfg = make_cfg()
+
+        with self.assertRaisesRegex(ValueError, "streams inexistentes"):
+            normalize_stream_schedule_config(
+                {
+                    "rules": [
+                        {
+                            "id": "invalid",
+                            "name": "Invalida",
+                            "enabled": True,
+                            "start_time": "10:00",
+                            "end_time": "12:00",
+                            "allowed_profile_ids": ["profile-z"],
+                        }
+                    ]
+                },
+                cfg["stream_profiles"],
+            )
+
+    def test_normalize_stream_schedule_rejects_overlapping_enabled_rules(self):
+        cfg = make_cfg_with_two_profiles()
+
+        with self.assertRaisesRegex(ValueError, "nao podem se sobrepor"):
+            normalize_stream_schedule_config(
+                {
+                    "rules": [
+                        {
+                            "id": "morning-a",
+                            "name": "A",
+                            "enabled": True,
+                            "start_time": "08:00",
+                            "end_time": "11:00",
+                            "allowed_profile_ids": ["profile-a"],
+                        },
+                        {
+                            "id": "morning-b",
+                            "name": "B",
+                            "enabled": True,
+                            "start_time": "10:30",
+                            "end_time": "12:00",
+                            "allowed_profile_ids": ["profile-b"],
+                        },
+                    ]
+                },
+                cfg["stream_profiles"],
+            )
+
+    def test_resolve_stream_schedule_returns_all_profiles_outside_rule(self):
+        cfg = make_cfg_with_two_profiles()
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "rules": [
+                {
+                    "id": "rush",
+                    "name": "Rush",
+                    "enabled": True,
+                    "start_time": "08:00",
+                    "end_time": "10:00",
+                    "allowed_profile_ids": ["profile-a"],
+                }
+            ],
+        }
+
+        state = resolve_stream_schedule_state(
+            cfg["stream_schedule"],
+            cfg["stream_profiles"],
+            now=datetime(2026, 4, 24, 11, 0, tzinfo=ZoneInfo("America/Sao_Paulo")),
+        )
+
+        self.assertFalse(state["isRestricted"])
+        self.assertEqual({"profile-a", "profile-b"}, set(state["eligibleProfileIds"]))
+
+    def test_resolve_stream_schedule_returns_only_allowed_profiles_inside_rule(self):
+        cfg = make_cfg_with_two_profiles()
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "rules": [
+                {
+                    "id": "rush",
+                    "name": "Rush",
+                    "enabled": True,
+                    "start_time": "08:00",
+                    "end_time": "10:00",
+                    "allowed_profile_ids": ["profile-b"],
+                }
+            ],
+        }
+
+        state = resolve_stream_schedule_state(
+            cfg["stream_schedule"],
+            cfg["stream_profiles"],
+            now=datetime(2026, 4, 24, 8, 30, tzinfo=ZoneInfo("America/Sao_Paulo")),
+        )
+
+        self.assertTrue(state["isRestricted"])
+        self.assertEqual("rush", state["activeRule"]["id"])
+        self.assertEqual(["profile-b"], state["eligibleProfileIds"])
+
+    def test_schedule_enforcement_prefers_first_eligible_when_current_is_invalid(self):
+        cfg = make_cfg_with_two_profiles()
+
+        chosen = choose_schedule_enforcement_profile(
+            {"id": "profile-a"},
+            [cfg["stream_profiles"][1]],
+        )
+
+        self.assertEqual("profile-b", chosen["id"])
+
+    def test_schedule_store_blocks_profile_deletion_when_rule_references_it(self):
+        cfg = normalize_config(make_cfg_with_two_profiles())
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "rules": [
+                {
+                    "id": "rush",
+                    "name": "Rush",
+                    "enabled": True,
+                    "start_time": "08:00",
+                    "end_time": "10:00",
+                    "allowed_profile_ids": ["profile-a"],
+                }
+            ],
+        }
+        cfg = normalize_config(cfg)
+        store = StreamScheduleStore(cfg)
+
+        with self.assertRaisesRegex(ValueError, "vinculada a uma agenda"):
+            store.assert_profile_not_referenced("profile-a")
+
+
 class StreamRotationTests(unittest.TestCase):
     def test_rotation_target_is_drawn_inside_configured_range(self):
         rotation = {
@@ -356,6 +546,29 @@ class StreamRotationTests(unittest.TestCase):
 
         self.assertIsNone(selected)
 
+    def test_random_selection_uses_only_profiles_allowed_by_schedule(self):
+        cfg = make_cfg_with_two_profiles()
+        cfg["stream_profiles"].append(
+            {
+                "id": "profile-c",
+                "name": "Camera C",
+                "stream_url": "rtsp://camera-c/live",
+                "camera_id": "cam_c",
+                "roi": DEFAULT_ROI,
+                "line": DEFAULT_LINE,
+                "count_direction": "any",
+            }
+        )
+        store = StreamProfileStore(cfg)
+
+        selected = select_random_stream_profile(
+            [profile for profile in store.list_profiles() if profile["id"] in {"profile-b", "profile-c"}],
+            "profile-a",
+            rng=_FirstChoiceRandom(),
+        )
+
+        self.assertEqual("profile-b", selected["id"])
+
     def test_pending_rotation_waits_for_non_countable_round_window(self):
         pending = {"id": "profile-b", "camera_id": "cam_b", "stream_url": "rtsp://camera-b/live"}
 
@@ -376,7 +589,9 @@ class WorkerApiContractTests(unittest.TestCase):
         self.assertIn("selectedStreamProfileId", payload)
         self.assertIn("streamProfileCameraIds", payload)
         self.assertIn("streamRotation", payload)
+        self.assertIn("streamSchedule", payload)
         self.assertIn("pending", payload["streamRotation"])
+        self.assertIn("pendingEnforcement", payload["streamSchedule"])
 
     def test_pipeline_start_accepts_stream_contract_without_starting_capture_inline(self):
         client = create_mjpeg_app().test_client()
@@ -402,6 +617,74 @@ class WorkerApiContractTests(unittest.TestCase):
         self.assertEqual("rtsp://camera-contract/live", queued.source_url)
         self.assertEqual("left", queued.direction)
         self.assertEqual({"x1": 1, "y1": 2, "x2": 3, "y2": 4}, queued.count_line)
+
+
+class _FakeResponse:
+    def __init__(self, payload=None):
+        self._payload = payload if payload is not None else []
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _FakeSession:
+    def __init__(self):
+        self.get_payloads = {}
+        self.posts = []
+        self.deletes = []
+
+    def get(self, url, headers=None, params=None, timeout=None):
+        return _FakeResponse(self.get_payloads.get(url, []))
+
+    def post(self, url, headers=None, params=None, json=None, timeout=None):
+        self.posts.append({"url": url, "json": json, "params": params})
+        return _FakeResponse([])
+
+    def delete(self, url, headers=None, params=None, timeout=None):
+        self.deletes.append({"url": url, "params": params})
+        return _FakeResponse([])
+
+
+class SupabaseSyncTests(unittest.TestCase):
+    def test_schedule_rules_round_trip_uses_separate_table(self):
+        sync = SupabaseStreamProfileSync(
+            url="https://example.supabase.co",
+            service_key="service-role",
+            table="stream_profiles",
+            schedule_table="stream_schedule_rules",
+            scope="videoBetTransit",
+        )
+        fake_session = _FakeSession()
+        sync._session = fake_session
+        fake_session.get_payloads["https://example.supabase.co/rest/v1/stream_schedule_rules"] = [
+            {
+                "id": "rush",
+                "name": "Rush",
+                "enabled": True,
+                "start_time": "08:00",
+                "end_time": "10:00",
+                "allowed_profile_ids": ["profile-a"],
+                "timezone": "America/Sao_Paulo",
+            }
+        ]
+
+        rules, timezone_name = sync.fetch_schedule_rules()
+        sync.upsert_schedule_rules(rules, timezone_name)
+
+        self.assertEqual("America/Sao_Paulo", timezone_name)
+        self.assertEqual("rush", rules[0]["id"])
+        self.assertEqual(
+            "https://example.supabase.co/rest/v1/stream_schedule_rules",
+            fake_session.posts[0]["url"],
+        )
+        self.assertEqual(["profile-a"], fake_session.posts[0]["json"][0]["allowed_profile_ids"])
+        self.assertEqual(
+            "not.in.(rush)",
+            fake_session.deletes[0]["params"]["id"],
+        )
 
 
 if __name__ == "__main__":

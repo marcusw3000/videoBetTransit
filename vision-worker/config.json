@@ -65,7 +65,7 @@
     "current_stream_profile_id": "stream_1776744835421",
     "rounds_on_current_stream": 1,
     "target_rounds_for_current_stream": 2,
-    "last_counted_round_id": "292a34c2-db31-4563-90d3-9c9c8ab8ae39"
+    "last_counted_round_id": "179204a0-7921-4e2a-bd26-420f4ec15395"
   },
   "stream_profiles": [
     {
@@ -107,5 +107,9 @@
       "count_direction": "any"
     }
   ],
-  "selected_stream_profile_id": "stream_1776744835421"
+  "selected_stream_profile_id": "stream_1776744835421",
+  "stream_schedule": {
+    "timezone": "America/Sao_Paulo",
+    "rules": []
+  }
 }

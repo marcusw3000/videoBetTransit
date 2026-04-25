@@ -14,6 +14,7 @@ from tkinter import ttk
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import cv2
 from flask import Flask, Response, jsonify, request
@@ -215,6 +216,17 @@ stream_rotation_status_ref = {
     "pendingProfileId": "",
     "selectedStreamProfileId": "",
     "activeProfileLabel": "",
+    "lastMessage": "",
+}
+stream_schedule_status_lock = threading.Lock()
+stream_schedule_status_ref = {
+    "timezone": "America/Sao_Paulo",
+    "activeRuleId": "",
+    "activeRuleName": "",
+    "activeWindow": "",
+    "restricted": False,
+    "eligibleProfileIds": [],
+    "pendingEnforcement": False,
     "lastMessage": "",
 }
 camera_activation_status_lock = threading.Lock()
@@ -661,6 +673,18 @@ def get_stream_rotation_status() -> dict:
         return dict(stream_rotation_status_ref)
 
 
+def update_stream_schedule_status(**values):
+    with stream_schedule_status_lock:
+        stream_schedule_status_ref.update(values)
+
+
+def get_stream_schedule_status() -> dict:
+    with stream_schedule_status_lock:
+        status = dict(stream_schedule_status_ref)
+    status["eligibleProfileIds"] = list(status.get("eligibleProfileIds") or [])
+    return status
+
+
 def update_camera_activation_status(**values):
     with camera_activation_status_lock:
         camera_activation_status_ref.update(values)
@@ -712,6 +736,7 @@ def create_mjpeg_app() -> Flask:
         payload["selectedStreamProfileId"] = active_config.get("selected_stream_profile_id", "")
         payload["streamProfileCameraIds"] = eligible_camera_ids
         payload["streamRotation"] = get_stream_rotation_status()
+        payload["streamSchedule"] = get_stream_schedule_status()
         payload["cameraActivation"] = activation
         return jsonify(payload)
 
@@ -919,6 +944,10 @@ DEFAULT_STREAM_ROTATION = {
     "target_rounds_for_current_stream": 0,
     "last_counted_round_id": "",
 }
+DEFAULT_STREAM_SCHEDULE = {
+    "timezone": "America/Sao_Paulo",
+    "rules": [],
+}
 STREAM_ROTATION_SAFE_STATUSES = {"settling", "settled", "void"}
 STREAM_ROTATION_DEFER_STATUSES = {"open", "closing"}
 
@@ -957,6 +986,243 @@ def normalize_count_direction(value) -> str:
     if direction in {"up", "down", "left", "right", "any"}:
         return direction
     return "any"
+
+
+def normalize_schedule_timezone(value) -> str:
+    timezone_name = str(value or DEFAULT_STREAM_SCHEDULE["timezone"]).strip() or DEFAULT_STREAM_SCHEDULE["timezone"]
+    try:
+        ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return DEFAULT_STREAM_SCHEDULE["timezone"]
+    return timezone_name
+
+
+def normalize_schedule_time_text(value: str) -> str:
+    text = str(value or "").strip()
+    try:
+        parsed = datetime.strptime(text, "%H:%M")
+    except ValueError as exc:
+        raise ValueError("Horario da agenda deve estar no formato HH:MM.") from exc
+    return parsed.strftime("%H:%M")
+
+
+def schedule_time_to_minutes(value: str) -> int:
+    normalized = normalize_schedule_time_text(value)
+    hours, minutes = normalized.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def make_stream_schedule_rule_id(existing_ids: set[str]) -> str:
+    base = f"schedule_{int(time.time() * 1000)}"
+    candidate = base
+    suffix = 1
+    while candidate in existing_ids:
+        suffix += 1
+        candidate = f"{base}_{suffix}"
+    return candidate
+
+
+def normalize_allowed_profile_ids(value) -> list[str]:
+    normalized: list[str] = []
+    for raw_value in value if isinstance(value, list) else []:
+        profile_id = str(raw_value or "").strip()
+        if profile_id and profile_id not in normalized:
+            normalized.append(profile_id)
+    return normalized
+
+
+def expand_schedule_rule_windows(start_minutes: int, end_minutes: int) -> list[tuple[int, int]]:
+    if start_minutes == end_minutes:
+        raise ValueError("A agenda por hora nao pode ter duracao zero.")
+    if end_minutes > start_minutes:
+        return [(start_minutes, end_minutes)]
+    return [
+        (start_minutes, 24 * 60),
+        (0, end_minutes),
+    ]
+
+
+def schedule_windows_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    return left[0] < right[1] and right[0] < left[1]
+
+
+def validate_stream_schedule_rules(rules: list[dict], profile_ids: set[str]) -> None:
+    expanded_rules: list[tuple[str, str, tuple[int, int]]] = []
+    for rule in rules:
+        rule_id = str(rule.get("id") or "").strip()
+        rule_name = str(rule.get("name") or "").strip() or rule_id or "agenda"
+        allowed_ids = normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))
+        if not allowed_ids:
+            raise ValueError(f"A agenda '{rule_name}' precisa de ao menos uma stream permitida.")
+        missing_ids = [profile_id for profile_id in allowed_ids if profile_id not in profile_ids]
+        if missing_ids:
+            raise ValueError(f"A agenda '{rule_name}' referencia streams inexistentes na esteira.")
+        if not bool(rule.get("enabled", True)):
+            continue
+
+        start_minutes = schedule_time_to_minutes(rule.get("start_time"))
+        end_minutes = schedule_time_to_minutes(rule.get("end_time"))
+        for window in expand_schedule_rule_windows(start_minutes, end_minutes):
+            expanded_rules.append((rule_id, rule_name, window))
+
+    for index, (rule_id, rule_name, window) in enumerate(expanded_rules):
+        for other_rule_id, other_rule_name, other_window in expanded_rules[index + 1:]:
+            if rule_id == other_rule_id:
+                continue
+            if schedule_windows_overlap(window, other_window):
+                raise ValueError(
+                    f"As agendas '{rule_name}' e '{other_rule_name}' nao podem se sobrepor."
+                )
+
+
+def build_stream_schedule_rule(
+    source: dict | None,
+    profile_ids: set[str],
+    *,
+    existing_ids: set[str] | None = None,
+) -> dict:
+    source = source if isinstance(source, dict) else {}
+    known_ids = existing_ids if isinstance(existing_ids, set) else set()
+    rule_id = str(source.get("id") or "").strip()
+    if not rule_id or rule_id in known_ids:
+        rule_id = make_stream_schedule_rule_id(known_ids)
+    start_time = normalize_schedule_time_text(source.get("start_time") or source.get("startTime") or "")
+    end_time = normalize_schedule_time_text(source.get("end_time") or source.get("endTime") or "")
+    rule = {
+        "id": rule_id,
+        "name": str(source.get("name") or "").strip() or f"Agenda {start_time}-{end_time}",
+        "enabled": bool(source.get("enabled", True)),
+        "start_time": start_time,
+        "end_time": end_time,
+        "allowed_profile_ids": normalize_allowed_profile_ids(source.get("allowed_profile_ids")),
+    }
+    validate_stream_schedule_rules([rule], profile_ids)
+    return rule
+
+
+def normalize_stream_schedule_config(value, profiles: list[dict]) -> dict:
+    source = value if isinstance(value, dict) else {}
+    profile_ids = {
+        str(profile.get("id") or "").strip()
+        for profile in profiles
+        if str(profile.get("id") or "").strip()
+    }
+    rules: list[dict] = []
+    existing_ids: set[str] = set()
+
+    for raw_rule in source.get("rules", []) if isinstance(source.get("rules"), list) else []:
+        rule = build_stream_schedule_rule(raw_rule, profile_ids, existing_ids=existing_ids)
+        existing_ids.add(rule["id"])
+        rules.append(rule)
+
+    validate_stream_schedule_rules(rules, profile_ids)
+    rules.sort(key=lambda item: (schedule_time_to_minutes(item["start_time"]), str(item.get("id") or "")))
+    return {
+        "timezone": normalize_schedule_timezone(source.get("timezone")),
+        "rules": rules,
+    }
+
+
+def schedule_rule_is_active(rule: dict, current_minutes: int) -> bool:
+    start_minutes = schedule_time_to_minutes(rule.get("start_time"))
+    end_minutes = schedule_time_to_minutes(rule.get("end_time"))
+    if end_minutes > start_minutes:
+        return start_minutes <= current_minutes < end_minutes
+    return current_minutes >= start_minutes or current_minutes < end_minutes
+
+
+def format_stream_schedule_window(rule: dict | None) -> str:
+    if not isinstance(rule, dict):
+        return ""
+    start_time = str(rule.get("start_time") or "").strip()
+    end_time = str(rule.get("end_time") or "").strip()
+    if not start_time or not end_time:
+        return ""
+    return f"{start_time}-{end_time}"
+
+
+def resolve_stream_schedule_state(
+    schedule: dict | None,
+    profiles: list[dict],
+    *,
+    now: datetime | None = None,
+) -> dict:
+    normalized = normalize_stream_schedule_config(schedule, profiles)
+    timezone_name = normalized["timezone"]
+    tzinfo = ZoneInfo(timezone_name)
+    current_time = now.astimezone(tzinfo) if isinstance(now, datetime) else datetime.now(tzinfo)
+    current_minutes = current_time.hour * 60 + current_time.minute
+    profiles_by_id = {
+        str(profile.get("id") or "").strip(): dict(profile)
+        for profile in profiles
+        if str(profile.get("id") or "").strip()
+    }
+
+    active_rule = None
+    for rule in normalized["rules"]:
+        if bool(rule.get("enabled", True)) and schedule_rule_is_active(rule, current_minutes):
+            active_rule = dict(rule)
+            break
+
+    if active_rule is None:
+        eligible_profiles = [dict(profile) for profile in profiles]
+    else:
+        eligible_profiles = [
+            dict(profiles_by_id[profile_id])
+            for profile_id in active_rule.get("allowed_profile_ids", [])
+            if profile_id in profiles_by_id
+        ]
+
+    return {
+        "timezone": timezone_name,
+        "activeRule": active_rule,
+        "activeWindow": format_stream_schedule_window(active_rule),
+        "eligibleProfiles": eligible_profiles,
+        "eligibleProfileIds": [str(profile.get("id") or "").strip() for profile in eligible_profiles if str(profile.get("id") or "").strip()],
+        "isRestricted": active_rule is not None,
+        "currentTime": current_time,
+    }
+
+
+def is_profile_allowed_by_schedule(profile: dict | None, schedule_state: dict | None) -> bool:
+    if not isinstance(profile, dict):
+        return False
+    if not isinstance(schedule_state, dict):
+        return True
+    eligible_ids = set(schedule_state.get("eligibleProfileIds") or [])
+    if not schedule_state.get("isRestricted"):
+        return True
+    return str(profile.get("id") or "").strip() in eligible_ids
+
+
+def choose_schedule_enforcement_profile(
+    current_profile: dict | None,
+    eligible_profiles: list[dict],
+) -> dict | None:
+    current_profile_id = str((current_profile or {}).get("id") or "").strip()
+    for profile in eligible_profiles:
+        if str(profile.get("id") or "").strip() == current_profile_id:
+            return dict(profile)
+    if eligible_profiles:
+        return dict(eligible_profiles[0])
+    return None
+
+
+def format_stream_schedule_rule_row(profile_labels_by_id: dict[str, str], rule: dict, *, active: bool = False) -> tuple[str, str, str, str]:
+    allowed_labels = [
+        profile_labels_by_id.get(profile_id, profile_id)
+        for profile_id in rule.get("allowed_profile_ids", [])
+        if str(profile_id or "").strip()
+    ]
+    profiles_label = ", ".join(allowed_labels[:3])
+    if len(allowed_labels) > 3:
+        profiles_label += f" +{len(allowed_labels) - 3}"
+    return (
+        "*" if active else "",
+        str(rule.get("name") or "").strip(),
+        format_stream_schedule_window(rule),
+        profiles_label,
+    )
 
 
 def normalize_stream_rotation_config(value) -> dict:
@@ -1247,6 +1513,7 @@ def normalize_config(cfg: dict | None) -> dict:
         existing_ids.add(profile["id"])
 
     cfg["stream_profiles"] = profiles
+    cfg["stream_schedule"] = normalize_stream_schedule_config(cfg.get("stream_schedule"), profiles)
     selected_profile_id = str(cfg.get("selected_stream_profile_id") or "").strip()
     selected_profile = next((profile for profile in profiles if profile["id"] == selected_profile_id), None)
     if selected_profile is None:
@@ -1273,6 +1540,7 @@ def load_config(path: str = "config.json") -> dict:
         "supabase_url": os.getenv("SUPABASE_URL"),
         "supabase_service_key": os.getenv("SUPABASE_SERVICE_KEY"),
         "supabase_stream_profiles_table": os.getenv("SUPABASE_STREAM_PROFILES_TABLE"),
+        "supabase_stream_schedule_table": os.getenv("SUPABASE_STREAM_SCHEDULE_TABLE"),
         "supabase_stream_profiles_scope": os.getenv("SUPABASE_STREAM_PROFILES_SCOPE"),
         "camera_id": os.getenv("CAMERA_ID"),
         "session_id": os.getenv("SESSION_ID"),
@@ -1307,31 +1575,73 @@ def bootstrap_stream_profiles_from_supabase(
         remote_profiles, remote_selected_profile_id = sync_client.fetch_profiles()
     except Exception as exc:
         logger.warning("Falha ao carregar stream profiles do Supabase: %s", exc)
-        return
+        remote_profiles = []
+        remote_selected_profile_id = None
 
-    if remote_profiles:
+    try:
+        remote_schedule_rules, remote_schedule_timezone = sync_client.fetch_schedule_rules()
+    except Exception as exc:
+        logger.warning("Falha ao carregar agenda por hora do Supabase: %s", exc)
+        remote_schedule_rules = []
+        remote_schedule_timezone = None
+
+    remote_profiles_loaded = bool(remote_profiles)
+    remote_schedule_loaded = bool(remote_schedule_rules)
+
+    if remote_profiles_loaded:
         cfg["stream_profiles"] = remote_profiles
         if remote_selected_profile_id:
             cfg["selected_stream_profile_id"] = remote_selected_profile_id
-        normalize_config(cfg)
-        save_config(config_path, cfg)
-        logger.info(
-            "Stream profiles carregados do Supabase: %d perfil(is)",
-            len(cfg.get("stream_profiles", [])),
-        )
-        return
 
-    try:
-        sync_client.upsert_profiles(
-            cfg.get("stream_profiles", []),
-            cfg.get("selected_stream_profile_id"),
-        )
-        logger.info(
-            "Supabase sem stream profiles. Config local publicada com %d perfil(is).",
-            len(cfg.get("stream_profiles", [])),
-        )
-    except Exception as exc:
-        logger.warning("Falha ao publicar stream profiles iniciais no Supabase: %s", exc)
+    if remote_schedule_loaded:
+        current_schedule = cfg.get("stream_schedule") if isinstance(cfg.get("stream_schedule"), dict) else {}
+        cfg["stream_schedule"] = {
+            "timezone": remote_schedule_timezone or current_schedule.get("timezone") or DEFAULT_STREAM_SCHEDULE["timezone"],
+            "rules": remote_schedule_rules,
+        }
+
+    if remote_profiles_loaded or remote_schedule_loaded:
+        try:
+            normalize_config(cfg)
+            save_config(config_path, cfg)
+            if remote_profiles_loaded:
+                logger.info(
+                    "Stream profiles carregados do Supabase: %d perfil(is)",
+                    len(cfg.get("stream_profiles", [])),
+                )
+            if remote_schedule_loaded:
+                logger.info(
+                    "Agenda por hora carregada do Supabase: %d regra(s)",
+                    len(cfg.get("stream_schedule", {}).get("rules", [])),
+                )
+        except Exception as exc:
+            logger.warning("Falha ao aplicar estado remoto de streams/agendas: %s", exc)
+
+    if not remote_profiles_loaded:
+        try:
+            sync_client.upsert_profiles(
+                cfg.get("stream_profiles", []),
+                cfg.get("selected_stream_profile_id"),
+            )
+            logger.info(
+                "Supabase sem stream profiles. Config local publicada com %d perfil(is).",
+                len(cfg.get("stream_profiles", [])),
+            )
+        except Exception as exc:
+            logger.warning("Falha ao publicar stream profiles iniciais no Supabase: %s", exc)
+
+    if not remote_schedule_loaded:
+        try:
+            sync_client.upsert_schedule_rules(
+                cfg.get("stream_schedule", {}).get("rules", []),
+                cfg.get("stream_schedule", {}).get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+            )
+            logger.info(
+                "Supabase sem agenda por hora. Config local publicada com %d regra(s).",
+                len(cfg.get("stream_schedule", {}).get("rules", [])),
+            )
+        except Exception as exc:
+            logger.warning("Falha ao publicar agenda por hora inicial no Supabase: %s", exc)
 
 
 def sync_stream_profiles_to_supabase(
@@ -1345,6 +1655,10 @@ def sync_stream_profiles_to_supabase(
         sync_client.upsert_profiles(
             cfg.get("stream_profiles", []),
             cfg.get("selected_stream_profile_id"),
+        )
+        sync_client.upsert_schedule_rules(
+            cfg.get("stream_schedule", {}).get("rules", []),
+            cfg.get("stream_schedule", {}).get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
         )
     except Exception as exc:
         logger.warning("Falha ao sincronizar esteira no Supabase: %s", exc)
@@ -1538,6 +1852,140 @@ class StreamProfileStore:
         }
         self.cfg.setdefault("stream_profiles", []).append(profile)
         return dict(sync_config_with_selected_profile(self.cfg, profile)), True
+
+
+class StreamScheduleStore:
+    def __init__(self, cfg: dict):
+        normalized_cfg = normalize_config(cfg)
+        cfg.clear()
+        cfg.update(normalized_cfg)
+        self.cfg = cfg
+
+    def list_rules(self) -> list[dict]:
+        return [dict(rule) for rule in self.cfg.get("stream_schedule", {}).get("rules", [])]
+
+    def get_schedule(self) -> dict:
+        schedule = normalize_stream_schedule_config(
+            self.cfg.get("stream_schedule"),
+            self.cfg.get("stream_profiles", []),
+        )
+        self.cfg["stream_schedule"] = schedule
+        return {
+            "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+            "rules": [dict(rule) for rule in schedule.get("rules", [])],
+        }
+
+    def save_rule(
+        self,
+        *,
+        rule_id: str = "",
+        name: str | None = None,
+        start_time: str,
+        end_time: str,
+        allowed_profile_ids: list[str],
+        enabled: bool,
+    ) -> tuple[dict, bool]:
+        schedule = self.get_schedule()
+        rules = schedule["rules"]
+        existing_ids = {str(rule.get("id") or "").strip() for rule in rules}
+        target_rule_id = str(rule_id or "").strip()
+        created = not target_rule_id
+
+        if created:
+            target_rule_id = make_stream_schedule_rule_id(existing_ids)
+
+        next_rule = {
+            "id": target_rule_id,
+            "name": str(name or "").strip() or f"Agenda {start_time}-{end_time}",
+            "enabled": bool(enabled),
+            "start_time": start_time,
+            "end_time": end_time,
+            "allowed_profile_ids": list(allowed_profile_ids or []),
+        }
+
+        updated_rules: list[dict] = []
+        replaced = False
+        for rule in rules:
+            if str(rule.get("id") or "").strip() == target_rule_id:
+                updated_rules.append(next_rule)
+                replaced = True
+            else:
+                updated_rules.append(dict(rule))
+
+        if not replaced:
+            updated_rules.append(next_rule)
+
+        normalized_schedule = normalize_stream_schedule_config(
+            {
+                "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+                "rules": updated_rules,
+            },
+            self.cfg.get("stream_profiles", []),
+        )
+        self.cfg["stream_schedule"] = normalized_schedule
+        saved_rule = next(
+            dict(rule)
+            for rule in normalized_schedule["rules"]
+            if str(rule.get("id") or "").strip() == target_rule_id
+        )
+        return saved_rule, created
+
+    def delete_rule(self, rule_id: str) -> dict:
+        target_rule_id = str(rule_id or "").strip()
+        schedule = self.get_schedule()
+        deleted = None
+        remaining_rules: list[dict] = []
+        for rule in schedule["rules"]:
+            if str(rule.get("id") or "").strip() == target_rule_id:
+                deleted = dict(rule)
+                continue
+            remaining_rules.append(dict(rule))
+
+        if deleted is None:
+            raise ValueError("Agenda por hora nao encontrada.")
+
+        self.cfg["stream_schedule"] = normalize_stream_schedule_config(
+            {
+                "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+                "rules": remaining_rules,
+            },
+            self.cfg.get("stream_profiles", []),
+        )
+        return deleted
+
+    def toggle_rule(self, rule_id: str) -> dict:
+        target_rule_id = str(rule_id or "").strip()
+        schedule = self.get_schedule()
+        toggled = None
+        updated_rules: list[dict] = []
+        for rule in schedule["rules"]:
+            next_rule = dict(rule)
+            if str(rule.get("id") or "").strip() == target_rule_id:
+                next_rule["enabled"] = not bool(rule.get("enabled", True))
+                toggled = dict(next_rule)
+            updated_rules.append(next_rule)
+
+        if toggled is None:
+            raise ValueError("Agenda por hora nao encontrada.")
+
+        self.cfg["stream_schedule"] = normalize_stream_schedule_config(
+            {
+                "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+                "rules": updated_rules,
+            },
+            self.cfg.get("stream_profiles", []),
+        )
+        return next(
+            dict(rule)
+            for rule in self.cfg["stream_schedule"]["rules"]
+            if str(rule.get("id") or "").strip() == target_rule_id
+        )
+
+    def assert_profile_not_referenced(self, profile_id: str) -> None:
+        target_id = str(profile_id or "").strip()
+        for rule in self.list_rules():
+            if target_id in rule.get("allowed_profile_ids", []):
+                raise ValueError("A stream esta vinculada a uma agenda por hora ativa ou salva.")
 
 
 def now() -> str:
@@ -2296,6 +2744,10 @@ class EditorControlPanel:
         on_set_count_direction,
         on_toggle_stream_rotation,
         on_queue_random_stream,
+        schedule_store: StreamScheduleStore,
+        on_save_stream_schedule_rule,
+        on_delete_stream_schedule_rule,
+        on_toggle_stream_schedule_rule,
         stream_rotation_enabled: bool = False,
     ):
         self.editor = editor
@@ -2310,8 +2762,15 @@ class EditorControlPanel:
         self.on_set_count_direction = on_set_count_direction
         self.on_toggle_stream_rotation = on_toggle_stream_rotation
         self.on_queue_random_stream = on_queue_random_stream
+        self.schedule_store = schedule_store
+        self.on_save_stream_schedule_rule = on_save_stream_schedule_rule
+        self.on_delete_stream_schedule_rule = on_delete_stream_schedule_rule
+        self.on_toggle_stream_schedule_rule = on_toggle_stream_schedule_rule
         self.should_close = False
         self._stream_profile_ids: list[str] = []
+        self._schedule_rule_ids: list[str] = []
+        self._schedule_profile_ids: list[str] = []
+        self._selected_schedule_rule_id = ""
         self._root = tk.Tk()
         self._root.title("Controles de Configuracao")
         self._root.resizable(False, False)
@@ -2330,6 +2789,15 @@ class EditorControlPanel:
         self._stream_url_var = tk.StringVar()
         self._count_direction_var = tk.StringVar(value="any")
         self._stream_rotation_enabled_var = tk.BooleanVar(value=bool(stream_rotation_enabled))
+        schedule = self.schedule_store.get_schedule()
+        self._schedule_name_var = tk.StringVar()
+        self._schedule_start_var = tk.StringVar(value="00:00")
+        self._schedule_end_var = tk.StringVar(value="01:00")
+        self._schedule_enabled_var = tk.BooleanVar(value=True)
+        self._schedule_timezone_var = tk.StringVar(
+            value=f"Timezone: {schedule.get('timezone', DEFAULT_STREAM_SCHEDULE['timezone'])}"
+        )
+        self._schedule_status_var = tk.StringVar(value="")
         self._stream_selector = ttk.Combobox(frame, state="readonly", width=48)
         self._stream_selector.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
         self._stream_selector.bind("<<ComboboxSelected>>", self._handle_profile_preview)
@@ -2394,10 +2862,75 @@ class EditorControlPanel:
             row=13, column=1, sticky="ew", pady=(0, 10)
         )
 
-        ttk.Label(frame, text="Ajuste de ROI e Linha", font=("Segoe UI", 11, "bold")).grid(
+        ttk.Label(frame, text="Agenda por Hora", font=("Segoe UI", 11, "bold")).grid(
             row=14, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
-        ttk.Label(frame, text="Direcao de contagem").grid(row=15, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, textvariable=self._schedule_timezone_var).grid(
+            row=15, column=0, columnspan=2, sticky="w", pady=(0, 4)
+        )
+        self._schedule_table = ttk.Treeview(
+            frame,
+            columns=("active", "name", "window", "profiles"),
+            show="headings",
+            height=4,
+            selectmode="browse",
+        )
+        self._schedule_table.heading("active", text="")
+        self._schedule_table.heading("name", text="Agenda")
+        self._schedule_table.heading("window", text="Faixa")
+        self._schedule_table.heading("profiles", text="Streams")
+        self._schedule_table.column("active", width=24, minwidth=24, stretch=False, anchor="center")
+        self._schedule_table.column("name", width=120, minwidth=90, stretch=False)
+        self._schedule_table.column("window", width=90, minwidth=80, stretch=False)
+        self._schedule_table.column("profiles", width=200, minwidth=120, stretch=True)
+        self._schedule_table.grid(row=16, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self._schedule_table.bind("<<TreeviewSelect>>", self._handle_schedule_rule_select)
+
+        ttk.Label(frame, text="Nome da agenda").grid(row=17, column=0, columnspan=2, sticky="w")
+        ttk.Entry(frame, textvariable=self._schedule_name_var).grid(
+            row=18, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Label(frame, text="Inicio (HH:MM)").grid(row=19, column=0, sticky="w")
+        ttk.Label(frame, text="Fim (HH:MM)").grid(row=19, column=1, sticky="w")
+        ttk.Entry(frame, textvariable=self._schedule_start_var).grid(
+            row=20, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Entry(frame, textvariable=self._schedule_end_var).grid(
+            row=20, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Checkbutton(
+            frame,
+            text="Regra ativa",
+            variable=self._schedule_enabled_var,
+        ).grid(row=21, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        ttk.Label(frame, text="Streams permitidas").grid(row=22, column=0, columnspan=2, sticky="w")
+        self._schedule_profiles_listbox = tk.Listbox(
+            frame,
+            selectmode=tk.MULTIPLE,
+            exportselection=False,
+            height=5,
+        )
+        self._schedule_profiles_listbox.grid(row=23, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        ttk.Button(frame, text="Nova Regra", command=self.new_schedule_rule).grid(
+            row=24, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Button(frame, text="Salvar Regra", command=self.save_schedule_rule).grid(
+            row=24, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(frame, text="Alternar Ativa", command=self.toggle_schedule_rule).grid(
+            row=25, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
+        )
+        ttk.Button(frame, text="Apagar Regra", command=self.delete_schedule_rule).grid(
+            row=25, column=1, sticky="ew", pady=(0, 10)
+        )
+        ttk.Label(frame, textvariable=self._schedule_status_var, wraplength=360).grid(
+            row=26, column=0, columnspan=2, sticky="w", pady=(0, 10)
+        )
+
+        ttk.Label(frame, text="Ajuste de ROI e Linha", font=("Segoe UI", 11, "bold")).grid(
+            row=27, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+        ttk.Label(frame, text="Direcao de contagem").grid(row=28, column=0, columnspan=2, sticky="w")
         self._count_direction_selector = ttk.Combobox(
             frame,
             state="readonly",
@@ -2405,47 +2938,65 @@ class EditorControlPanel:
             textvariable=self._count_direction_var,
         )
         self._count_direction_selector.grid(
-            row=16, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=29, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
         self._count_direction_selector.bind("<<ComboboxSelected>>", self._handle_direction_change)
 
         ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
-            row=17, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=30, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
-            row=17, column=1, sticky="ew", pady=(0, 6)
+            row=30, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Salvar", command=self.save).grid(
-            row=18, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=31, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
-            row=18, column=1, sticky="ew", pady=(0, 6)
+            row=31, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
-            row=19, column=0, columnspan=2, sticky="ew"
+            row=32, column=0, columnspan=2, sticky="ew"
         )
         ttk.Button(frame, text="Fechar", command=self.request_close).grid(
-            row=20, column=0, columnspan=2, sticky="ew", pady=(6, 0)
+            row=33, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
 
         self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
         self._message_var = tk.StringVar(value=self.editor.message)
         ttk.Label(frame, textvariable=self._mode_var).grid(
-            row=21, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=34, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         ttk.Label(frame, textvariable=self._message_var, wraplength=360).grid(
-            row=22, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=35, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
         ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, T, Q").grid(
-            row=23, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=36, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         self._refresh_stream_profiles()
+        self._refresh_schedule_profiles()
+        self._refresh_schedule_rules()
         self.set_active_stream_profile(self.stream_store.get_selected_profile())
 
     def refresh(self):
         self._mode_var.set(f"Modo: {self.editor.mode}")
         self._message_var.set(self.editor.message)
+        schedule_status = get_stream_schedule_status()
+        self._refresh_schedule_rules(selected_rule_id=self._get_selected_schedule_rule_id())
+        active_rule_name = str(schedule_status.get("activeRuleName") or "").strip()
+        active_window = str(schedule_status.get("activeWindow") or "").strip()
+        status_parts = []
+        if active_rule_name or active_window:
+            status_parts.append(active_rule_name or active_window)
+        elif schedule_status.get("restricted"):
+            status_parts.append("Agenda ativa")
+        else:
+            status_parts.append("Fora de agenda restritiva")
+        if schedule_status.get("pendingEnforcement"):
+            status_parts.append("troca pendente")
+        if schedule_status.get("lastMessage"):
+            status_parts.append(str(schedule_status["lastMessage"]))
+        self._schedule_status_var.set(" | ".join(part for part in status_parts if part))
         try:
             self._root.update_idletasks()
             self._root.update()
@@ -2560,6 +3111,68 @@ class EditorControlPanel:
         self._stream_url_var.set(str(profile.get("stream_url") or ""))
         self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
 
+    def new_schedule_rule(self):
+        self._selected_schedule_rule_id = ""
+        self._schedule_name_var.set("")
+        self._schedule_start_var.set("00:00")
+        self._schedule_end_var.set("01:00")
+        self._schedule_enabled_var.set(True)
+        self._set_schedule_allowed_profile_ids([])
+        self._refresh_schedule_rules()
+
+    def save_schedule_rule(self):
+        try:
+            rule = self.on_save_stream_schedule_rule(
+                self._selected_schedule_rule_id,
+                self._schedule_name_var.get(),
+                self._schedule_start_var.get(),
+                self._schedule_end_var.get(),
+                self._get_selected_schedule_profile_ids(),
+                bool(self._schedule_enabled_var.get()),
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+
+        self._selected_schedule_rule_id = str(rule.get("id") or "")
+        self._refresh_schedule_rules(selected_rule_id=self._selected_schedule_rule_id)
+        self._set_schedule_form(rule)
+        self.editor.message = "Agenda por hora salva."
+
+    def delete_schedule_rule(self):
+        rule_id = self._get_selected_schedule_rule_id()
+        if not rule_id:
+            self.editor.message = "Selecione uma agenda por hora."
+            return
+
+        try:
+            deleted = self.on_delete_stream_schedule_rule(rule_id)
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+
+        self.new_schedule_rule()
+        self.editor.message = f"Agenda removida: {str(deleted.get('name') or '').strip() or rule_id}"
+
+    def toggle_schedule_rule(self):
+        rule_id = self._get_selected_schedule_rule_id()
+        if not rule_id:
+            self.editor.message = "Selecione uma agenda por hora."
+            return
+
+        try:
+            rule = self.on_toggle_stream_schedule_rule(rule_id)
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+
+        self._selected_schedule_rule_id = str(rule.get("id") or "")
+        self._refresh_schedule_rules(selected_rule_id=self._selected_schedule_rule_id)
+        self._set_schedule_form(rule)
+        self.editor.message = (
+            "Agenda ativada." if rule.get("enabled") else "Agenda desativada."
+        )
+
     def _refresh_stream_profiles(self, selected_profile_id: str | None = None):
         profiles = self.stream_store.list_profiles()
         self._stream_profile_ids = [str(profile.get("id") or "") for profile in profiles]
@@ -2587,6 +3200,51 @@ class EditorControlPanel:
             self._stream_selector.current(0)
             self._stream_table.selection_set(self._stream_profile_ids[0])
             self._stream_table.focus(self._stream_profile_ids[0])
+
+        self._refresh_schedule_profiles()
+        self._refresh_schedule_rules()
+
+    def _refresh_schedule_profiles(self):
+        profiles = self.stream_store.list_profiles()
+        current_ids = self._get_selected_schedule_profile_ids()
+        self._schedule_profile_ids = [str(profile.get("id") or "") for profile in profiles]
+        self._schedule_profiles_listbox.delete(0, tk.END)
+        for profile in profiles:
+            self._schedule_profiles_listbox.insert(tk.END, format_stream_profile_label(profile))
+        self._set_schedule_allowed_profile_ids(current_ids)
+
+    def _refresh_schedule_rules(self, selected_rule_id: str | None = None):
+        rules = self.schedule_store.list_rules()
+        profiles_by_id = {
+            str(profile.get("id") or "").strip(): format_stream_profile_label(profile)
+            for profile in self.stream_store.list_profiles()
+            if str(profile.get("id") or "").strip()
+        }
+        active_rule_id = str(get_stream_schedule_status().get("activeRuleId") or "")
+        self._schedule_rule_ids = [str(rule.get("id") or "") for rule in rules]
+        target_rule_id = selected_rule_id or self._selected_schedule_rule_id
+        for item_id in self._schedule_table.get_children():
+            self._schedule_table.delete(item_id)
+        for rule in rules:
+            rule_id = str(rule.get("id") or "")
+            self._schedule_table.insert(
+                "",
+                "end",
+                iid=rule_id,
+                values=format_stream_schedule_rule_row(
+                    profiles_by_id,
+                    rule,
+                    active=rule_id == active_rule_id,
+                ),
+            )
+
+        if target_rule_id in self._schedule_rule_ids:
+            self._schedule_table.selection_set(target_rule_id)
+            self._schedule_table.focus(target_rule_id)
+            self._schedule_table.see(target_rule_id)
+        elif self._schedule_rule_ids:
+            self._schedule_table.selection_set(self._schedule_rule_ids[0])
+            self._schedule_table.focus(self._schedule_rule_ids[0])
 
     def _handle_profile_preview(self, _event=None):
         index = self._stream_selector.current()
@@ -2619,6 +3277,16 @@ class EditorControlPanel:
                 self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
                 break
 
+    def _handle_schedule_rule_select(self, _event=None):
+        rule_id = self._get_selected_schedule_rule_id()
+        if not rule_id:
+            return
+        for rule in self.schedule_store.list_rules():
+            if str(rule.get("id") or "").strip() == rule_id:
+                self._selected_schedule_rule_id = rule_id
+                self._set_schedule_form(rule)
+                break
+
     def _handle_direction_change(self, _event=None):
         self._commit_count_direction()
 
@@ -2635,6 +3303,35 @@ class EditorControlPanel:
         if 0 <= index < len(self._stream_profile_ids):
             return self._stream_profile_ids[index]
         return ""
+
+    def _get_selected_schedule_rule_id(self) -> str:
+        selection = self._schedule_table.selection()
+        if selection:
+            return str(selection[0])
+        return str(self._selected_schedule_rule_id or "")
+
+    def _get_selected_schedule_profile_ids(self) -> list[str]:
+        indices = self._schedule_profiles_listbox.curselection()
+        selected_ids = []
+        for index in indices:
+            if 0 <= index < len(self._schedule_profile_ids):
+                selected_ids.append(self._schedule_profile_ids[index])
+        return selected_ids
+
+    def _set_schedule_allowed_profile_ids(self, allowed_profile_ids: list[str]):
+        allowed_set = {str(profile_id or "").strip() for profile_id in allowed_profile_ids if str(profile_id or "").strip()}
+        self._schedule_profiles_listbox.selection_clear(0, tk.END)
+        for index, profile_id in enumerate(self._schedule_profile_ids):
+            if profile_id in allowed_set:
+                self._schedule_profiles_listbox.selection_set(index)
+
+    def _set_schedule_form(self, rule: dict):
+        self._selected_schedule_rule_id = str(rule.get("id") or "")
+        self._schedule_name_var.set(str(rule.get("name") or ""))
+        self._schedule_start_var.set(str(rule.get("start_time") or "00:00"))
+        self._schedule_end_var.set(str(rule.get("end_time") or "01:00"))
+        self._schedule_enabled_var.set(bool(rule.get("enabled", True)))
+        self._set_schedule_allowed_profile_ids(rule.get("allowed_profile_ids", []))
 
     def request_close(self):
         self.should_close = True
@@ -2840,8 +3537,11 @@ def main():
         )
     bootstrap_stream_profiles_from_supabase(cfg, config_path, supabase_sync)
     stream_store = StreamProfileStore(cfg)
+    schedule_store = StreamScheduleStore(cfg)
     stream_rotation = cfg["stream_rotation"]
+    stream_schedule = cfg["stream_schedule"]
     selected_profile = stream_store.get_selected_profile()
+    initial_schedule_state = resolve_stream_schedule_state(stream_schedule, stream_store.list_profiles())
     if stream_rotation.get("enabled") and ensure_stream_rotation_profile_state(
         stream_rotation,
         str(selected_profile.get("id") or ""),
@@ -2861,6 +3561,16 @@ def main():
         lastCountedRoundId=str(stream_rotation.get("last_counted_round_id") or ""),
         selectedStreamProfileId=str(selected_profile.get("id") or ""),
         activeProfileLabel=format_stream_profile_label(selected_profile),
+        lastMessage="",
+    )
+    update_stream_schedule_status(
+        timezone=initial_schedule_state.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+        activeRuleId=str((initial_schedule_state.get("activeRule") or {}).get("id") or ""),
+        activeRuleName=str((initial_schedule_state.get("activeRule") or {}).get("name") or ""),
+        activeWindow=initial_schedule_state.get("activeWindow", ""),
+        restricted=bool(initial_schedule_state.get("isRestricted")),
+        eligibleProfileIds=list(initial_schedule_state.get("eligibleProfileIds", [])),
+        pendingEnforcement=False,
         lastMessage="",
     )
     initial_camera_id = str(cfg.get("camera_id") or selected_profile.get("camera_id") or "").strip()
@@ -2944,6 +3654,7 @@ def main():
     pending_stream_profile = None
     pending_camera_activation = None
     pending_rotation_profile = None
+    pending_schedule_profile = None
     last_rotation_round_id = ""
     rotation_boundary_consumed = False
     pending_stream_refresh_started_at = None
@@ -2996,6 +3707,34 @@ def main():
             lastMessage=message,
         )
 
+    def resolve_schedule_state() -> dict:
+        return resolve_stream_schedule_state(stream_schedule, stream_store.list_profiles())
+
+    def publish_schedule_status(message: str = ""):
+        schedule_state = resolve_schedule_state()
+        update_stream_schedule_status(
+            timezone=schedule_state.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+            activeRuleId=str((schedule_state.get("activeRule") or {}).get("id") or ""),
+            activeRuleName=str((schedule_state.get("activeRule") or {}).get("name") or ""),
+            activeWindow=schedule_state.get("activeWindow", ""),
+            restricted=bool(schedule_state.get("isRestricted")),
+            eligibleProfileIds=list(schedule_state.get("eligibleProfileIds", [])),
+            pendingEnforcement=isinstance(pending_schedule_profile, dict),
+            lastMessage=message,
+        )
+
+    def ensure_profile_allowed_for_schedule(profile: dict, *, action_name: str):
+        schedule_state = resolve_schedule_state()
+        if is_profile_allowed_by_schedule(profile, schedule_state):
+            return
+
+        active_rule = schedule_state.get("activeRule") or {}
+        window_label = schedule_state.get("activeWindow") or "fora da agenda atual"
+        raise ValueError(
+            f"Nao e possivel {action_name}: a stream esta fora da faixa horaria ativa "
+            f"'{str(active_rule.get('name') or window_label)}' ({window_label})."
+        )
+
     def set_rotation_enabled(enabled: bool):
         stream_rotation["enabled"] = bool(enabled)
         if enabled:
@@ -3017,13 +3756,14 @@ def main():
     def queue_random_stream_profile(*, reason: str = "manual") -> dict:
         nonlocal pending_rotation_profile
 
+        schedule_state = resolve_schedule_state()
         profile = select_random_stream_profile(
-            stream_store.list_profiles(),
+            schedule_state.get("eligibleProfiles", []),
             str(cfg.get("selected_stream_profile_id") or ""),
             rng=random,
         )
         if profile is None:
-            message = "Rotacao requer ao menos dois perfis com camera_id e URL."
+            message = "Rotacao requer ao menos dois perfis elegiveis com camera_id e URL."
             publish_rotation_status(message)
             raise ValueError(message)
 
@@ -3036,6 +3776,67 @@ def main():
         if editor is not None:
             editor.message = message
         return pending_rotation_profile
+
+    def maybe_enforce_stream_schedule(backend_round: dict | None):
+        nonlocal pending_schedule_profile, pending_rotation_profile
+
+        schedule_state = resolve_schedule_state()
+        selected_profile = stream_store.get_selected_profile()
+
+        if (
+            isinstance(pending_rotation_profile, dict)
+            and not is_profile_allowed_by_schedule(pending_rotation_profile, schedule_state)
+        ):
+            pending_rotation_profile = None
+            publish_rotation_status("Rotacao pendente cancelada pela agenda por hora.")
+
+        target_profile = None
+        if schedule_state.get("isRestricted") and not is_profile_allowed_by_schedule(selected_profile, schedule_state):
+            target_profile = choose_schedule_enforcement_profile(
+                selected_profile,
+                schedule_state.get("eligibleProfiles", []),
+            )
+
+        if target_profile is None:
+            if pending_schedule_profile is not None:
+                pending_schedule_profile = None
+                publish_schedule_status("Agenda por hora liberada ou ja atendida.")
+            else:
+                publish_schedule_status("")
+            return
+
+        if (
+            pending_schedule_profile is None
+            or str(pending_schedule_profile.get("id") or "").strip() != str(target_profile.get("id") or "").strip()
+        ):
+            pending_schedule_profile = dict(target_profile)
+            pending_schedule_profile["_activation_allow_settling"] = True
+
+        if not should_apply_pending_stream_rotation(pending_schedule_profile, backend_round):
+            status = get_round_status(backend_round) or "indisponivel"
+            publish_schedule_status(
+                "Agenda por hora exige troca; aguardando janela segura "
+                f"({status}): {format_stream_profile_label(target_profile)}"
+            )
+            return
+
+        current_camera_id = str(cfg.get("camera_id") or "").strip()
+        allowed, reason = backend.ensure_camera_change_allowed(
+            current_camera_id,
+            operation_name="agenda por hora",
+            allow_settling=True,
+        )
+        if not allowed:
+            publish_schedule_status(f"Agenda por hora bloqueada pelo backend: {reason}")
+            return
+
+        profile = dict(pending_schedule_profile)
+        pending_schedule_profile = None
+        queue_stream_profile(
+            profile,
+            message=f"Agenda por hora aplicada em janela segura: {format_stream_profile_label(profile)}",
+        )
+        publish_schedule_status("Agenda por hora aplicada em janela segura.")
 
     def maybe_schedule_stream_rotation(backend_round: dict | None):
         nonlocal pending_rotation_profile, last_rotation_round_id, rotation_boundary_consumed
@@ -3060,6 +3861,10 @@ def main():
             if count_settled_round_for_stream_rotation(stream_rotation, backend_round):
                 cfg["stream_rotation"] = dict(stream_rotation)
                 save_config(config_path, cfg)
+
+        if pending_schedule_profile is not None:
+            publish_rotation_status("Rotacao aguardando agenda por hora.")
+            return
 
         if (
             pending_rotation_profile is None
@@ -3121,6 +3926,8 @@ def main():
             round_sync_enabled
             or bool(stream_rotation.get("enabled"))
             or pending_rotation_profile is not None
+            or bool(stream_schedule.get("rules"))
+            or pending_schedule_profile is not None
         )
         now_ts = time.time()
         if not should_poll_round or now_ts - last_round_sync < ROUND_SYNC_INTERVAL:
@@ -3147,6 +3954,7 @@ def main():
             else:
                 current_round_id = next_round_id
 
+        maybe_enforce_stream_schedule(backend_round)
         maybe_schedule_stream_rotation(backend_round)
 
     def save_editor_state():
@@ -3193,6 +4001,7 @@ def main():
         if control_panel is not None:
             control_panel.set_active_stream_profile(profile)
         publish_rotation_status(message)
+        publish_schedule_status(message)
 
     def queue_saved_profile_for_next_window(profile: dict, *, message: str):
         nonlocal pending_rotation_profile
@@ -3213,6 +4022,17 @@ def main():
         )
 
     def select_stream_profile(profile_id: str) -> dict:
+        profile = next(
+            (
+                dict(item)
+                for item in stream_store.list_profiles()
+                if str(item.get("id") or "").strip() == str(profile_id or "").strip()
+            ),
+            None,
+        )
+        if profile is None:
+            raise ValueError("Stream selecionada nao encontrada.")
+        ensure_profile_allowed_for_schedule(profile, action_name="carregar a stream")
         profile = stream_store.select_profile(profile_id)
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
@@ -3246,6 +4066,23 @@ def main():
                     break
 
         current_camera_id = str(cfg.get("camera_id") or "").strip()
+        candidate_profile = next(
+            (
+                dict(item)
+                for item in stream_store.list_profiles()
+                if str(item.get("stream_url") or "").strip() == str(target_url or cfg.get("stream_url", "")).strip()
+                and str(item.get("camera_id") or "").strip() == str(target_camera_id or cfg.get("camera_id", "")).strip()
+            ),
+            None,
+        )
+        if candidate_profile is None:
+            candidate_profile = {
+                "id": "",
+                "name": str(stream_name or "").strip(),
+                "stream_url": str(target_url or cfg.get("stream_url", "")).strip(),
+                "camera_id": str(target_camera_id or cfg.get("camera_id", "")).strip(),
+            }
+        ensure_profile_allowed_for_schedule(candidate_profile, action_name="forcar a troca")
         profile, _created = stream_store.save_profile_entry(
             name=stream_name,
             camera_id=target_camera_id or cfg.get("camera_id", ""),
@@ -3310,6 +4147,25 @@ def main():
             )
             return profile
 
+        target_url = validate_stream_url(stream_url or "")
+        target_camera_id = str(camera_id or cfg.get("camera_id") or "").strip()
+        candidate_profile = next(
+            (
+                dict(item)
+                for item in stream_store.list_profiles()
+                if str(item.get("stream_url") or "").strip() == target_url
+                and str(item.get("camera_id") or "").strip() == target_camera_id
+            ),
+            None,
+        )
+        if candidate_profile is None:
+            candidate_profile = {
+                "id": "",
+                "name": str(stream_name or "").strip(),
+                "stream_url": target_url,
+                "camera_id": target_camera_id,
+            }
+        ensure_profile_allowed_for_schedule(candidate_profile, action_name="abrir a stream")
         profile, created = stream_store.apply_stream_url(
             stream_url,
             name=stream_name,
@@ -3388,6 +4244,7 @@ def main():
         return profile
 
     def delete_stream_profile(profile_id: str) -> dict:
+        schedule_store.assert_profile_not_referenced(profile_id)
         deleted = stream_store.delete_profile(profile_id)
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
@@ -3396,6 +4253,51 @@ def main():
         if editor is not None:
             editor.message = f"Stream apagada da esteira: {format_stream_profile_label(deleted)}"
         return deleted
+
+    def save_stream_schedule_rule(
+        rule_id: str,
+        name: str,
+        start_time: str,
+        end_time: str,
+        allowed_profile_ids: list[str],
+        enabled: bool,
+    ) -> dict:
+        rule, created = schedule_store.save_rule(
+            rule_id=rule_id,
+            name=name,
+            start_time=start_time,
+            end_time=end_time,
+            allowed_profile_ids=allowed_profile_ids,
+            enabled=enabled,
+        )
+        stream_schedule.clear()
+        stream_schedule.update(cfg["stream_schedule"])
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        publish_schedule_status(
+            "Agenda por hora salva." if not created else "Agenda por hora adicionada."
+        )
+        return rule
+
+    def delete_stream_schedule_rule(rule_id: str) -> dict:
+        deleted = schedule_store.delete_rule(rule_id)
+        stream_schedule.clear()
+        stream_schedule.update(cfg["stream_schedule"])
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        publish_schedule_status("Agenda por hora removida.")
+        return deleted
+
+    def toggle_stream_schedule_rule(rule_id: str) -> dict:
+        toggled = schedule_store.toggle_rule(rule_id)
+        stream_schedule.clear()
+        stream_schedule.update(cfg["stream_schedule"])
+        save_config(config_path, cfg)
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        publish_schedule_status(
+            "Agenda por hora ativada." if toggled.get("enabled") else "Agenda por hora desativada."
+        )
+        return toggled
 
     if round_sync_enabled:
         backend_round = backend.fetch_current_round(cfg.get("camera_id", ""))
@@ -3428,6 +4330,10 @@ def main():
             set_count_direction,
             set_rotation_enabled,
             lambda: queue_random_stream_profile(reason="manual"),
+            schedule_store,
+            save_stream_schedule_rule,
+            delete_stream_schedule_rule,
+            toggle_stream_schedule_rule,
             stream_rotation_enabled=bool(stream_rotation.get("enabled")),
         )
         active_control_panel_ref = control_panel

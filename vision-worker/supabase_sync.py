@@ -15,12 +15,14 @@ class SupabaseStreamProfileSync:
         url: str,
         service_key: str,
         table: str = "stream_profiles",
+        schedule_table: str = "stream_schedule_rules",
         scope: str = "videoBetTransit",
         timeout_seconds: int = 8,
     ):
         self.url = url.rstrip("/")
         self.service_key = service_key.strip()
         self.table = table.strip() or "stream_profiles"
+        self.schedule_table = schedule_table.strip() or "stream_schedule_rules"
         self.scope = scope.strip() or "videoBetTransit"
         self.timeout_seconds = max(2, int(timeout_seconds))
         self._session = requests.Session()
@@ -44,6 +46,11 @@ class SupabaseStreamProfileSync:
                 or cfg.get("supabase_stream_profiles_table")
                 or "stream_profiles"
             ).strip(),
+            schedule_table=str(
+                os.environ.get("SUPABASE_STREAM_SCHEDULE_TABLE")
+                or cfg.get("supabase_stream_schedule_table")
+                or "stream_schedule_rules"
+            ).strip(),
             scope=str(
                 os.environ.get("SUPABASE_STREAM_PROFILES_SCOPE")
                 or cfg.get("supabase_stream_profiles_scope")
@@ -58,7 +65,7 @@ class SupabaseStreamProfileSync:
 
     def fetch_profiles(self) -> tuple[list[dict], str | None]:
         response = self._session.get(
-            self._table_url(),
+            self._table_url(self.table),
             headers=self._headers(),
             params={
                 "select": "id,name,stream_url,camera_id,roi,line,count_direction,is_selected,updated_at",
@@ -113,25 +120,124 @@ class SupabaseStreamProfileSync:
                 }
             )
 
-        if not payload:
-            return
+        if payload:
+            response = self._session.post(
+                self._table_url(self.table),
+                headers=self._headers(
+                    {
+                        "Content-Type": "application/json",
+                        "Prefer": "resolution=merge-duplicates,return=minimal",
+                    }
+                ),
+                params={"on_conflict": "scope,id"},
+                json=payload,
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
 
-        response = self._session.post(
-            self._table_url(),
-            headers=self._headers(
-                {
-                    "Content-Type": "application/json",
-                    "Prefer": "resolution=merge-duplicates,return=minimal",
-                }
-            ),
-            params={"on_conflict": "scope,id"},
-            json=payload,
+        self._delete_missing_rows(self.table, [item["id"] for item in payload])
+
+    def fetch_schedule_rules(self) -> tuple[list[dict], str | None]:
+        response = self._session.get(
+            self._table_url(self.schedule_table),
+            headers=self._headers(),
+            params={
+                "select": "id,name,enabled,start_time,end_time,allowed_profile_ids,timezone,updated_at",
+                "scope": f"eq.{self.scope}",
+                "order": "updated_at.desc.nullslast,id.asc",
+            },
             timeout=self.timeout_seconds,
         )
         response.raise_for_status()
+        rows = response.json()
 
-    def _table_url(self) -> str:
-        return f"{self.url}/rest/v1/{self.table}"
+        rules: list[dict] = []
+        timezone_name = None
+        for row in rows:
+            rule_id = str(row.get("id") or "").strip()
+            start_time = str(row.get("start_time") or "").strip()
+            end_time = str(row.get("end_time") or "").strip()
+            allowed_ids = row.get("allowed_profile_ids")
+            if not isinstance(allowed_ids, list):
+                allowed_ids = []
+            if not rule_id or not start_time or not end_time:
+                continue
+            rules.append(
+                {
+                    "id": rule_id,
+                    "name": str(row.get("name") or "").strip(),
+                    "enabled": bool(row.get("enabled", True)),
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "allowed_profile_ids": [str(value).strip() for value in allowed_ids if str(value).strip()],
+                }
+            )
+            if timezone_name is None:
+                timezone_name = str(row.get("timezone") or "").strip() or None
+
+        return rules, timezone_name
+
+    def upsert_schedule_rules(self, rules: list[dict], timezone_name: str | None) -> None:
+        payload: list[dict[str, Any]] = []
+        normalized_timezone = str(timezone_name or "").strip() or "America/Sao_Paulo"
+
+        for rule in rules:
+            rule_id = str(rule.get("id") or "").strip()
+            start_time = str(rule.get("start_time") or "").strip()
+            end_time = str(rule.get("end_time") or "").strip()
+            if not rule_id or not start_time or not end_time:
+                continue
+
+            allowed_ids = [
+                str(value).strip()
+                for value in (rule.get("allowed_profile_ids") or [])
+                if str(value).strip()
+            ]
+            payload.append(
+                {
+                    "scope": self.scope,
+                    "id": rule_id,
+                    "name": str(rule.get("name") or "").strip(),
+                    "enabled": bool(rule.get("enabled", True)),
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "allowed_profile_ids": allowed_ids,
+                    "timezone": normalized_timezone,
+                }
+            )
+
+        if payload:
+            response = self._session.post(
+                self._table_url(self.schedule_table),
+                headers=self._headers(
+                    {
+                        "Content-Type": "application/json",
+                        "Prefer": "resolution=merge-duplicates,return=minimal",
+                    }
+                ),
+                params={"on_conflict": "scope,id"},
+                json=payload,
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+
+        self._delete_missing_rows(self.schedule_table, [item["id"] for item in payload])
+
+    def _table_url(self, table_name: str) -> str:
+        return f"{self.url}/rest/v1/{table_name}"
+
+    def _delete_missing_rows(self, table_name: str, retained_ids: list[str]) -> None:
+        params = {"scope": f"eq.{self.scope}"}
+        if retained_ids:
+            escaped_ids = ",".join(str(value).replace('"', '\\"') for value in retained_ids)
+            params["id"] = f"not.in.({escaped_ids})"
+        response = self._session.delete(
+            self._table_url(table_name),
+            headers=self._headers({"Prefer": "return=minimal"}),
+            params=params,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
 
     def _headers(self, extra: dict | None = None) -> dict:
         headers = {

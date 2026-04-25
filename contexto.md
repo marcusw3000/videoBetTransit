@@ -117,6 +117,8 @@ Configuracoes relevantes em `vision-worker/config.json`:
 - `count_direction`: `up`, `down` ou `any`
 - `stream_profiles`: esteira de presets operacionais; cada item carrega `id`, `name`, `stream_url`, `camera_id`, `roi`, `line` e `count_direction`
 - `selected_stream_profile_id`: preset atualmente selecionado na esteira
+- `stream_schedule.timezone`: timezone usada para avaliar a agenda por hora; padrao `America/Sao_Paulo`
+- `stream_schedule.rules`: regras recorrentes diarias com `id`, `name`, `enabled`, `start_time`, `end_time` e `allowed_profile_ids`
 - `stream_rotation.enabled`: ativa/desativa rotacao randômica; por padrao fica `false`
 - `stream_rotation.mode`: modo da rotacao; hoje `round_boundary`
 - `stream_rotation.strategy`: estrategia de sorteio; hoje `uniform_excluding_current`
@@ -127,6 +129,7 @@ Configuracoes relevantes em `vision-worker/config.json`:
 - `supabase_url`: URL do projeto Supabase para sincronizacao opcional da esteira
 - `supabase_service_key`: service role key usada pela engine para ler/escrever a esteira
 - `supabase_stream_profiles_table`: nome da tabela remota, por padrao `stream_profiles`
+- `supabase_stream_schedule_table`: nome da tabela remota da agenda por hora, por padrao `stream_schedule_rules`
 - `supabase_stream_profiles_scope`: escopo logico para separar ambientes/projetos dentro da mesma tabela
 
 Observacao importante:
@@ -137,12 +140,15 @@ Observacao importante:
 - a criacao da app MJPEG foi isolada em funcao propria para facilitar evolucao de deploy
 - a calibracao operacional de ROI e linha agora acontece no proprio Python, com janela OpenCV e painel de botoes
 - o painel local do Vision tambem permite informar `Camera ID`, abrir URL, salvar preset, ativar rotacao e sortear a proxima camera
+- o painel local tambem permite cadastrar agendas por hora para restringir quais presets podem rodar em cada faixa
 - a esteira de streams continua salva localmente em `vision-worker/config.json` para garantir boot offline
 - quando `supabase_url` e `supabase_service_key` estao configurados, a engine sincroniza a esteira com o Supabase
+- a agenda por hora tambem fica salva localmente e pode ser sincronizada no Supabase em tabela separada
 - no primeiro boot com Supabase, se a tabela remota estiver vazia, a configuracao local e publicada
 - se ja existirem perfis remotos, eles passam a popular a esteira local
+- se ja existirem regras remotas da agenda por hora, elas passam a popular a configuracao local
 - a rotacao randômica fica pendente enquanto o round estiver `open` ou `closing`; a aplicacao so ocorre em `settling`, validada pelo backend
-- o `/health` do worker expoe `selectedStreamProfileId` e `streamRotation`, alem dos dados de pipeline ja existentes
+- o `/health` do worker expoe `selectedStreamProfileId`, `streamRotation` e `streamSchedule`, alem dos dados de pipeline ja existentes
 - a baseline atual de latencia ficou boa com:
   - `ffmpeg_capture_options`: `fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;32768`
   - `stream_buffer_size`: `1`
@@ -236,10 +242,12 @@ Observacao:
 
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
 - Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
-- se quiser sincronizar a esteira no Supabase, crie a tabela usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `vision-worker/config.json`
+- se quiser sincronizar a esteira no Supabase, crie as tabelas usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e [`supabase_stream_schedule_rules.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_schedule_rules.sql), e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `vision-worker/config.json`
+- para agenda por hora, cadastre as regras com faixas sem sobreposicao e com `allowed_profile_ids` apontando para presets existentes
 - para rotação randômica real, cadastre ao menos dois `stream_profiles` com `camera_id` e URL validos
 - cada preset publica na propria saida `processed/<camera_id>`; o frontend deve apontar para o `cameraId` que se quer monitorar
 - troca manual de ROI, linha e stream profile segue bloqueada durante round ativo; a excecao `AllowSettling` e restrita a rotacao controlada durante `settling`
+- quando uma faixa horaria ativa restringe a esteira, trocas manuais e rotacao so consideram presets elegiveis; se a stream atual sair da faixa, a troca fica pendente ate a proxima janela segura
 - No ambiente Windows atual, `127.0.0.1` e o host confiavel; `localhost` pode falhar por resolver em `::1`.
 - A `.venv` precisa estar atualizada com `vision-worker/requirements.txt`.
 - Clicar no terminal do Windows em modo QuickEdit pode congelar temporariamente a engine Python.
