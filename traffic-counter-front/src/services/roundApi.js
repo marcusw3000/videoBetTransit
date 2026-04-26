@@ -28,8 +28,19 @@ export async function getCurrentRound(cameraId) {
   return normalizeRoundContract(data)
 }
 
-export async function getRoundHistory(cameraId) {
-  const params = cameraId ? { cameraId } : undefined
+export async function getRoundHistory(cameraId, cameraIds = []) {
+  const normalizedCameraId = String(cameraId || '').trim()
+  const normalizedCameraIds = Array.isArray(cameraIds)
+    ? cameraIds.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+
+  const params = {}
+  if (normalizedCameraId) {
+    params.cameraId = normalizedCameraId
+  } else if (normalizedCameraIds.length > 0) {
+    params.cameraIds = normalizedCameraIds.join(',')
+  }
+
   const { data } = await withRetry(() => api.get('/rounds/history', { params }))
   return Array.isArray(data) ? data.map(normalizeRoundContract).filter(Boolean) : []
 }

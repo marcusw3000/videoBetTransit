@@ -24,20 +24,15 @@ export default function RoundSummaryCard({
 }) {
   const metaClassName = compact ? 'round-summary-meta round-summary-meta-compact' : 'round-summary-meta'
   const status = String(round?.status || 'loading').toLowerCase()
-  const roundMode = String(round?.roundMode || 'normal').toLowerCase()
-  const cardClassName = `card round-summary-card${roundMode === 'turbo' ? ' round-summary-card-turbo' : ''}`
 
   return (
-    <div className={cardClassName}>
+    <div className="card round-summary-card">
       <div className="round-summary-head">
         <div>
           <span className="label">{title}</span>
           <h3>{round?.displayName || 'Rodada Normal'}</h3>
         </div>
         <div className="round-summary-head-badges">
-          {roundMode === 'turbo' && (
-            <span className="turbo-badge round-summary-mode-turbo">TURBO</span>
-          )}
           <span className={`admin-round-status admin-round-status-${status}`}>
             {status.toUpperCase()}
           </span>
@@ -55,7 +50,7 @@ export default function RoundSummaryCard({
         </div>
         <div>
           <span className="label">Modo</span>
-          <strong>{roundMode === 'turbo' ? 'Turbo' : 'Normal'}</strong>
+          <strong>Normal</strong>
         </div>
         <div>
           <span className="label">Criado em</span>

@@ -172,7 +172,6 @@ function MarketPage() {
   const roundIdRef = useRef('')
 
   const roundPhase = getRoundPhase(round)
-  const isTurboRound = String(round?.roundMode || 'normal').toLowerCase() === 'turbo'
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
   const markets = round?.markets || []
@@ -246,12 +245,12 @@ function MarketPage() {
 
   const loadHistory = useCallback(async () => {
     try {
-      const data = await getRoundHistory()
+      const data = await getRoundHistory(activeCameraId)
       setHistory(data)
     } catch (err) {
       console.error(err)
     }
-  }, [])
+  }, [activeCameraId])
 
   const reconcileRecentBets = useCallback((roundData) => {
     setRecentBets((current) => current.map((bet) => reconcileBetWithRound(bet, roundData)))
@@ -343,7 +342,7 @@ function MarketPage() {
       try {
         const [currentRound, roundHistory] = await Promise.all([
           getCurrentRound(activeCameraId),
-          getRoundHistory(),
+          getRoundHistory(activeCameraId),
         ])
         if (!active) return
         updateRound(currentRound)
@@ -518,12 +517,11 @@ function MarketPage() {
     <div className="page">
       <div className="page-inner">
         {/* Header */}
-        <header className={`exchange-header${isTurboRound ? ' header-turbo' : ''}`}>
+        <header className="exchange-header">
           <div className="header-left">
             <div className="header-brand-icon" aria-label="brand icon">🚗</div>
             <div className="header-title-block">
-              <span className={`header-game-title${isTurboRound ? ' header-game-title-turbo' : ''}`}>{gameTitle}</span>
-              {isTurboRound && <span className="turbo-badge">TURBO</span>}
+              <span className="header-game-title">{gameTitle}</span>
               <LiveBadge phase={roundPhase} workerOnline={workerOnline} />
             </div>
           </div>

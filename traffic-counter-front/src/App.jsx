@@ -54,7 +54,7 @@ function getRoundPhaseLabel(roundPhase) {
 }
 
 function getDisplayName(round) {
-  return round?.displayName || 'Rodada Turbo'
+  return round?.displayName || 'Rodada Normal'
 }
 
 function getRoundDurationLabel(round) {

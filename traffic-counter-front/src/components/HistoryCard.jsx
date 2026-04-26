@@ -54,7 +54,7 @@ export default function HistoryCard({
       <div className="history-main">
         <div className="history-id">{item.id}</div>
         <div className="history-meta">
-          <span>{item.displayName || 'Rodada Turbo'}</span>
+          <span>{item.displayName || 'Rodada Normal'}</span>
           <span>{cameraLabel}</span>
           <span>{eventsCount} evento(s)</span>
           <span>{getHistoryStatusLabel(item)}</span>

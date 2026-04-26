@@ -37,13 +37,6 @@ public class AppWebApplicationFactory : WebApplicationFactory<Program>
 
             services.AddScoped<IMediaMtxClient, FakeMediaMtxClient>();
 
-            var randomDescriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(IRandomSource));
-            if (randomDescriptor is not null)
-                services.Remove(randomDescriptor);
-
-            services.AddSingleton<FakeRandomSource>();
-            services.AddSingleton<IRandomSource>(sp => sp.GetRequiredService<FakeRandomSource>());
         });
 
         builder.UseEnvironment("Testing");
@@ -61,38 +54,4 @@ public class FakeMediaMtxClient : IMediaMtxClient
 
     public Task<bool> PathExistsAsync(string pathName, CancellationToken ct = default)
         => Task.FromResult(true);
-}
-
-public class FakeRandomSource : IRandomSource
-{
-    private readonly Queue<double> _values = new();
-    private readonly object _lock = new();
-
-    public void Enqueue(params double[] values)
-    {
-        lock (_lock)
-        {
-            foreach (var value in values)
-                _values.Enqueue(value);
-        }
-    }
-
-    public void Reset()
-    {
-        lock (_lock)
-        {
-            _values.Clear();
-        }
-    }
-
-    public double NextDouble()
-    {
-        lock (_lock)
-        {
-            if (_values.Count == 0)
-                return 0.99;
-
-            return _values.Dequeue();
-        }
-    }
 }

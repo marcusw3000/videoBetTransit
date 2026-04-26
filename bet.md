@@ -756,6 +756,117 @@ Essas referencias nao substituem implementacao, mas devem orientar:
 - monitoracao
 - readiness regulatoria
 
+## 20.1 Arquitetura Inicial Recomendada
+
+Arquitetura recomendada para o momento atual:
+
+- `1 camera global`
+- uso da pipeline de cameras ja existente
+- sem escalar ainda para multiplas cameras
+- foco em estabilidade `24/7` antes de particionar a plataforma
+
+### Desenho alvo para o estagio atual
+
+- `1 VPS` como plano principal de aplicacao
+- `Supabase` como banco gerenciado e camada operacional administrativa
+- `1 worker` ativo para a camera global
+- `snapshots` e evidencias persistidos fora da logica do frontend
+
+### O que roda na VPS unica
+
+- `TrafficCounter.Api`
+- frontend do produto
+- backoffice/admin
+- `provider API`
+- emissor de webhook com retry
+- monitoracao basica, logs e healthchecks
+- opcionalmente o `vision-worker`, apenas se a carga real da camera continuar saudavel
+
+### O que fica fora da VPS
+
+- `Supabase/Postgres` gerenciado
+- armazenamento de evidencias, se o volume crescer alem do disco local
+- eventualmente o `vision-worker`, quando CPU, memoria ou latencia deixarem de ser confortaveis
+
+### Regra de separacao entre backend e worker
+
+- enquanto existir apenas `1 camera global`, e aceitavel comecar com `backend + worker` na mesma VPS
+- o backend continua sendo soberano para `rounds`, `bets`, settlement, wallet e reconciliacao
+- o worker continua sendo apenas produtor de sinal operacional, deteccao e crossing event
+- se houver impacto perceptivel no `round engine`, no webhook ou na API, o primeiro passo de escala e separar o `vision-worker` em outra maquina
+
+### Criterios para manter tudo em uma unica VPS
+
+- uso de CPU sustentado dentro de faixa segura
+- uso de memoria sem swap recorrente
+- latencia do stream sem degradacao perceptivel
+- backend respondendo healthcheck, round lifecycle e webhooks sem atraso
+- reinicio do worker sem derrubar o plano de controle do provider
+
+### Gatilhos para separar o `vision-worker`
+
+- travamentos de OpenCV, FFmpeg ou YOLO afetando a API
+- atraso no stream ou no processamento de crossing event
+- picos de CPU que prejudiquem `round engine`, webhooks ou backoffice
+- necessidade de GPU
+- necessidade de manutencao do worker sem risco para a API
+
+### Servicos logicos previstos
+
+1. `app service`
+
+- backend .NET
+- endpoints internos
+- `provider API`
+- backoffice
+- reconciliacao e ledger
+
+2. `worker service`
+
+- ingestao da camera global
+- deteccao, tracking e line crossing
+- envio de eventos para o backend
+- publicacao de health operacional
+
+3. `delivery service`
+
+- fila ou dispatcher de webhook
+- retry exponencial
+- `dead-letter`
+- reenvio manual futuro
+
+4. `storage service`
+
+- Supabase para estado soberano e administrativo
+- snapshots e evidencias em storage adequado ao volume real
+
+### Topologia recomendada agora
+
+- `Internet -> reverse proxy -> backend/frontend na VPS`
+- `vision-worker -> backend interno`
+- `backend -> Supabase`
+- `backend -> webhooks das operadoras`
+
+### Portas e superficies logicas
+
+- HTTPS publico apenas para frontend, admin e `provider API`
+- endpoints internos do worker protegidos por `api key` e nao expostos livremente
+- banco sem acesso publico amplo, restrito ao backend e operacao controlada
+
+### Decisao recomendada para o estagio atual
+
+- comecar com `1 VPS + Supabase`
+- subir `backend`, frontend, admin e integracoes na VPS
+- testar o `vision-worker` na mesma VPS primeiro
+- separar o worker apenas quando houver evidencia concreta de gargalo
+
+### Criterio de aceite desta arquitetura inicial
+
+- a camera global opera `24/7` com comportamento previsivel
+- o backend continua responsivo mesmo durante picos do worker
+- a operacao consegue reiniciar o worker sem perder soberania do round
+- a plataforma permanece simples o suficiente para evoluir sem custo operacional desnecessario
+
 ## 21. Backlog Operacional por Epicos
 
 Este backlog traduz o plano em blocos executaveis. A ideia e usar cada epico como unidade de planejamento e cada task como item concreto de implementacao.

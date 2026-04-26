@@ -26,7 +26,7 @@ export function normalizeRoundContract(round) {
   return {
     id: round.roundId || round.id || '',
     roundId: round.roundId || round.id || '',
-    displayName: round.displayName || 'Rodada Turbo',
+    displayName: round.displayName || 'Rodada Normal',
     status,
     createdAt: round.createdAt || null,
     betCloseAt: round.betCloseAt || null,

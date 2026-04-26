@@ -54,18 +54,21 @@ public class RoundsController : ControllerBase
     }
 
     [HttpGet("history")]
-    public async Task<IActionResult> GetHistory([FromQuery] int limit = 20, [FromQuery] string? cameraId = null)
+    public async Task<IActionResult> GetHistory(
+        [FromQuery] int limit = 20,
+        [FromQuery] string? cameraId = null,
+        [FromQuery] string? cameraIds = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var effectiveCameraId = string.IsNullOrWhiteSpace(cameraId) ? null : cameraId.Trim();
+        var effectiveCameraIds = BuildCameraFilter(cameraId, cameraIds);
 
         var query = db.Rounds
             .Include(r => r.Markets)
             .Where(r => r.Status == RoundStatus.Settled || r.Status == RoundStatus.Void)
             .AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(effectiveCameraId))
-            query = query.Where(r => r.CameraId == effectiveCameraId);
+        if (effectiveCameraIds.Count > 0)
+            query = query.Where(r => effectiveCameraIds.Contains(r.CameraId));
 
         var rounds = await query
             .OrderByDescending(r => r.SettledAt ?? r.VoidedAt)
@@ -212,4 +215,24 @@ public class RoundsController : ControllerBase
         Max = m.Max,
         IsWinner = m.IsWinner,
     };
+
+    private static List<string> BuildCameraFilter(string? cameraId, string? cameraIds)
+    {
+        var values = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(cameraId))
+            values.Add(cameraId.Trim());
+
+        if (!string.IsNullOrWhiteSpace(cameraIds))
+        {
+            values.AddRange(
+                cameraIds
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(value => !string.IsNullOrWhiteSpace(value)));
+        }
+
+        return values
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }

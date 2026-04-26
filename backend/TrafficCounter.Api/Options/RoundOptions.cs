@@ -6,7 +6,6 @@ public class RoundOptions
     public int BetWindowSeconds { get; set; } = 15;
     public int SettleDelaySeconds { get; set; } = 2;
     public RoundTimingOptions Timing { get; set; } = new();
-    public TurboRoundOptions Turbo { get; set; } = new();
     public DynamicMarketOptions DynamicMarkets { get; set; } = new();
     public RoundMarketSets MarketSets { get; set; } = new();
     public List<MarketTemplate> Markets { get; set; } = [];
@@ -30,22 +29,9 @@ public class MarketTemplate
     public int? TargetValue { get; set; }
 }
 
-public class TurboRoundOptions
-{
-    public bool Enabled { get; set; } = false;
-    public double Probability { get; set; } = 0.25;
-    public int WarmupRoundsAfterProfileSwitch { get; set; } = 5;
-}
-
 public class RoundTimingOptions
 {
     public RoundModeTimingOptions Normal { get; set; } = new()
-    {
-        DurationSeconds = 60,
-        BetWindowSeconds = 15,
-    };
-
-    public RoundModeTimingOptions Turbo { get; set; } = new()
     {
         DurationSeconds = 60,
         BetWindowSeconds = 15,
@@ -61,7 +47,6 @@ public class RoundModeTimingOptions
 public class RoundMarketSets
 {
     public List<MarketTemplate> Normal { get; set; } = [];
-    public List<MarketTemplate> Turbo { get; set; } = [];
 }
 
 public class DynamicMarketOptions

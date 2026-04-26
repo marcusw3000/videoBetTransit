@@ -25,9 +25,6 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         _factory = factory;
         _client = factory.CreateClient();
         _client.DefaultRequestHeaders.Add("X-API-Key", "CHANGE_ME");
-
-        using var scope = _factory.Services.CreateScope();
-        scope.ServiceProvider.GetRequiredService<FakeRandomSource>().Reset();
     }
 
     [Fact]
@@ -400,7 +397,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task Dynamic_market_lines_normalize_counts_from_mixed_round_modes()
+    public async Task Dynamic_market_lines_use_historical_rounds_without_turbo_special_case()
     {
         using var scope = _factory.Services.CreateScope();
         var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
@@ -408,16 +405,16 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         await SeedSettledRoundHistoryAsync(
             dbFactory,
-            "cam_dynamic_mixed_modes",
+            "cam_dynamic_historical_rounds",
             roundsSinceProfileSwitch: 3,
             lastProfileChangedAt: null,
             new SeededHistoricalRound(RoundMode.Normal, 18),
-            new SeededHistoricalRound(RoundMode.Turbo, 12),
-            new SeededHistoricalRound(RoundMode.Turbo, 12));
+            new SeededHistoricalRound(RoundMode.Normal, 12),
+            new SeededHistoricalRound(RoundMode.Normal, 12));
 
-        await roundService.EnsureActiveRoundAsync("cam_dynamic_mixed_modes");
+        await roundService.EnsureActiveRoundAsync("cam_dynamic_historical_rounds");
 
-        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_dynamic_mixed_modes");
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_dynamic_historical_rounds");
 
         Assert.NotNull(round);
         Assert.Equal("normal", round!.RoundMode);
@@ -743,28 +740,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task Turbo_round_is_not_selected_before_warmup_rounds()
-    {
-        using var scope = _factory.Services.CreateScope();
-        scope.ServiceProvider.GetRequiredService<FakeRandomSource>().Enqueue(0.0);
-
-        await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
-        {
-            CameraId = "cam_turbo_warmup",
-            StreamProfileId = "profile-a",
-        });
-
-        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
-        await roundService.EnsureActiveRoundAsync("cam_turbo_warmup");
-
-        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_turbo_warmup");
-
-        Assert.NotNull(round);
-        Assert.Equal("normal", round!.RoundMode);
-    }
-
-    [Fact]
-    public async Task Turbo_round_is_frozen_even_after_warmup_when_probability_hits()
+    public async Task New_rounds_are_always_created_in_normal_mode()
     {
         using var scope = _factory.Services.CreateScope();
         var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
@@ -772,64 +748,19 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
         {
-            CameraId = "cam_turbo_enabled",
+            CameraId = "cam_normal_only",
             StreamProfileId = "profile-a",
         })).EnsureSuccessStatusCode();
 
-        for (var index = 0; index < 5; index++)
-        {
-            await roundService.EnsureActiveRoundAsync("cam_turbo_enabled");
-            await ForceSettleCurrentRoundAsync(dbFactory, "cam_turbo_enabled");
-        }
+        await roundService.EnsureActiveRoundAsync("cam_normal_only");
+        await ForceSettleCurrentRoundAsync(dbFactory, "cam_normal_only");
+        await roundService.EnsureActiveRoundAsync("cam_normal_only");
 
-        await roundService.EnsureActiveRoundAsync("cam_turbo_enabled");
-
-        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_turbo_enabled");
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_normal_only");
 
         Assert.NotNull(round);
         Assert.Equal("normal", round!.RoundMode);
         Assert.Equal("Rodada Normal", round.DisplayName);
-        Assert.Equal(60, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
-        Assert.Equal(15, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
-    }
-
-    [Fact]
-    public async Task Stream_profile_change_resets_turbo_warmup()
-    {
-        using var scope = _factory.Services.CreateScope();
-        var random = scope.ServiceProvider.GetRequiredService<FakeRandomSource>();
-        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
-        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-
-        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
-        {
-            CameraId = "cam_turbo_reset",
-            StreamProfileId = "profile-a",
-        })).EnsureSuccessStatusCode();
-
-        for (var index = 0; index < 5; index++)
-        {
-            await roundService.EnsureActiveRoundAsync("cam_turbo_reset");
-            await ForceSettleCurrentRoundAsync(dbFactory, "cam_turbo_reset");
-        }
-
-        random.Enqueue(0.0);
-        await roundService.EnsureActiveRoundAsync("cam_turbo_reset");
-        await ForceSettleCurrentRoundAsync(dbFactory, "cam_turbo_reset");
-
-        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
-        {
-            CameraId = "cam_turbo_reset",
-            StreamProfileId = "profile-b",
-        })).EnsureSuccessStatusCode();
-
-        random.Enqueue(0.0);
-        await roundService.EnsureActiveRoundAsync("cam_turbo_reset");
-
-        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_turbo_reset");
-
-        Assert.NotNull(round);
-        Assert.Equal("normal", round!.RoundMode);
     }
 
     [Fact]
@@ -1719,8 +1650,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         {
             var seededRound = rounds[index];
             var createdAt = start.AddMinutes((index + 1) * 5);
-            var durationSeconds = seededRound.RoundMode == RoundMode.Turbo ? 120 : 180;
-            var betWindowSeconds = seededRound.RoundMode == RoundMode.Turbo ? 30 : 70;
+            var durationSeconds = 180;
+            var betWindowSeconds = 70;
             var endsAt = createdAt.AddSeconds(durationSeconds);
 
             db.Rounds.Add(new Round
@@ -1729,7 +1660,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
                 CameraId = cameraId,
                 RoundMode = seededRound.RoundMode,
                 Status = RoundStatus.Settled,
-                DisplayName = seededRound.RoundMode == RoundMode.Turbo ? "Rodada Turbo" : "Rodada Normal",
+                DisplayName = "Rodada Normal",
                 CreatedAt = createdAt,
                 BetCloseAt = createdAt.AddSeconds(betWindowSeconds),
                 EndsAt = endsAt,

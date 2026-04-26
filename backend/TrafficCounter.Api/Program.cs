@@ -48,7 +48,6 @@ builder.Services.AddScoped<UrlValidationService>();
 builder.Services.AddScoped<DynamicMarketLineService>();
 builder.Services.AddScoped<RoundService>();
 builder.Services.AddScoped<BetService>();
-builder.Services.AddSingleton<IRandomSource, SystemRandomSource>();
 
 // ── MediaMTX client — Singleton para poder ser injetado em Singletons/Workers ─
 builder.Services.AddSingleton<IMediaMtxClient>(sp =>

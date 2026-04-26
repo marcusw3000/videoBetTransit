@@ -23,7 +23,6 @@ public class RoundService
     private readonly IHubContext<RoundHub> _hub;
     private readonly ILogger<RoundService> _logger;
     private readonly RoundOptions _options;
-    private readonly IRandomSource _randomSource;
     private readonly BetService _betService;
     private readonly DynamicMarketLineService _dynamicMarketLineService;
 
@@ -32,7 +31,6 @@ public class RoundService
         IHubContext<RoundHub> hub,
         ILogger<RoundService> logger,
         IOptions<RoundOptions> options,
-        IRandomSource randomSource,
         BetService betService,
         DynamicMarketLineService dynamicMarketLineService)
     {
@@ -40,7 +38,6 @@ public class RoundService
         _hub = hub;
         _logger = logger;
         _options = options.Value;
-        _randomSource = randomSource;
         _betService = betService;
         _dynamicMarketLineService = dynamicMarketLineService;
     }
@@ -522,22 +519,22 @@ public class RoundService
                 return null;
             }
 
-            var selection = SelectRoundMode(state);
-            var timing = GetTiming(selection.RoundMode);
+            var roundMode = RoundMode.Normal;
+            var timing = GetTiming();
             var marketLine = await _dynamicMarketLineService.BuildTemplatesAsync(
                 db,
                 normalizedCameraId,
                 timing.DurationSeconds,
-                selection.RoundsSinceProfileSwitch,
+                state.RoundsSinceProfileSwitch,
                 state.LastProfileChangedAt,
-                GetMarketTemplates(selection.RoundMode));
+                GetMarketTemplates());
             var round = new Round
             {
                 RoundId = Guid.NewGuid(),
                 CameraId = normalizedCameraId,
-                RoundMode = selection.RoundMode,
+                RoundMode = roundMode,
                 Status = RoundStatus.Open,
-                DisplayName = GetDisplayName(selection.RoundMode),
+                DisplayName = GetDisplayName(),
                 CreatedAt = now,
                 BetCloseAt = now.AddSeconds(timing.BetWindowSeconds),
                 EndsAt = now.AddSeconds(timing.DurationSeconds),
@@ -569,7 +566,7 @@ public class RoundService
                 "round_mode_selected",
                 now,
                 0,
-                $"roundMode={selection.RoundMode.ToString().ToLowerInvariant()};eligible={selection.WasEligibleForTurbo.ToString().ToLowerInvariant()};streamProfileId={state.ActiveStreamProfileId ?? "none"};roundsSinceSwitchBeforeCreate={selection.RoundsSinceProfileSwitch}",
+                $"roundMode={roundMode.ToString().ToLowerInvariant()};streamProfileId={state.ActiveStreamProfileId ?? "none"};roundsSinceSwitchBeforeCreate={state.RoundsSinceProfileSwitch}",
                 "round_manager"));
             db.RoundEvents.Add(CreateRoundEvent(
                 round,
@@ -836,26 +833,9 @@ public class RoundService
         };
     }
 
-    private RoundModeSelection SelectRoundMode(CameraRoundState state)
+    private List<MarketTemplate> GetMarketTemplates()
     {
-        var warmupRounds = Math.Max(0, _options.Turbo.WarmupRoundsAfterProfileSwitch);
-        var roundsSinceProfileSwitch = Math.Max(0, state.RoundsSinceProfileSwitch);
-        var eligibleForTurbo = _options.Turbo.Enabled
-            && roundsSinceProfileSwitch >= warmupRounds
-            && GetMarketTemplates(RoundMode.Turbo).Count > 0;
-
-        var selectedMode = eligibleForTurbo && _randomSource.NextDouble() < Math.Clamp(_options.Turbo.Probability, 0.0, 1.0)
-            ? RoundMode.Turbo
-            : RoundMode.Normal;
-
-        return new RoundModeSelection(selectedMode, eligibleForTurbo, roundsSinceProfileSwitch);
-    }
-
-    private List<MarketTemplate> GetMarketTemplates(RoundMode roundMode)
-    {
-        var preferred = roundMode == RoundMode.Turbo
-            ? _options.MarketSets.Turbo
-            : _options.MarketSets.Normal;
+        var preferred = _options.MarketSets.Normal;
 
         if (preferred is { Count: > 0 })
             return preferred;
@@ -866,17 +846,11 @@ public class RoundService
         return [];
     }
 
-    private static string GetDisplayName(RoundMode roundMode) => roundMode switch
-    {
-        RoundMode.Turbo => "Rodada Turbo",
-        _ => "Rodada Normal",
-    };
+    private static string GetDisplayName() => "Rodada Normal";
 
-    private RoundModeTimingOptions GetTiming(RoundMode roundMode)
+    private RoundModeTimingOptions GetTiming()
     {
-        var configured = roundMode == RoundMode.Turbo
-            ? _options.Timing.Turbo
-            : _options.Timing.Normal;
+        var configured = _options.Timing.Normal;
 
         if (configured.DurationSeconds > 0 && configured.BetWindowSeconds > 0)
             return configured;
@@ -887,11 +861,6 @@ public class RoundService
             BetWindowSeconds = Math.Max(1, _options.BetWindowSeconds),
         };
     }
-
-    private readonly record struct RoundModeSelection(
-        RoundMode RoundMode,
-        bool WasEligibleForTurbo,
-        int RoundsSinceProfileSwitch);
 
     private async Task<bool> VoidRoundAsync(
         AppDbContext db,
