@@ -54,7 +54,10 @@
     "strategy": "uniform_excluding_current",
     "min_rounds_per_stream": 2,
     "max_rounds_per_stream": 2,
-    "target_rounds_for_current_stream": 2
+    "current_stream_profile_id": "stream_1775342309357",
+    "rounds_on_current_stream": 0,
+    "target_rounds_for_current_stream": 2,
+    "last_counted_round_id": ""
   },
   "stream_profiles": [
     {
@@ -77,5 +80,10 @@
       "count_direction": "down"
     }
   ],
-  "selected_stream_profile_id": "stream_1775342309357"
+  "selected_stream_profile_id": "stream_1775342309357",
+  "stream_schedule": {
+    "timezone": "America/Sao_Paulo",
+    "outside_window_behavior": "allow_all",
+    "rules": []
+  }
 }

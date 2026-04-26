@@ -1,5 +1,5 @@
 {
-  "stream_url": "http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8",
+  "stream_url": "https://streaming1.highwaytraffic.go.th/Phase8/PER_8_038.stream/playlist.m3u8",
   "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct",
   "stream_buffer_size": 1,
   "stream_open_timeout_ms": 5000,
@@ -18,7 +18,7 @@
   "backend_url": "http://127.0.0.1:8080/rounds/current?cameraId=cam_001",
   "api_key": "CHANGE_ME",
   "mjpeg_token": "CHANGE_ME",
-  "camera_id": "cam_008",
+  "camera_id": "cam_007",
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
@@ -62,10 +62,10 @@
     "strategy": "uniform_excluding_current",
     "min_rounds_per_stream": 2,
     "max_rounds_per_stream": 2,
-    "current_stream_profile_id": "stream_1777109591220",
+    "current_stream_profile_id": "stream_1777109467268",
     "rounds_on_current_stream": 1,
     "target_rounds_for_current_stream": 2,
-    "last_counted_round_id": "0fc7aed2-25b2-4bc5-813e-69b5ccec742b"
+    "last_counted_round_id": "e1e49709-902b-4a2b-9c68-e2f0ce7526dd"
   },
   "stream_profiles": [
     {
@@ -118,8 +118,8 @@
         "h": 179
       },
       "line": {
-        "x1": 174,
-        "y1": 163,
+        "x1": 173,
+        "y1": 176,
         "x2": 349,
         "y2": 177
       },
@@ -150,23 +150,24 @@
       "stream_url": "http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8",
       "camera_id": "cam_008",
       "roi": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 0
+        "x": 168,
+        "y": 191,
+        "w": 251,
+        "h": 168
       },
       "line": {
-        "x1": 0,
-        "y1": 0,
-        "x2": 0,
-        "y2": 0
+        "x1": 149,
+        "y1": 257,
+        "x2": 412,
+        "y2": 256
       },
       "count_direction": "any"
     }
   ],
-  "selected_stream_profile_id": "stream_1777109591220",
+  "selected_stream_profile_id": "stream_1777109467268",
   "stream_schedule": {
     "timezone": "America/Sao_Paulo",
+    "outside_window_behavior": "restrict_configured",
     "rules": [
       {
         "id": "schedule_1777108359194",

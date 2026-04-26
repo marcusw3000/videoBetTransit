@@ -78,6 +78,22 @@ def make_cfg_with_two_profiles():
     return cfg
 
 
+def make_cfg_with_three_profiles():
+    cfg = make_cfg_with_two_profiles()
+    cfg["stream_profiles"].append(
+        {
+            "id": "profile-c",
+            "name": "Camera C",
+            "stream_url": "rtsp://camera-c/live",
+            "camera_id": "cam_c",
+            "roi": {"x": 9, "y": 10, "w": 60, "h": 44},
+            "line": {"x1": 30, "y1": 40, "x2": 88, "y2": 40},
+            "count_direction": "any",
+        }
+    )
+    return cfg
+
+
 class StreamProfileStoreTests(unittest.TestCase):
     def test_apply_stream_url_creates_profile_with_camera_id_and_default_geometry(self):
         cfg = make_cfg()
@@ -282,6 +298,7 @@ class StreamScheduleTests(unittest.TestCase):
         self.assertEqual(
             {
                 "timezone": "America/Sao_Paulo",
+                "outside_window_behavior": "allow_all",
                 "rules": [],
             },
             cfg["stream_schedule"],
@@ -412,6 +429,94 @@ class StreamScheduleTests(unittest.TestCase):
         self.assertFalse(state["isRestricted"])
         self.assertEqual({"profile-a", "profile-b"}, set(state["eligibleProfileIds"]))
 
+    def test_resolve_stream_schedule_can_restrict_outside_window(self):
+        cfg = make_cfg_with_two_profiles()
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "outside_window_behavior": "restrict_configured",
+            "rules": [
+                {
+                    "id": "rush",
+                    "name": "Rush",
+                    "enabled": True,
+                    "start_time": "09:00",
+                    "end_time": "19:00",
+                    "allowed_profile_ids": ["profile-b"],
+                }
+            ],
+        }
+
+        state = resolve_stream_schedule_state(
+            cfg["stream_schedule"],
+            cfg["stream_profiles"],
+            now=datetime(2026, 4, 24, 5, 29, tzinfo=ZoneInfo("America/Sao_Paulo")),
+        )
+
+        self.assertTrue(state["isRestricted"])
+        self.assertFalse(state["outsideWindowRestricted"])
+        self.assertEqual(["profile-a"], state["eligibleProfileIds"])
+
+    def test_resolve_stream_schedule_keeps_unscheduled_profiles_allowed_by_default(self):
+        cfg = make_cfg_with_three_profiles()
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "outside_window_behavior": "restrict_configured",
+            "rules": [
+                {
+                    "id": "rush-a",
+                    "name": "Rush A",
+                    "enabled": True,
+                    "start_time": "09:00",
+                    "end_time": "19:00",
+                    "allowed_profile_ids": ["profile-a"],
+                },
+                {
+                    "id": "rush-b",
+                    "name": "Rush B",
+                    "enabled": True,
+                    "start_time": "09:00",
+                    "end_time": "19:00",
+                    "allowed_profile_ids": ["profile-b"],
+                },
+            ],
+        }
+
+        state = resolve_stream_schedule_state(
+            cfg["stream_schedule"],
+            cfg["stream_profiles"],
+            now=datetime(2026, 4, 24, 5, 29, tzinfo=ZoneInfo("America/Sao_Paulo")),
+        )
+
+        self.assertTrue(state["isRestricted"])
+        self.assertFalse(state["outsideWindowRestricted"])
+        self.assertEqual(["profile-c"], state["eligibleProfileIds"])
+
+    def test_resolve_stream_schedule_keeps_unscheduled_profiles_alongside_active_scheduled_profiles(self):
+        cfg = make_cfg_with_three_profiles()
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "outside_window_behavior": "restrict_configured",
+            "rules": [
+                {
+                    "id": "rush-a",
+                    "name": "Rush A",
+                    "enabled": True,
+                    "start_time": "09:00",
+                    "end_time": "19:00",
+                    "allowed_profile_ids": ["profile-a"],
+                }
+            ],
+        }
+
+        state = resolve_stream_schedule_state(
+            cfg["stream_schedule"],
+            cfg["stream_profiles"],
+            now=datetime(2026, 4, 24, 9, 30, tzinfo=ZoneInfo("America/Sao_Paulo")),
+        )
+
+        self.assertTrue(state["isRestricted"])
+        self.assertEqual({"profile-a", "profile-b", "profile-c"}, set(state["eligibleProfileIds"]))
+
     def test_resolve_stream_schedule_returns_only_allowed_profiles_inside_rule(self):
         cfg = make_cfg_with_two_profiles()
         cfg["stream_schedule"] = {
@@ -436,7 +541,7 @@ class StreamScheduleTests(unittest.TestCase):
 
         self.assertTrue(state["isRestricted"])
         self.assertEqual("rush", state["activeRule"]["id"])
-        self.assertEqual(["profile-b"], state["eligibleProfileIds"])
+        self.assertEqual(["profile-a", "profile-b"], state["eligibleProfileIds"])
 
     def test_schedule_enforcement_prefers_first_eligible_when_current_is_invalid(self):
         cfg = make_cfg_with_two_profiles()

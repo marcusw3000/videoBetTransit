@@ -1,5 +1,6 @@
 import json
 import logging
+import numpy as np
 import os
 import queue
 import random
@@ -735,7 +736,12 @@ def create_mjpeg_app() -> Flask:
         payload["sourceUrl"] = active_config.get("stream_url", "")
         payload["captureSourceUrl"] = active_config.get("capture_source_url", "")
         payload["processedStreamPath"] = activation.get("readyProcessedStreamPath") or active_config.get("processed_stream_path", "")
-        payload["selectedStreamProfileId"] = active_config.get("selected_stream_profile_id", "")
+        payload["selectedStreamProfileId"] = (
+            active_config.get("selected_stream_profile_id", "")
+            or activation.get("readyStreamProfileId")
+            or activation.get("requestedStreamProfileId")
+            or get_stream_rotation_status().get("selectedStreamProfileId", "")
+        )
         payload["streamProfileCameraIds"] = eligible_camera_ids
         payload["streamRotation"] = get_stream_rotation_status()
         payload["streamSchedule"] = get_stream_schedule_status()
@@ -948,6 +954,7 @@ DEFAULT_STREAM_ROTATION = {
 }
 DEFAULT_STREAM_SCHEDULE = {
     "timezone": "America/Sao_Paulo",
+    "outside_window_behavior": "allow_all",
     "rules": [],
 }
 STREAM_ROTATION_SAFE_STATUSES = {"settling", "settled", "void"}
@@ -1002,6 +1009,13 @@ def normalize_schedule_timezone(value) -> str:
     except ZoneInfoNotFoundError:
         return DEFAULT_STREAM_SCHEDULE["timezone"]
     return timezone_name
+
+
+def normalize_outside_window_behavior(value) -> str:
+    normalized = str(value or DEFAULT_STREAM_SCHEDULE["outside_window_behavior"]).strip().lower()
+    if normalized in {"allow_all", "restrict_configured"}:
+        return normalized
+    return DEFAULT_STREAM_SCHEDULE["outside_window_behavior"]
 
 
 def normalize_schedule_time_text(value: str) -> str:
@@ -1128,6 +1142,7 @@ def normalize_stream_schedule_config(value, profiles: list[dict]) -> dict:
     rules.sort(key=lambda item: (schedule_time_to_minutes(item["start_time"]), str(item.get("id") or "")))
     return {
         "timezone": normalize_schedule_timezone(source.get("timezone")),
+        "outside_window_behavior": normalize_outside_window_behavior(source.get("outside_window_behavior")),
         "rules": rules,
     }
 
@@ -1172,12 +1187,36 @@ def resolve_stream_schedule_state(
         for rule in normalized["rules"]
         if bool(rule.get("enabled", True)) and schedule_rule_is_active(rule, current_minutes)
     ]
+    has_enabled_rules = any(bool(rule.get("enabled", True)) for rule in normalized["rules"])
+    outside_window_behavior = normalize_outside_window_behavior(normalized.get("outside_window_behavior"))
+    configured_profile_ids = {
+        str(profile_id or "").strip()
+        for rule in normalized["rules"]
+        if bool(rule.get("enabled", True))
+        for profile_id in rule.get("allowed_profile_ids", [])
+        if str(profile_id or "").strip()
+    }
+    always_allowed_profile_ids = [
+        profile_id
+        for profile_id in profiles_by_id
+        if profile_id not in configured_profile_ids
+    ]
 
     if not active_rules:
-        eligible_profiles = [dict(profile) for profile in profiles]
+        if has_enabled_rules and outside_window_behavior == "restrict_configured":
+            eligible_profiles = [
+                dict(profiles_by_id[profile_id])
+                for profile_id in always_allowed_profile_ids
+            ]
+        else:
+            eligible_profiles = [dict(profile) for profile in profiles]
     else:
         eligible_profile_ids: list[str] = []
         seen_ids: set[str] = set()
+        for profile_id in always_allowed_profile_ids:
+            if profile_id in profiles_by_id and profile_id not in seen_ids:
+                eligible_profile_ids.append(profile_id)
+                seen_ids.add(profile_id)
         for rule in active_rules:
             for profile_id in rule.get("allowed_profile_ids", []):
                 profile_id = str(profile_id or "").strip()
@@ -1204,9 +1243,16 @@ def resolve_stream_schedule_state(
         "activeRuleIds": [str(rule.get("id") or "").strip() for rule in active_rules if str(rule.get("id") or "").strip()],
         "activeRuleName": " + ".join(active_rule_names),
         "activeWindow": " | ".join(active_windows),
+        "outsideWindowBehavior": outside_window_behavior,
+        "outsideWindowRestricted": bool(
+            has_enabled_rules
+            and not active_rules
+            and outside_window_behavior == "restrict_configured"
+            and not eligible_profiles
+        ),
         "eligibleProfiles": eligible_profiles,
         "eligibleProfileIds": [str(profile.get("id") or "").strip() for profile in eligible_profiles if str(profile.get("id") or "").strip()],
-        "isRestricted": bool(active_rules),
+        "isRestricted": bool(active_rules) or bool(has_enabled_rules and outside_window_behavior == "restrict_configured"),
         "currentTime": current_time,
     }
 
@@ -3554,6 +3600,8 @@ class EditorControlPanel:
         status_parts = []
         if active_rule_name or active_window:
             status_parts.append(active_rule_name or active_window)
+        elif schedule_status.get("outsideWindowRestricted"):
+            status_parts.append("Fora da agenda configurada")
         elif schedule_status.get("restricted"):
             status_parts.append("Agenda ativa")
         else:
@@ -3572,6 +3620,8 @@ class EditorControlPanel:
             if active_window:
                 details = f"{details} | {active_window}"
             return details
+        if schedule_status.get("outsideWindowRestricted"):
+            return "Fora da agenda configurada"
         return "Sem restricao por horario"
 
     def _build_rotation_state(self, rotation_status: dict) -> str:
@@ -4525,6 +4575,8 @@ class CompactEditorControlPanel:
         status_parts = []
         if active_rule_name or active_window:
             status_parts.append(active_rule_name or active_window)
+        elif schedule_status.get("outsideWindowRestricted"):
+            status_parts.append("Fora da agenda configurada")
         elif schedule_status.get("restricted"):
             status_parts.append("Agenda ativa")
         else:
@@ -4543,6 +4595,8 @@ class CompactEditorControlPanel:
             if active_window:
                 details = f"{details} | {active_window}"
             return details
+        if schedule_status.get("outsideWindowRestricted"):
+            return "Fora da agenda configurada"
         return "Sem restricao por horario"
 
     def _build_rotation_state(self, rotation_status: dict) -> str:
@@ -4780,6 +4834,7 @@ def main():
     stream_schedule = cfg["stream_schedule"]
     selected_profile = stream_store.get_selected_profile()
     initial_schedule_state = resolve_stream_schedule_state(stream_schedule, stream_store.list_profiles())
+    startup_blocked_by_schedule = bool(initial_schedule_state.get("outsideWindowRestricted"))
     if stream_rotation.get("enabled") and ensure_stream_rotation_profile_state(
         stream_rotation,
         str(selected_profile.get("id") or ""),
@@ -4807,6 +4862,8 @@ def main():
         activeRuleIds=list(initial_schedule_state.get("activeRuleIds", [])),
         activeRuleName=str(initial_schedule_state.get("activeRuleName") or ""),
         activeWindow=initial_schedule_state.get("activeWindow", ""),
+        outsideWindowBehavior=str(initial_schedule_state.get("outsideWindowBehavior") or DEFAULT_STREAM_SCHEDULE["outside_window_behavior"]),
+        outsideWindowRestricted=bool(initial_schedule_state.get("outsideWindowRestricted")),
         restricted=bool(initial_schedule_state.get("isRestricted")),
         eligibleProfileIds=list(initial_schedule_state.get("eligibleProfileIds", [])),
         pendingEnforcement=False,
@@ -4817,7 +4874,7 @@ def main():
     initial_processed_path = str(cfg.get("processed_stream_path") or f"processed/{initial_camera_id}" if initial_camera_id else "").strip()
     initial_profile_label = format_stream_profile_label(selected_profile) if selected_profile else initial_camera_id
     update_camera_activation_status(
-        phase="waiting_stream",
+        phase="outside_schedule" if startup_blocked_by_schedule else "waiting_stream",
         requestedCameraId=initial_camera_id,
         readyCameraId="",
         requestedStreamProfileId=initial_profile_id,
@@ -4854,12 +4911,16 @@ def main():
         port=int(cfg.get("mjpeg_port", 8090)),
     )
     active_mjpeg_server_ref = mjpeg_server
-    try:
-        current_pipeline_cfg = build_pipeline_config(cfg)
-        pipeline_runtime.start(current_pipeline_cfg)
-    except Exception as exc:
-        logger.warning("Pipeline inicial nao iniciada: %s", exc)
+    if startup_blocked_by_schedule:
         current_pipeline_cfg = dict(cfg)
+        logger.info("Pipeline inicial pausada: fora da agenda configurada para a camera/perfil selecionado.")
+    else:
+        try:
+            current_pipeline_cfg = build_pipeline_config(cfg)
+            pipeline_runtime.start(current_pipeline_cfg)
+        except Exception as exc:
+            logger.warning("Pipeline inicial nao iniciada: %s", exc)
+            current_pipeline_cfg = dict(cfg)
     active_stream_ref = None
 
     class_names = build_class_names(cfg["allowed_classes"])
@@ -4902,7 +4963,7 @@ def main():
             "requestNotified": False,
             "readyNotified": False,
         }
-        if initial_camera_id and initial_profile_id
+        if initial_camera_id and initial_profile_id and not startup_blocked_by_schedule
         else None
     )
     pending_rotation_profile = None
@@ -5059,6 +5120,22 @@ def main():
                 selected_profile,
                 schedule_state.get("eligibleProfiles", []),
             )
+
+        if schedule_state.get("outsideWindowRestricted") and target_profile is None:
+            if pending_schedule_profile is not None:
+                pending_schedule_profile = None
+            if pipeline_runtime.is_running():
+                queue_pipeline_stop()
+            update_camera_activation_status(
+                phase="outside_schedule",
+                readyCameraId="",
+                readyStreamProfileId="",
+                readyProcessedStreamPath="",
+                readyProfileLabel="",
+                readyForRounds=False,
+            )
+            publish_schedule_status("Fora da agenda configurada; pipeline pausada ate a proxima faixa ativa.")
+            return
 
         if target_profile is None:
             if pending_schedule_profile is not None:
@@ -5619,6 +5696,51 @@ def main():
         operator_preview_fps_limit,
     )
 
+    def refresh_window_idle(title: str, subtitle: str = "") -> bool:
+        if not cfg.get("show_window", True):
+            return False
+
+        if control_panel is not None:
+            control_panel.refresh()
+            if control_panel.should_close:
+                return True
+
+        idle_frame = np.zeros((540, 960, 3), dtype=np.uint8)
+        cv2.putText(
+            idle_frame,
+            title[:72],
+            (36, 220),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (255, 255, 255),
+            2,
+        )
+        if subtitle:
+            cv2.putText(
+                idle_frame,
+                subtitle[:92],
+                (36, 270),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.68,
+                (140, 220, 255),
+                2,
+            )
+        cv2.putText(
+            idle_frame,
+            "Pressione Q para fechar",
+            (36, 500),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (180, 180, 180),
+            1,
+        )
+        cv2.imshow(WINDOW_NAME, idle_frame)
+        key = poll_window_key(1)
+        if key == -1:
+            return False
+        key &= 0xFF
+        return key == ord("q")
+
     fps_frame_count = 0
     fps_start_ts = time.time()
 
@@ -5835,6 +5957,11 @@ def main():
         poll_round_state_if_needed()
 
         if not pipeline_runtime.is_running():
+            if refresh_window_idle(
+                "Pipeline pausada",
+                str(get_stream_schedule_status().get("lastMessage") or editor.message if editor is not None else ""),
+            ):
+                break
             time.sleep(0.05)
             continue
 
@@ -5842,6 +5969,11 @@ def main():
         if frame is None or captured_at is None:
             if frame_count == 0:
                 logger.warning("Nenhum frame recebido ainda do stream...")
+            if refresh_window_idle(
+                "Aguardando frames da stream",
+                str(editor.message if editor is not None else get_stream_schedule_status().get("lastMessage") or ""),
+            ):
+                break
             active_pipeline_cfg = pipeline_runtime.get_config() or current_pipeline_cfg
             active_source_url = str(active_pipeline_cfg.get("stream_url") or cfg.get("stream_url") or "").strip()
             if is_youtube_url(active_source_url) and time.time() >= youtube_retry_after:
