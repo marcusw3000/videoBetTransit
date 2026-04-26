@@ -222,6 +222,7 @@ stream_schedule_status_lock = threading.Lock()
 stream_schedule_status_ref = {
     "timezone": "America/Sao_Paulo",
     "activeRuleId": "",
+    "activeRuleIds": [],
     "activeRuleName": "",
     "activeWindow": "",
     "restricted": False,
@@ -681,6 +682,7 @@ def update_stream_schedule_status(**values):
 def get_stream_schedule_status() -> dict:
     with stream_schedule_status_lock:
         status = dict(stream_schedule_status_ref)
+    status["activeRuleIds"] = list(status.get("activeRuleIds") or [])
     status["eligibleProfileIds"] = list(status.get("eligibleProfileIds") or [])
     return status
 
@@ -981,6 +983,11 @@ def normalize_count_direction(value) -> str:
         "up_to_down": "down",
         "left_to_right": "right",
         "right_to_left": "left",
+        "qualquer direcao": "any",
+        "cima para baixo": "down",
+        "baixo para cima": "up",
+        "esquerda para direita": "right",
+        "direita para esquerda": "left",
     }
     direction = aliases.get(direction, direction)
     if direction in {"up", "down", "left", "right", "any"}:
@@ -1047,7 +1054,7 @@ def schedule_windows_overlap(left: tuple[int, int], right: tuple[int, int]) -> b
 
 
 def validate_stream_schedule_rules(rules: list[dict], profile_ids: set[str]) -> None:
-    expanded_rules: list[tuple[str, str, tuple[int, int]]] = []
+    expanded_rules: list[tuple[str, str, tuple[int, int], set[str]]] = []
     for rule in rules:
         rule_id = str(rule.get("id") or "").strip()
         rule_name = str(rule.get("name") or "").strip() or rule_id or "agenda"
@@ -1063,15 +1070,17 @@ def validate_stream_schedule_rules(rules: list[dict], profile_ids: set[str]) -> 
         start_minutes = schedule_time_to_minutes(rule.get("start_time"))
         end_minutes = schedule_time_to_minutes(rule.get("end_time"))
         for window in expand_schedule_rule_windows(start_minutes, end_minutes):
-            expanded_rules.append((rule_id, rule_name, window))
+            expanded_rules.append((rule_id, rule_name, window, set(allowed_ids)))
 
-    for index, (rule_id, rule_name, window) in enumerate(expanded_rules):
-        for other_rule_id, other_rule_name, other_window in expanded_rules[index + 1:]:
+    for index, (rule_id, rule_name, window, allowed_ids) in enumerate(expanded_rules):
+        for other_rule_id, other_rule_name, other_window, other_allowed_ids in expanded_rules[index + 1:]:
             if rule_id == other_rule_id:
+                continue
+            if allowed_ids.isdisjoint(other_allowed_ids):
                 continue
             if schedule_windows_overlap(window, other_window):
                 raise ValueError(
-                    f"As agendas '{rule_name}' e '{other_rule_name}' nao podem se sobrepor."
+                    f"As agendas '{rule_name}' e '{other_rule_name}' nao podem se sobrepor para a mesma camera."
                 )
 
 
@@ -1158,28 +1167,46 @@ def resolve_stream_schedule_state(
         if str(profile.get("id") or "").strip()
     }
 
-    active_rule = None
-    for rule in normalized["rules"]:
-        if bool(rule.get("enabled", True)) and schedule_rule_is_active(rule, current_minutes):
-            active_rule = dict(rule)
-            break
+    active_rules = [
+        dict(rule)
+        for rule in normalized["rules"]
+        if bool(rule.get("enabled", True)) and schedule_rule_is_active(rule, current_minutes)
+    ]
 
-    if active_rule is None:
+    if not active_rules:
         eligible_profiles = [dict(profile) for profile in profiles]
     else:
+        eligible_profile_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for rule in active_rules:
+            for profile_id in rule.get("allowed_profile_ids", []):
+                profile_id = str(profile_id or "").strip()
+                if profile_id and profile_id not in seen_ids and profile_id in profiles_by_id:
+                    eligible_profile_ids.append(profile_id)
+                    seen_ids.add(profile_id)
         eligible_profiles = [
             dict(profiles_by_id[profile_id])
-            for profile_id in active_rule.get("allowed_profile_ids", [])
-            if profile_id in profiles_by_id
+            for profile_id in eligible_profile_ids
         ]
+
+    active_rule = dict(active_rules[0]) if active_rules else None
+    active_rule_names = [str(rule.get("name") or "").strip() for rule in active_rules if str(rule.get("name") or "").strip()]
+    active_windows = []
+    for rule in active_rules:
+        window = format_stream_schedule_window(rule)
+        if window and window not in active_windows:
+            active_windows.append(window)
 
     return {
         "timezone": timezone_name,
         "activeRule": active_rule,
-        "activeWindow": format_stream_schedule_window(active_rule),
+        "activeRules": active_rules,
+        "activeRuleIds": [str(rule.get("id") or "").strip() for rule in active_rules if str(rule.get("id") or "").strip()],
+        "activeRuleName": " + ".join(active_rule_names),
+        "activeWindow": " | ".join(active_windows),
         "eligibleProfiles": eligible_profiles,
         "eligibleProfileIds": [str(profile.get("id") or "").strip() for profile in eligible_profiles if str(profile.get("id") or "").strip()],
-        "isRestricted": active_rule is not None,
+        "isRestricted": bool(active_rules),
         "currentTime": current_time,
     }
 
@@ -1218,7 +1245,7 @@ def format_stream_schedule_rule_row(profile_labels_by_id: dict[str, str], rule: 
     if len(allowed_labels) > 3:
         profiles_label += f" +{len(allowed_labels) - 3}"
     return (
-        "*" if active else "",
+        "Ativa" if active else ("Ligada" if bool(rule.get("enabled", True)) else "Pausada"),
         str(rule.get("name") or "").strip(),
         format_stream_schedule_window(rule),
         profiles_label,
@@ -2332,12 +2359,12 @@ def should_count_track(
 
 def count_direction_display_name(direction: str) -> str:
     return {
-        "any": "any",
-        "up": "up",
-        "down": "down",
-        "left": "left",
-        "right": "right",
-    }.get(normalize_count_direction(direction), "any")
+        "any": "Qualquer direcao",
+        "up": "Baixo para cima",
+        "down": "Cima para baixo",
+        "left": "Direita para esquerda",
+        "right": "Esquerda para direita",
+    }.get(normalize_count_direction(direction), "Qualquer direcao")
 
 
 def anchor_point(x1: int, y1: int, x2: int, y2: int) -> tuple[int, int]:
@@ -2770,11 +2797,18 @@ class EditorControlPanel:
         self._stream_profile_ids: list[str] = []
         self._schedule_rule_ids: list[str] = []
         self._schedule_profile_ids: list[str] = []
+        self._schedule_profile_vars: dict[str, tk.BooleanVar] = {}
         self._selected_schedule_rule_id = ""
+        self._updating_stream_selection = False
+        self._updating_schedule_selection = False
         self._root = tk.Tk()
         self._root.title("Controles de Configuracao")
-        self._root.resizable(False, False)
+        self._root.resizable(True, True)
+        self._root.geometry("980x860")
+        self._root.minsize(860, 720)
         self._root.protocol("WM_DELETE_WINDOW", self.request_close)
+        self._root.columnconfigure(0, weight=1)
+        self._root.rowconfigure(0, weight=1)
 
         frame = ttk.Frame(self._root, padding=12)
         frame.grid(row=0, column=0, sticky="nsew")
@@ -2787,7 +2821,7 @@ class EditorControlPanel:
         self._stream_name_var = tk.StringVar()
         self._stream_camera_id_var = tk.StringVar()
         self._stream_url_var = tk.StringVar()
-        self._count_direction_var = tk.StringVar(value="any")
+        self._count_direction_var = tk.StringVar(value=count_direction_display_name("any"))
         self._stream_rotation_enabled_var = tk.BooleanVar(value=bool(stream_rotation_enabled))
         schedule = self.schedule_store.get_schedule()
         self._schedule_name_var = tk.StringVar()
@@ -2798,57 +2832,99 @@ class EditorControlPanel:
             value=f"Timezone: {schedule.get('timezone', DEFAULT_STREAM_SCHEDULE['timezone'])}"
         )
         self._schedule_status_var = tk.StringVar(value="")
+        self._rotation_status_var = tk.StringVar(value="")
+        self._stream_summary_var = tk.StringVar(value="")
+        self._schedule_summary_var = tk.StringVar(value="")
+        self._schedule_validation_var = tk.StringVar(value="")
+        self._active_stream_var = tk.StringVar(value="-")
+        self._next_stream_var = tk.StringVar(value="-")
+        self._active_schedule_var = tk.StringVar(value="-")
+        self._rotation_state_var = tk.StringVar(value="-")
+        self._safe_window_var = tk.StringVar(value="-")
+        self._schedule_name_var.trace_add("write", lambda *_: self._update_schedule_form_state())
+        self._schedule_start_var.trace_add("write", lambda *_: self._update_schedule_form_state())
+        self._schedule_end_var.trace_add("write", lambda *_: self._update_schedule_form_state())
+        self._schedule_enabled_var.trace_add("write", lambda *_: self._update_schedule_form_state())
+        status_frame = ttk.LabelFrame(frame, text="Estado Operacional")
+        status_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        status_frame.columnconfigure(0, weight=1)
+        status_frame.columnconfigure(1, weight=1)
+        ttk.Label(status_frame, text="Stream ativa").grid(row=0, column=0, sticky="w")
+        ttk.Label(status_frame, textvariable=self._active_stream_var, wraplength=360).grid(
+            row=1, column=0, sticky="w", padx=(0, 12), pady=(0, 4)
+        )
+        ttk.Label(status_frame, text="Proxima stream").grid(row=0, column=1, sticky="w")
+        ttk.Label(status_frame, textvariable=self._next_stream_var, wraplength=360).grid(
+            row=1, column=1, sticky="w", pady=(0, 4)
+        )
+        ttk.Label(status_frame, text="Agenda atual").grid(row=2, column=0, sticky="w")
+        ttk.Label(status_frame, textvariable=self._active_schedule_var, wraplength=360).grid(
+            row=3, column=0, sticky="w", padx=(0, 12), pady=(0, 4)
+        )
+        ttk.Label(status_frame, text="Rotacao").grid(row=2, column=1, sticky="w")
+        ttk.Label(status_frame, textvariable=self._rotation_state_var, wraplength=360).grid(
+            row=3, column=1, sticky="w", pady=(0, 4)
+        )
+        ttk.Label(status_frame, text="Janela segura").grid(row=4, column=0, sticky="w")
+        ttk.Label(status_frame, textvariable=self._safe_window_var, wraplength=360).grid(
+            row=5, column=0, columnspan=2, sticky="w"
+        )
+
+        ttk.Label(frame, text="Ir para preset salvo").grid(row=1, column=0, sticky="w")
         self._stream_selector = ttk.Combobox(frame, state="readonly", width=48)
-        self._stream_selector.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+        self._stream_selector.grid(row=2, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
         self._stream_selector.bind("<<ComboboxSelected>>", self._handle_profile_preview)
         ttk.Button(frame, text="Carregar", command=self.load_selected_stream).grid(
-            row=1, column=1, sticky="ew", pady=(0, 6)
+            row=2, column=1, sticky="ew", pady=(0, 6)
         )
         self._stream_table = ttk.Treeview(
             frame,
-            columns=("active", "name", "camera_id", "url"),
+            columns=("status", "name", "camera_id", "url"),
             show="headings",
             height=5,
             selectmode="browse",
         )
-        self._stream_table.heading("active", text="")
+        self._stream_table.heading("status", text="Estado")
         self._stream_table.heading("name", text="Stream")
         self._stream_table.heading("camera_id", text="Camera ID")
         self._stream_table.heading("url", text="URL")
-        self._stream_table.column("active", width=24, minwidth=24, stretch=False, anchor="center")
+        self._stream_table.column("status", width=150, minwidth=120, stretch=False, anchor="center")
         self._stream_table.column("name", width=130, minwidth=90, stretch=False)
         self._stream_table.column("camera_id", width=92, minwidth=80, stretch=False)
         self._stream_table.column("url", width=190, minwidth=120, stretch=True)
-        self._stream_table.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self._stream_table.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         self._stream_table.bind("<<TreeviewSelect>>", self._handle_profile_table_select)
 
-        ttk.Label(frame, text="Apelido da stream").grid(row=3, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text="Apelido da stream").grid(row=4, column=0, columnspan=2, sticky="w")
         ttk.Entry(frame, textvariable=self._stream_name_var).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=5, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
-        ttk.Label(frame, text="Camera ID").grid(row=5, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text="Camera ID").grid(row=6, column=0, columnspan=2, sticky="w")
         ttk.Entry(frame, textvariable=self._stream_camera_id_var).grid(
-            row=6, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=7, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
-        ttk.Label(frame, text="URL da stream").grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text="URL da stream").grid(row=8, column=0, columnspan=2, sticky="w")
         ttk.Entry(frame, textvariable=self._stream_url_var).grid(
-            row=8, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=9, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
-        ttk.Button(frame, text="Abrir URL", command=self.open_stream_url).grid(
-            row=9, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        ttk.Button(frame, text="Abrir URL na visualizacao", command=self.open_stream_url).grid(
+            row=10, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
-        ttk.Button(frame, text="Salvar na Esteira", command=self.save_stream_profile).grid(
-            row=9, column=1, sticky="ew", pady=(0, 6)
+        ttk.Button(frame, text="Salvar preset na esteira", command=self.save_stream_profile).grid(
+            row=10, column=1, sticky="ew", pady=(0, 6)
         )
-        ttk.Button(frame, text="Apagar da Esteira", command=self.delete_stream_profile).grid(
-            row=10, column=0, columnspan=2, sticky="ew", pady=(0, 10)
+        ttk.Label(frame, textvariable=self._stream_summary_var, wraplength=360).grid(
+            row=11, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
-        ttk.Button(frame, text="Forcar Troca", command=self.force_stream_switch).grid(
-            row=11, column=0, columnspan=2, sticky="ew", pady=(0, 10)
+        ttk.Button(frame, text="Trocar na proxima janela segura", command=self.force_stream_switch).grid(
+            row=12, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
+        )
+        ttk.Button(frame, text="Apagar preset da esteira", command=self.delete_stream_profile).grid(
+            row=12, column=1, sticky="ew", pady=(0, 10)
         )
 
         ttk.Label(frame, text="Rotacao Randômica", font=("Segoe UI", 11, "bold")).grid(
-            row=12, column=0, columnspan=2, sticky="w", pady=(0, 8)
+            row=13, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
         ttk.Checkbutton(
             frame,
@@ -2856,17 +2932,20 @@ class EditorControlPanel:
             variable=self._stream_rotation_enabled_var,
             command=self.toggle_stream_rotation,
         ).grid(
-            row=13, column=0, sticky="w", padx=(0, 6), pady=(0, 10)
+            row=14, column=0, sticky="w", padx=(0, 6), pady=(0, 10)
         )
-        ttk.Button(frame, text="Sortear Proxima", command=self.queue_random_stream).grid(
-            row=13, column=1, sticky="ew", pady=(0, 10)
+        ttk.Button(frame, text="Sortear proxima", command=self.queue_random_stream).grid(
+            row=14, column=1, sticky="ew", pady=(0, 10)
+        )
+        ttk.Label(frame, textvariable=self._rotation_status_var, wraplength=360).grid(
+            row=15, column=0, columnspan=2, sticky="w", pady=(0, 10)
         )
 
         ttk.Label(frame, text="Agenda por Hora", font=("Segoe UI", 11, "bold")).grid(
-            row=14, column=0, columnspan=2, sticky="w", pady=(0, 8)
+            row=16, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
         ttk.Label(frame, textvariable=self._schedule_timezone_var).grid(
-            row=15, column=0, columnspan=2, sticky="w", pady=(0, 4)
+            row=17, column=0, columnspan=2, sticky="w", pady=(0, 4)
         )
         self._schedule_table = ttk.Treeview(
             frame,
@@ -2875,103 +2954,110 @@ class EditorControlPanel:
             height=4,
             selectmode="browse",
         )
-        self._schedule_table.heading("active", text="")
+        self._schedule_table.heading("active", text="Estado")
         self._schedule_table.heading("name", text="Agenda")
         self._schedule_table.heading("window", text="Faixa")
         self._schedule_table.heading("profiles", text="Streams")
-        self._schedule_table.column("active", width=24, minwidth=24, stretch=False, anchor="center")
+        self._schedule_table.column("active", width=78, minwidth=68, stretch=False, anchor="center")
         self._schedule_table.column("name", width=120, minwidth=90, stretch=False)
         self._schedule_table.column("window", width=90, minwidth=80, stretch=False)
         self._schedule_table.column("profiles", width=200, minwidth=120, stretch=True)
-        self._schedule_table.grid(row=16, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self._schedule_table.grid(row=18, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         self._schedule_table.bind("<<TreeviewSelect>>", self._handle_schedule_rule_select)
-
-        ttk.Label(frame, text="Nome da agenda").grid(row=17, column=0, columnspan=2, sticky="w")
-        ttk.Entry(frame, textvariable=self._schedule_name_var).grid(
-            row=18, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        ttk.Label(frame, textvariable=self._schedule_summary_var, wraplength=360).grid(
+            row=19, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
-        ttk.Label(frame, text="Inicio (HH:MM)").grid(row=19, column=0, sticky="w")
-        ttk.Label(frame, text="Fim (HH:MM)").grid(row=19, column=1, sticky="w")
+
+        ttk.Label(frame, text="Nome da agenda").grid(row=20, column=0, columnspan=2, sticky="w")
+        ttk.Entry(frame, textvariable=self._schedule_name_var).grid(
+            row=21, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Label(frame, text="Inicio (HH:MM)").grid(row=22, column=0, sticky="w")
+        ttk.Label(frame, text="Fim (HH:MM)").grid(row=22, column=1, sticky="w")
         ttk.Entry(frame, textvariable=self._schedule_start_var).grid(
-            row=20, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=23, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Entry(frame, textvariable=self._schedule_end_var).grid(
-            row=20, column=1, sticky="ew", pady=(0, 6)
+            row=23, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Checkbutton(
             frame,
             text="Regra ativa",
             variable=self._schedule_enabled_var,
-        ).grid(row=21, column=0, columnspan=2, sticky="w", pady=(0, 6))
-        ttk.Label(frame, text="Streams permitidas").grid(row=22, column=0, columnspan=2, sticky="w")
-        self._schedule_profiles_listbox = tk.Listbox(
-            frame,
-            selectmode=tk.MULTIPLE,
-            exportselection=False,
-            height=5,
+        ).grid(row=24, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        ttk.Label(frame, text="Streams permitidas").grid(row=25, column=0, columnspan=2, sticky="w")
+        self._schedule_profiles_frame = ttk.Frame(frame)
+        self._schedule_profiles_frame.grid(row=26, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        ttk.Label(frame, textvariable=self._schedule_validation_var, wraplength=360).grid(
+            row=27, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
-        self._schedule_profiles_listbox.grid(row=23, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         ttk.Button(frame, text="Nova Regra", command=self.new_schedule_rule).grid(
-            row=24, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=28, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Salvar Regra", command=self.save_schedule_rule).grid(
-            row=24, column=1, sticky="ew", pady=(0, 6)
+            row=28, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Alternar Ativa", command=self.toggle_schedule_rule).grid(
-            row=25, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
+            row=29, column=0, sticky="ew", padx=(0, 6), pady=(0, 10)
         )
         ttk.Button(frame, text="Apagar Regra", command=self.delete_schedule_rule).grid(
-            row=25, column=1, sticky="ew", pady=(0, 10)
+            row=29, column=1, sticky="ew", pady=(0, 10)
         )
         ttk.Label(frame, textvariable=self._schedule_status_var, wraplength=360).grid(
-            row=26, column=0, columnspan=2, sticky="w", pady=(0, 10)
+            row=30, column=0, columnspan=2, sticky="w", pady=(0, 10)
         )
 
         ttk.Label(frame, text="Ajuste de ROI e Linha", font=("Segoe UI", 11, "bold")).grid(
-            row=27, column=0, columnspan=2, sticky="w", pady=(0, 8)
+            row=31, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
-        ttk.Label(frame, text="Direcao de contagem").grid(row=28, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text="Direcao de contagem").grid(row=32, column=0, columnspan=2, sticky="w")
         self._count_direction_selector = ttk.Combobox(
             frame,
             state="readonly",
-            values=("any", "up", "down", "left", "right"),
+            values=(
+                "Qualquer direcao",
+                "Cima para baixo",
+                "Baixo para cima",
+                "Esquerda para direita",
+                "Direita para esquerda",
+            ),
             textvariable=self._count_direction_var,
         )
         self._count_direction_selector.grid(
-            row=29, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+            row=33, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
         self._count_direction_selector.bind("<<ComboboxSelected>>", self._handle_direction_change)
 
         ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
-            row=30, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=34, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
-            row=30, column=1, sticky="ew", pady=(0, 6)
+            row=34, column=1, sticky="ew", pady=(0, 6)
         )
-        ttk.Button(frame, text="Salvar", command=self.save).grid(
-            row=31, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        ttk.Button(frame, text="Salvar calibracao", command=self.save).grid(
+            row=35, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
-            row=31, column=1, sticky="ew", pady=(0, 6)
+            row=35, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
-            row=32, column=0, columnspan=2, sticky="ew"
+            row=36, column=0, columnspan=2, sticky="ew"
         )
-        ttk.Button(frame, text="Fechar", command=self.request_close).grid(
-            row=33, column=0, columnspan=2, sticky="ew", pady=(6, 0)
+        ttk.Button(frame, text="Fechar painel", command=self.request_close).grid(
+            row=37, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
 
         self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
         self._message_var = tk.StringVar(value=self.editor.message)
         ttk.Label(frame, textvariable=self._mode_var).grid(
-            row=34, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=38, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         ttk.Label(frame, textvariable=self._message_var, wraplength=360).grid(
-            row=35, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=39, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
         ttk.Label(frame, text="Atalhos opcionais: R, L, S, C, T, Q").grid(
-            row=36, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=40, column=0, columnspan=2, sticky="w", pady=(10, 0)
         )
         self._refresh_stream_profiles()
         self._refresh_schedule_profiles()
@@ -2982,21 +3068,19 @@ class EditorControlPanel:
         self._mode_var.set(f"Modo: {self.editor.mode}")
         self._message_var.set(self.editor.message)
         schedule_status = get_stream_schedule_status()
+        rotation_status = get_stream_rotation_status()
+        activation_status = get_camera_activation_status()
         self._refresh_schedule_rules(selected_rule_id=self._get_selected_schedule_rule_id())
-        active_rule_name = str(schedule_status.get("activeRuleName") or "").strip()
-        active_window = str(schedule_status.get("activeWindow") or "").strip()
-        status_parts = []
-        if active_rule_name or active_window:
-            status_parts.append(active_rule_name or active_window)
-        elif schedule_status.get("restricted"):
-            status_parts.append("Agenda ativa")
-        else:
-            status_parts.append("Fora de agenda restritiva")
-        if schedule_status.get("pendingEnforcement"):
-            status_parts.append("troca pendente")
-        if schedule_status.get("lastMessage"):
-            status_parts.append(str(schedule_status["lastMessage"]))
-        self._schedule_status_var.set(" | ".join(part for part in status_parts if part))
+        self._schedule_status_var.set(self._build_schedule_status_text(schedule_status))
+        self._rotation_status_var.set(str(rotation_status.get("lastMessage") or "").strip())
+        self._active_stream_var.set(
+            str(activation_status.get("readyProfileLabel") or rotation_status.get("activeProfileLabel") or "-")
+        )
+        self._next_stream_var.set(self._build_next_stream_status(schedule_status, rotation_status))
+        self._active_schedule_var.set(self._build_active_schedule_status(schedule_status))
+        self._rotation_state_var.set(self._build_rotation_state(rotation_status))
+        self._safe_window_var.set(self._build_safe_window_status(schedule_status, rotation_status, activation_status))
+        self._update_schedule_validation()
         try:
             self._root.update_idletasks()
             self._root.update()
@@ -3106,10 +3190,7 @@ class EditorControlPanel:
 
     def set_active_stream_profile(self, profile: dict):
         self._refresh_stream_profiles(selected_profile_id=profile.get("id"))
-        self._stream_name_var.set(str(profile.get("name") or ""))
-        self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
-        self._stream_url_var.set(str(profile.get("stream_url") or ""))
-        self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
+        self._populate_stream_form(profile)
 
     def new_schedule_rule(self):
         self._selected_schedule_rule_id = ""
@@ -3119,6 +3200,8 @@ class EditorControlPanel:
         self._schedule_enabled_var.set(True)
         self._set_schedule_allowed_profile_ids([])
         self._refresh_schedule_rules()
+        self._update_schedule_summary()
+        self._update_schedule_validation()
 
     def save_schedule_rule(self):
         try:
@@ -3180,38 +3263,79 @@ class EditorControlPanel:
 
         active_id = str(self.stream_store.get_selected_profile().get("id") or "")
         target_id = selected_profile_id or active_id
-        for item_id in self._stream_table.get_children():
-            self._stream_table.delete(item_id)
-        for profile in profiles:
-            profile_id = str(profile.get("id") or "")
-            self._stream_table.insert(
-                "",
-                "end",
-                iid=profile_id,
-                values=format_stream_profile_table_row(profile, active=profile_id == active_id),
-            )
+        schedule_status = get_stream_schedule_status()
+        rotation_status = get_stream_rotation_status()
+        eligible_ids = {
+            str(profile_id or "").strip()
+            for profile_id in schedule_status.get("eligibleProfileIds", [])
+            if str(profile_id or "").strip()
+        }
+        pending_id = str(rotation_status.get("pendingProfileId") or "").strip()
+        self._updating_stream_selection = True
+        try:
+            for item_id in self._stream_table.get_children():
+                self._stream_table.delete(item_id)
+            for profile in profiles:
+                profile_id = str(profile.get("id") or "")
+                status_badges = []
+                if profile_id == active_id:
+                    status_badges.append("Ativa")
+                if profile_id == pending_id:
+                    status_badges.append("Pendente")
+                if profile_id in eligible_ids:
+                    status_badges.append("Em agenda")
+                if profile_id == target_id and profile_id != active_id:
+                    status_badges.append("Selecionada")
+                _, name, camera_id, stream_url = format_stream_profile_table_row(profile, active=profile_id == active_id)
+                self._stream_table.insert(
+                    "",
+                    "end",
+                    iid=profile_id,
+                    values=(
+                        " | ".join(status_badges) if status_badges else "-",
+                        name,
+                        camera_id,
+                        stream_url,
+                    ),
+                )
 
-        if target_id in self._stream_profile_ids:
-            self._stream_selector.current(self._stream_profile_ids.index(target_id))
-            self._stream_table.selection_set(target_id)
-            self._stream_table.focus(target_id)
-            self._stream_table.see(target_id)
-        elif self._stream_profile_ids:
-            self._stream_selector.current(0)
-            self._stream_table.selection_set(self._stream_profile_ids[0])
-            self._stream_table.focus(self._stream_profile_ids[0])
+            if target_id in self._stream_profile_ids:
+                self._stream_selector.current(self._stream_profile_ids.index(target_id))
+                self._stream_table.selection_set(target_id)
+                self._stream_table.focus(target_id)
+                self._stream_table.see(target_id)
+            elif self._stream_profile_ids:
+                self._stream_selector.current(0)
+                self._stream_table.selection_set(self._stream_profile_ids[0])
+                self._stream_table.focus(self._stream_profile_ids[0])
+        finally:
+            self._updating_stream_selection = False
 
         self._refresh_schedule_profiles()
         self._refresh_schedule_rules()
+        self._update_stream_summary()
 
     def _refresh_schedule_profiles(self):
         profiles = self.stream_store.list_profiles()
         current_ids = self._get_selected_schedule_profile_ids()
         self._schedule_profile_ids = [str(profile.get("id") or "") for profile in profiles]
-        self._schedule_profiles_listbox.delete(0, tk.END)
+        for child in self._schedule_profiles_frame.winfo_children():
+            child.destroy()
+        self._schedule_profile_vars = {}
         for profile in profiles:
-            self._schedule_profiles_listbox.insert(tk.END, format_stream_profile_label(profile))
+            profile_id = str(profile.get("id") or "").strip()
+            if not profile_id:
+                continue
+            var = tk.BooleanVar(value=False)
+            self._schedule_profile_vars[profile_id] = var
+            ttk.Checkbutton(
+                self._schedule_profiles_frame,
+                text=format_stream_profile_label(profile),
+                variable=var,
+                command=self._update_schedule_form_state,
+            ).pack(anchor="w")
         self._set_schedule_allowed_profile_ids(current_ids)
+        self._update_schedule_summary()
 
     def _refresh_schedule_rules(self, selected_rule_id: str | None = None):
         rules = self.schedule_store.list_rules()
@@ -3220,31 +3344,44 @@ class EditorControlPanel:
             for profile in self.stream_store.list_profiles()
             if str(profile.get("id") or "").strip()
         }
-        active_rule_id = str(get_stream_schedule_status().get("activeRuleId") or "")
+        schedule_status = get_stream_schedule_status()
+        active_rule_ids = {
+            str(rule_id or "").strip()
+            for rule_id in schedule_status.get("activeRuleIds", [])
+            if str(rule_id or "").strip()
+        }
+        fallback_active_rule_id = str(schedule_status.get("activeRuleId") or "")
+        if fallback_active_rule_id:
+            active_rule_ids.add(fallback_active_rule_id)
         self._schedule_rule_ids = [str(rule.get("id") or "") for rule in rules]
         target_rule_id = selected_rule_id or self._selected_schedule_rule_id
-        for item_id in self._schedule_table.get_children():
-            self._schedule_table.delete(item_id)
-        for rule in rules:
-            rule_id = str(rule.get("id") or "")
-            self._schedule_table.insert(
-                "",
-                "end",
-                iid=rule_id,
-                values=format_stream_schedule_rule_row(
-                    profiles_by_id,
-                    rule,
-                    active=rule_id == active_rule_id,
-                ),
-            )
+        self._updating_schedule_selection = True
+        try:
+            for item_id in self._schedule_table.get_children():
+                self._schedule_table.delete(item_id)
+            for rule in rules:
+                rule_id = str(rule.get("id") or "")
+                self._schedule_table.insert(
+                    "",
+                    "end",
+                    iid=rule_id,
+                    values=format_stream_schedule_rule_row(
+                        profiles_by_id,
+                        rule,
+                        active=rule_id in active_rule_ids,
+                    ),
+                )
 
-        if target_rule_id in self._schedule_rule_ids:
-            self._schedule_table.selection_set(target_rule_id)
-            self._schedule_table.focus(target_rule_id)
-            self._schedule_table.see(target_rule_id)
-        elif self._schedule_rule_ids:
-            self._schedule_table.selection_set(self._schedule_rule_ids[0])
-            self._schedule_table.focus(self._schedule_rule_ids[0])
+            if target_rule_id in self._schedule_rule_ids:
+                self._schedule_table.selection_set(target_rule_id)
+                self._schedule_table.focus(target_rule_id)
+                self._schedule_table.see(target_rule_id)
+            elif self._schedule_rule_ids:
+                self._schedule_table.selection_set(self._schedule_rule_ids[0])
+                self._schedule_table.focus(self._schedule_rule_ids[0])
+        finally:
+            self._updating_schedule_selection = False
+        self._update_schedule_summary()
 
     def _handle_profile_preview(self, _event=None):
         index = self._stream_selector.current()
@@ -3257,13 +3394,12 @@ class EditorControlPanel:
             self._stream_table.focus(profile_id)
         for profile in self.stream_store.list_profiles():
             if str(profile.get("id") or "") == profile_id:
-                self._stream_name_var.set(str(profile.get("name") or ""))
-                self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
-                self._stream_url_var.set(str(profile.get("stream_url") or ""))
-                self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
+                self._populate_stream_form(profile)
                 break
 
     def _handle_profile_table_select(self, _event=None):
+        if self._updating_stream_selection:
+            return
         profile_id = self._get_selected_stream_profile_id()
         if not profile_id:
             return
@@ -3271,13 +3407,12 @@ class EditorControlPanel:
             self._stream_selector.current(self._stream_profile_ids.index(profile_id))
         for profile in self.stream_store.list_profiles():
             if str(profile.get("id") or "") == profile_id:
-                self._stream_name_var.set(str(profile.get("name") or ""))
-                self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
-                self._stream_url_var.set(str(profile.get("stream_url") or ""))
-                self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
+                self._populate_stream_form(profile)
                 break
 
     def _handle_schedule_rule_select(self, _event=None):
+        if self._updating_schedule_selection:
+            return
         rule_id = self._get_selected_schedule_rule_id()
         if not rule_id:
             return
@@ -3286,6 +3421,8 @@ class EditorControlPanel:
                 self._selected_schedule_rule_id = rule_id
                 self._set_schedule_form(rule)
                 break
+        self._update_schedule_summary()
+        self._update_schedule_validation()
 
     def _handle_direction_change(self, _event=None):
         self._commit_count_direction()
@@ -3311,19 +3448,19 @@ class EditorControlPanel:
         return str(self._selected_schedule_rule_id or "")
 
     def _get_selected_schedule_profile_ids(self) -> list[str]:
-        indices = self._schedule_profiles_listbox.curselection()
-        selected_ids = []
-        for index in indices:
-            if 0 <= index < len(self._schedule_profile_ids):
-                selected_ids.append(self._schedule_profile_ids[index])
-        return selected_ids
+        return [
+            profile_id
+            for profile_id in self._schedule_profile_ids
+            if self._schedule_profile_vars.get(profile_id) is not None
+            and bool(self._schedule_profile_vars[profile_id].get())
+        ]
 
     def _set_schedule_allowed_profile_ids(self, allowed_profile_ids: list[str]):
         allowed_set = {str(profile_id or "").strip() for profile_id in allowed_profile_ids if str(profile_id or "").strip()}
-        self._schedule_profiles_listbox.selection_clear(0, tk.END)
-        for index, profile_id in enumerate(self._schedule_profile_ids):
-            if profile_id in allowed_set:
-                self._schedule_profiles_listbox.selection_set(index)
+        for profile_id in self._schedule_profile_ids:
+            var = self._schedule_profile_vars.get(profile_id)
+            if var is not None:
+                var.set(profile_id in allowed_set)
 
     def _set_schedule_form(self, rule: dict):
         self._selected_schedule_rule_id = str(rule.get("id") or "")
@@ -3332,6 +3469,1107 @@ class EditorControlPanel:
         self._schedule_end_var.set(str(rule.get("end_time") or "01:00"))
         self._schedule_enabled_var.set(bool(rule.get("enabled", True)))
         self._set_schedule_allowed_profile_ids(rule.get("allowed_profile_ids", []))
+        self._update_schedule_summary()
+        self._update_schedule_validation()
+
+    def _populate_stream_form(self, profile: dict):
+        self._stream_name_var.set(str(profile.get("name") or ""))
+        self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
+        self._stream_url_var.set(str(profile.get("stream_url") or ""))
+        self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
+        self._update_stream_summary()
+
+    def _update_stream_summary(self):
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
+            self._stream_summary_var.set("Selecione uma stream para editar, carregar ou agendar a troca.")
+            return
+        for profile in self.stream_store.list_profiles():
+            if str(profile.get("id") or "") == profile_id:
+                self._stream_summary_var.set(
+                    " | ".join(
+                        [
+                            f"Selecionada: {format_stream_profile_label(profile)}",
+                            f"Direcao: {count_direction_display_name(str(profile.get('count_direction') or 'any'))}",
+                            f"URL: {shorten_text(str(profile.get('stream_url') or ''), max_len=88)}",
+                        ]
+                    )
+                )
+                return
+
+    def _update_schedule_form_state(self):
+        self._update_schedule_summary()
+        self._update_schedule_validation()
+
+    def _update_schedule_summary(self):
+        labels_by_id = {
+            str(profile.get("id") or "").strip(): format_stream_profile_label(profile)
+            for profile in self.stream_store.list_profiles()
+        }
+        selected_labels = [
+            labels_by_id.get(profile_id, profile_id)
+            for profile_id in self._get_selected_schedule_profile_ids()
+        ]
+        selected_summary = ", ".join(selected_labels[:3]) if selected_labels else "nenhuma stream"
+        if len(selected_labels) > 3:
+            selected_summary += f" +{len(selected_labels) - 3}"
+        name = self._schedule_name_var.get().strip() or (self._selected_schedule_rule_id or "Nova regra")
+        self._schedule_summary_var.set(
+            f"{name} | {self._schedule_start_var.get().strip() or '--:--'}-{self._schedule_end_var.get().strip() or '--:--'} | {selected_summary}"
+        )
+
+    def _update_schedule_validation(self):
+        try:
+            candidate_rule_id = self._selected_schedule_rule_id or "__draft__"
+            candidate_rule = {
+                "id": candidate_rule_id,
+                "name": self._schedule_name_var.get(),
+                "enabled": bool(self._schedule_enabled_var.get()),
+                "start_time": self._schedule_start_var.get(),
+                "end_time": self._schedule_end_var.get(),
+                "allowed_profile_ids": self._get_selected_schedule_profile_ids(),
+            }
+            rules = []
+            replaced = False
+            for rule in self.schedule_store.list_rules():
+                if str(rule.get("id") or "").strip() == candidate_rule_id:
+                    rules.append(candidate_rule)
+                    replaced = True
+                else:
+                    rules.append(rule)
+            if not replaced:
+                rules.append(candidate_rule)
+            validate_stream_schedule_rules(rules, set(self._schedule_profile_ids))
+        except ValueError as exc:
+            self._schedule_validation_var.set(str(exc))
+            return
+        if not self._get_selected_schedule_profile_ids():
+            self._schedule_validation_var.set("Selecione pelo menos uma stream permitida.")
+            return
+        self._schedule_validation_var.set("Regra valida para salvar.")
+
+    def _build_schedule_status_text(self, schedule_status: dict) -> str:
+        active_rule_name = str(schedule_status.get("activeRuleName") or "").strip()
+        active_window = str(schedule_status.get("activeWindow") or "").strip()
+        status_parts = []
+        if active_rule_name or active_window:
+            status_parts.append(active_rule_name or active_window)
+        elif schedule_status.get("restricted"):
+            status_parts.append("Agenda ativa")
+        else:
+            status_parts.append("Sem restricao por horario")
+        if schedule_status.get("pendingEnforcement"):
+            status_parts.append("troca pendente")
+        if schedule_status.get("lastMessage"):
+            status_parts.append(str(schedule_status["lastMessage"]))
+        return " | ".join(part for part in status_parts if part)
+
+    def _build_active_schedule_status(self, schedule_status: dict) -> str:
+        active_rule_name = str(schedule_status.get("activeRuleName") or "").strip()
+        active_window = str(schedule_status.get("activeWindow") or "").strip()
+        if active_rule_name or active_window:
+            details = active_rule_name or "Agenda ativa"
+            if active_window:
+                details = f"{details} | {active_window}"
+            return details
+        return "Sem restricao por horario"
+
+    def _build_rotation_state(self, rotation_status: dict) -> str:
+        if rotation_status.get("pending"):
+            return str(rotation_status.get("lastMessage") or "Troca pendente para a proxima janela segura.")
+        if rotation_status.get("enabled"):
+            return str(rotation_status.get("lastMessage") or "Rotacao ativa entre rounds.")
+        return "Rotacao desativada"
+
+    def _build_next_stream_status(self, schedule_status: dict, rotation_status: dict) -> str:
+        pending_profile_id = str(rotation_status.get("pendingProfileId") or "").strip()
+        if pending_profile_id:
+            for profile in self.stream_store.list_profiles():
+                if str(profile.get("id") or "").strip() == pending_profile_id:
+                    return f"Pendente: {format_stream_profile_label(profile)}"
+        if schedule_status.get("pendingEnforcement"):
+            return str(schedule_status.get("lastMessage") or "Agenda aguardando janela segura.")
+        return "Nenhuma troca pendente"
+
+    def _build_safe_window_status(self, schedule_status: dict, rotation_status: dict, activation_status: dict) -> str:
+        if not activation_status.get("readyForRounds", True):
+            return "Nao pronta para rounds: aguardando ativacao da stream."
+        if schedule_status.get("pendingEnforcement"):
+            return str(schedule_status.get("lastMessage") or "Agenda aguardando janela segura.")
+        if rotation_status.get("pending"):
+            return str(rotation_status.get("lastMessage") or "Rotacao aguardando janela segura.")
+        return "Livre para operar na stream atual."
+
+    def request_close(self):
+        self.should_close = True
+
+    def close(self):
+        try:
+            self._root.destroy()
+        except tk.TclError:
+            pass
+
+
+class CompactEditorControlPanel:
+    def __init__(
+        self,
+        editor: ConfigEditor,
+        stream_store: StreamProfileStore,
+        on_save,
+        on_reset_stream,
+        on_select_stream,
+        on_open_stream,
+        on_save_stream_profile,
+        on_delete_stream_profile,
+        on_force_stream_switch,
+        on_set_count_direction,
+        on_toggle_stream_rotation,
+        on_queue_random_stream,
+        schedule_store: StreamScheduleStore,
+        on_save_stream_schedule_rule,
+        on_delete_stream_schedule_rule,
+        on_toggle_stream_schedule_rule,
+        stream_rotation_enabled: bool = False,
+    ):
+        self.editor = editor
+        self.stream_store = stream_store
+        self.on_save = on_save
+        self.on_reset_stream = on_reset_stream
+        self.on_select_stream = on_select_stream
+        self.on_open_stream = on_open_stream
+        self.on_save_stream_profile = on_save_stream_profile
+        self.on_delete_stream_profile = on_delete_stream_profile
+        self.on_force_stream_switch = on_force_stream_switch
+        self.on_set_count_direction = on_set_count_direction
+        self.on_toggle_stream_rotation = on_toggle_stream_rotation
+        self.on_queue_random_stream = on_queue_random_stream
+        self.schedule_store = schedule_store
+        self.on_save_stream_schedule_rule = on_save_stream_schedule_rule
+        self.on_delete_stream_schedule_rule = on_delete_stream_schedule_rule
+        self.on_toggle_stream_schedule_rule = on_toggle_stream_schedule_rule
+        self.should_close = False
+        self._stream_profile_ids: list[str] = []
+        self._schedule_camera_ids: list[str] = []
+        self._camera_rule_ids: list[str] = []
+        self._selected_schedule_camera_id = ""
+        self._selected_schedule_rule_id = ""
+        self._updating_stream_selection = False
+        self._updating_schedule_camera = False
+        self._updating_schedule_rule = False
+        self._selected_rule_is_legacy = False
+
+        self._root = tk.Tk()
+        self._root.title("Controles de Configuracao")
+        self._root.resizable(True, True)
+        self._root.geometry("1040x760")
+        self._root.minsize(920, 680)
+        self._root.protocol("WM_DELETE_WINDOW", self.request_close)
+        self._root.columnconfigure(0, weight=1)
+        self._root.rowconfigure(0, weight=1)
+
+        self._stream_name_var = tk.StringVar()
+        self._stream_camera_id_var = tk.StringVar()
+        self._stream_url_var = tk.StringVar()
+        self._count_direction_var = tk.StringVar(value=count_direction_display_name("any"))
+        self._stream_rotation_enabled_var = tk.BooleanVar(value=bool(stream_rotation_enabled))
+
+        schedule = self.schedule_store.get_schedule()
+        self._schedule_name_var = tk.StringVar()
+        self._schedule_start_var = tk.StringVar(value="09:00")
+        self._schedule_end_var = tk.StringVar(value="19:00")
+        self._schedule_enabled_var = tk.BooleanVar(value=True)
+        self._schedule_timezone_var = tk.StringVar(
+            value=f"Timezone: {schedule.get('timezone', DEFAULT_STREAM_SCHEDULE['timezone'])}"
+        )
+        self._mode_var = tk.StringVar(value=f"Modo: {self.editor.mode}")
+        self._message_var = tk.StringVar(value=self.editor.message)
+        self._stream_summary_var = tk.StringVar(value="")
+        self._schedule_summary_var = tk.StringVar(value="")
+        self._schedule_validation_var = tk.StringVar(value="")
+        self._schedule_status_var = tk.StringVar(value="")
+        self._schedule_legacy_var = tk.StringVar(value="")
+        self._rotation_status_var = tk.StringVar(value="")
+        self._active_stream_var = tk.StringVar(value="-")
+        self._next_stream_var = tk.StringVar(value="-")
+        self._active_schedule_var = tk.StringVar(value="-")
+        self._rotation_state_var = tk.StringVar(value="-")
+        self._safe_window_var = tk.StringVar(value="-")
+
+        self._schedule_name_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
+        self._schedule_start_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
+        self._schedule_end_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
+        self._schedule_enabled_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
+
+        root_frame = ttk.Frame(self._root, padding=10)
+        root_frame.grid(row=0, column=0, sticky="nsew")
+        root_frame.columnconfigure(0, weight=1)
+        root_frame.rowconfigure(0, weight=1)
+
+        self._notebook = ttk.Notebook(root_frame)
+        self._notebook.grid(row=0, column=0, sticky="nsew")
+
+        self._tab_streams = ttk.Frame(self._notebook, padding=10)
+        self._tab_agenda = ttk.Frame(self._notebook, padding=10)
+        self._tab_calibracao = ttk.Frame(self._notebook, padding=10)
+        self._tab_estado = ttk.Frame(self._notebook, padding=10)
+        self._notebook.add(self._tab_streams, text="Streams")
+        self._notebook.add(self._tab_agenda, text="Agenda")
+        self._notebook.add(self._tab_calibracao, text="Calibracao")
+        self._notebook.add(self._tab_estado, text="Estado")
+
+        self._build_state_tab()
+        self._build_streams_tab()
+        self._build_agenda_tab()
+        self._build_calibracao_tab()
+        self._build_footer(root_frame)
+
+        self._refresh_stream_profiles()
+        self._refresh_schedule_cameras()
+        self._refresh_schedule_rules()
+        self.set_active_stream_profile(self.stream_store.get_selected_profile())
+
+    def _build_state_tab(self):
+        self._tab_estado.columnconfigure(0, weight=1)
+        state_frame = ttk.LabelFrame(self._tab_estado, text="Estado Operacional")
+        state_frame.grid(row=0, column=0, sticky="nsew")
+        state_frame.columnconfigure(0, weight=1)
+        state_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(state_frame, text="Stream ativa").grid(row=0, column=0, sticky="w")
+        ttk.Label(state_frame, textvariable=self._active_stream_var, wraplength=420).grid(
+            row=1, column=0, sticky="w", padx=(0, 12), pady=(0, 8)
+        )
+        ttk.Label(state_frame, text="Proxima stream").grid(row=0, column=1, sticky="w")
+        ttk.Label(state_frame, textvariable=self._next_stream_var, wraplength=420).grid(
+            row=1, column=1, sticky="w", pady=(0, 8)
+        )
+        ttk.Label(state_frame, text="Agenda atual").grid(row=2, column=0, sticky="w")
+        ttk.Label(state_frame, textvariable=self._active_schedule_var, wraplength=420).grid(
+            row=3, column=0, sticky="w", padx=(0, 12), pady=(0, 8)
+        )
+        ttk.Label(state_frame, text="Rotacao").grid(row=2, column=1, sticky="w")
+        ttk.Label(state_frame, textvariable=self._rotation_state_var, wraplength=420).grid(
+            row=3, column=1, sticky="w", pady=(0, 8)
+        )
+        ttk.Label(state_frame, text="Janela segura").grid(row=4, column=0, sticky="w")
+        ttk.Label(state_frame, textvariable=self._safe_window_var, wraplength=420).grid(
+            row=5, column=0, columnspan=2, sticky="w"
+        )
+
+    def _build_streams_tab(self):
+        self._tab_streams.columnconfigure(0, weight=5)
+        self._tab_streams.columnconfigure(1, weight=4)
+        self._tab_streams.rowconfigure(0, weight=1)
+
+        left = ttk.LabelFrame(self._tab_streams, text="Esteira de Streams")
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        left.columnconfigure(0, weight=1)
+        left.columnconfigure(1, weight=0)
+        left.rowconfigure(1, weight=1)
+
+        ttk.Label(left, text="Ir para preset salvo").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        self._stream_selector = ttk.Combobox(left, state="readonly")
+        self._stream_selector.grid(row=0, column=0, sticky="ew", padx=(0, 110))
+        self._stream_selector.bind("<<ComboboxSelected>>", self._handle_profile_preview)
+        ttk.Button(left, text="Carregar", command=self.load_selected_stream).grid(
+            row=0, column=1, sticky="e"
+        )
+
+        self._stream_table = ttk.Treeview(
+            left,
+            columns=("status", "name", "camera_id"),
+            show="headings",
+            height=12,
+            selectmode="browse",
+        )
+        self._stream_table.heading("status", text="Estado")
+        self._stream_table.heading("name", text="Stream")
+        self._stream_table.heading("camera_id", text="Camera")
+        self._stream_table.column("status", width=170, minwidth=120, stretch=False, anchor="center")
+        self._stream_table.column("name", width=180, minwidth=120, stretch=True)
+        self._stream_table.column("camera_id", width=120, minwidth=100, stretch=False)
+        self._stream_table.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(8, 8))
+        self._stream_table.bind("<<TreeviewSelect>>", self._handle_profile_table_select)
+
+        ttk.Label(left, textvariable=self._stream_summary_var, wraplength=460).grid(
+            row=2, column=0, columnspan=2, sticky="w"
+        )
+
+        right = ttk.LabelFrame(self._tab_streams, text="Preset Selecionado")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.columnconfigure(1, weight=1)
+
+        ttk.Label(right, text="Apelido").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Entry(right, textvariable=self._stream_name_var).grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Label(right, text="Camera ID").grid(row=2, column=0, columnspan=2, sticky="w")
+        ttk.Entry(right, textvariable=self._stream_camera_id_var).grid(
+            row=3, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Label(right, text="URL da stream").grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Entry(right, textvariable=self._stream_url_var).grid(
+            row=5, column=0, columnspan=2, sticky="ew", pady=(0, 8)
+        )
+        ttk.Button(right, text="Abrir URL na visualizacao", command=self.open_stream_url).grid(
+            row=6, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Button(right, text="Salvar preset", command=self.save_stream_profile).grid(
+            row=6, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(right, text="Trocar na proxima janela segura", command=self.force_stream_switch).grid(
+            row=7, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(right, text="Apagar preset", command=self.delete_stream_profile).grid(
+            row=8, column=0, columnspan=2, sticky="ew"
+        )
+
+    def _build_agenda_tab(self):
+        self._tab_agenda.columnconfigure(0, weight=4)
+        self._tab_agenda.columnconfigure(1, weight=5)
+        self._tab_agenda.rowconfigure(1, weight=1)
+
+        header = ttk.LabelFrame(self._tab_agenda, text="Resumo da Agenda")
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, textvariable=self._schedule_timezone_var).grid(row=0, column=0, sticky="w")
+        ttk.Label(header, textvariable=self._schedule_status_var, wraplength=860).grid(
+            row=1, column=0, sticky="w", pady=(4, 0)
+        )
+
+        left = ttk.LabelFrame(self._tab_agenda, text="Cameras da Esteira")
+        left.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(0, weight=1)
+        self._schedule_camera_table = ttk.Treeview(
+            left,
+            columns=("status", "camera_id", "summary"),
+            show="headings",
+            height=14,
+            selectmode="browse",
+        )
+        self._schedule_camera_table.heading("status", text="Estado")
+        self._schedule_camera_table.heading("camera_id", text="Camera")
+        self._schedule_camera_table.heading("summary", text="Horarios")
+        self._schedule_camera_table.column("status", width=120, minwidth=100, stretch=False, anchor="center")
+        self._schedule_camera_table.column("camera_id", width=130, minwidth=110, stretch=False)
+        self._schedule_camera_table.column("summary", width=280, minwidth=180, stretch=True)
+        self._schedule_camera_table.grid(row=0, column=0, sticky="nsew")
+        self._schedule_camera_table.bind("<<TreeviewSelect>>", self._handle_schedule_camera_select)
+
+        right = ttk.Frame(self._tab_agenda)
+        right.grid(row=1, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+
+        selected_camera_frame = ttk.LabelFrame(right, text="Horarios da Camera Selecionada")
+        selected_camera_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        selected_camera_frame.columnconfigure(0, weight=1)
+        ttk.Label(selected_camera_frame, textvariable=self._schedule_summary_var, wraplength=500).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(selected_camera_frame, textvariable=self._schedule_legacy_var, wraplength=500).grid(
+            row=1, column=0, sticky="w", pady=(4, 0)
+        )
+
+        rules_frame = ttk.LabelFrame(right, text="Faixas da Camera")
+        rules_frame.grid(row=1, column=0, sticky="nsew")
+        rules_frame.columnconfigure(0, weight=1)
+        rules_frame.rowconfigure(0, weight=1)
+        self._camera_rule_table = ttk.Treeview(
+            rules_frame,
+            columns=("status", "window", "name"),
+            show="headings",
+            height=8,
+            selectmode="browse",
+        )
+        self._camera_rule_table.heading("status", text="Estado")
+        self._camera_rule_table.heading("window", text="Faixa")
+        self._camera_rule_table.heading("name", text="Descricao")
+        self._camera_rule_table.column("status", width=130, minwidth=100, stretch=False, anchor="center")
+        self._camera_rule_table.column("window", width=120, minwidth=100, stretch=False)
+        self._camera_rule_table.column("name", width=260, minwidth=160, stretch=True)
+        self._camera_rule_table.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
+        self._camera_rule_table.bind("<<TreeviewSelect>>", self._handle_schedule_rule_select)
+
+        editor_frame = ttk.LabelFrame(rules_frame, text="Editar Faixa")
+        editor_frame.grid(row=1, column=0, sticky="ew")
+        editor_frame.columnconfigure(0, weight=1)
+        editor_frame.columnconfigure(1, weight=1)
+        ttk.Label(editor_frame, text="Descricao").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Entry(editor_frame, textvariable=self._schedule_name_var).grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6)
+        )
+        ttk.Label(editor_frame, text="Inicio (HH:MM)").grid(row=2, column=0, sticky="w")
+        ttk.Label(editor_frame, text="Fim (HH:MM)").grid(row=2, column=1, sticky="w")
+        ttk.Entry(editor_frame, textvariable=self._schedule_start_var).grid(
+            row=3, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Entry(editor_frame, textvariable=self._schedule_end_var).grid(
+            row=3, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Checkbutton(editor_frame, text="Faixa ativa", variable=self._schedule_enabled_var).grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        ttk.Label(editor_frame, textvariable=self._schedule_validation_var, wraplength=500).grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        ttk.Button(editor_frame, text="Nova faixa para camera", command=self.new_schedule_rule).grid(
+            row=6, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        self._schedule_save_button = ttk.Button(editor_frame, text="Salvar faixa", command=self.save_schedule_rule)
+        self._schedule_save_button.grid(row=6, column=1, sticky="ew", pady=(0, 6))
+        ttk.Button(editor_frame, text="Ativar/Desativar", command=self.toggle_schedule_rule).grid(
+            row=7, column=0, sticky="ew", padx=(0, 6)
+        )
+        ttk.Button(editor_frame, text="Apagar faixa", command=self.delete_schedule_rule).grid(
+            row=7, column=1, sticky="ew"
+        )
+
+    def _build_calibracao_tab(self):
+        self._tab_calibracao.columnconfigure(0, weight=1)
+        frame = ttk.LabelFrame(self._tab_calibracao, text="Ajuste de ROI e Linha")
+        frame.grid(row=0, column=0, sticky="ew")
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+        ttk.Label(frame, text="Direcao de contagem").grid(row=0, column=0, columnspan=2, sticky="w")
+        self._count_direction_selector = ttk.Combobox(
+            frame,
+            state="readonly",
+            values=(
+                "Qualquer direcao",
+                "Cima para baixo",
+                "Baixo para cima",
+                "Esquerda para direita",
+                "Direita para esquerda",
+            ),
+            textvariable=self._count_direction_var,
+        )
+        self._count_direction_selector.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self._count_direction_selector.bind("<<ComboboxSelected>>", self._handle_direction_change)
+        ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
+            row=2, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
+            row=2, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(frame, text="Salvar calibracao", command=self.save).grid(
+            row=3, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+        )
+        ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
+            row=3, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
+            row=4, column=0, columnspan=2, sticky="ew"
+        )
+
+    def _build_footer(self, root_frame: ttk.Frame):
+        footer = ttk.Frame(root_frame)
+        footer.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        footer.columnconfigure(0, weight=1)
+        footer.columnconfigure(1, weight=0)
+        ttk.Label(footer, textvariable=self._mode_var).grid(row=0, column=0, sticky="w")
+        ttk.Label(footer, textvariable=self._message_var, wraplength=760).grid(
+            row=1, column=0, sticky="w", pady=(4, 0)
+        )
+        ttk.Button(footer, text="Fechar painel", command=self.request_close).grid(
+            row=0, column=1, rowspan=2, sticky="e"
+        )
+
+    def refresh(self):
+        self._mode_var.set(f"Modo: {self.editor.mode}")
+        self._message_var.set(self.editor.message)
+        self._update_state_summary()
+        self._refresh_schedule_cameras()
+        self._refresh_schedule_rules()
+        try:
+            self._root.update_idletasks()
+            self._root.update()
+        except tk.TclError:
+            self.should_close = True
+
+    def save(self):
+        self._commit_count_direction()
+        self.on_save()
+        self.set_active_stream_profile(self.stream_store.get_selected_profile())
+
+    def cancel(self):
+        self.editor.cancel()
+
+    def reset_stream(self):
+        self.on_reset_stream()
+
+    def load_selected_stream(self):
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
+            self.editor.message = "Selecione uma stream salva."
+            return
+        try:
+            profile = self.on_select_stream(profile_id)
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self.set_active_stream_profile(profile)
+
+    def open_stream_url(self):
+        try:
+            profile = self.on_open_stream(
+                self._stream_url_var.get(),
+                self._stream_name_var.get(),
+                self._stream_camera_id_var.get(),
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self.set_active_stream_profile(profile)
+
+    def save_stream_profile(self):
+        try:
+            self._commit_count_direction()
+            profile = self.on_save_stream_profile(
+                self._stream_name_var.get(),
+                self._stream_url_var.get(),
+                self._stream_camera_id_var.get(),
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self.set_active_stream_profile(profile)
+
+    def delete_stream_profile(self):
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
+            self.editor.message = "Selecione uma stream salva."
+            return
+        try:
+            deleted = self.on_delete_stream_profile(profile_id)
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self._refresh_stream_profiles()
+        self.editor.message = f"Stream apagada: {format_stream_profile_label(deleted)}"
+
+    def force_stream_switch(self):
+        try:
+            self._commit_count_direction()
+            profile = self.on_force_stream_switch(
+                self._get_selected_stream_profile_id(),
+                self._stream_name_var.get(),
+                self._stream_url_var.get(),
+                self._stream_camera_id_var.get(),
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self.set_active_stream_profile(profile)
+
+    def toggle_stream_rotation(self):
+        try:
+            self.on_toggle_stream_rotation(bool(self._stream_rotation_enabled_var.get()))
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+
+    def refresh_stream_profiles(self, selected_profile_id: str | None = None):
+        self._refresh_stream_profiles(selected_profile_id=selected_profile_id)
+        self._refresh_schedule_cameras()
+
+    def queue_random_stream(self):
+        try:
+            profile = self.on_queue_random_stream()
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        if profile:
+            self._refresh_stream_profiles(selected_profile_id=profile.get("id"))
+            self._update_state_summary()
+
+    def set_active_stream_profile(self, profile: dict):
+        self._refresh_stream_profiles(selected_profile_id=profile.get("id"))
+        self._populate_stream_form(profile)
+        selected_camera_id = str(profile.get("id") or "")
+        if selected_camera_id:
+            self._selected_schedule_camera_id = selected_camera_id
+            self._refresh_schedule_cameras(selected_camera_id=selected_camera_id)
+            self._refresh_schedule_rules()
+        self._update_state_summary()
+
+    def new_schedule_rule(self):
+        if not self._selected_schedule_camera_id:
+            self.editor.message = "Selecione uma camera na aba Agenda."
+            return
+        self._selected_schedule_rule_id = ""
+        self._selected_rule_is_legacy = False
+        self._schedule_name_var.set("")
+        self._schedule_start_var.set("09:00")
+        self._schedule_end_var.set("19:00")
+        self._schedule_enabled_var.set(True)
+        self._schedule_legacy_var.set("")
+        self._update_schedule_editor_summary()
+
+    def save_schedule_rule(self):
+        camera_id = self._selected_schedule_camera_id
+        if not camera_id:
+            self.editor.message = "Selecione uma camera na aba Agenda."
+            return
+        if self._selected_rule_is_legacy:
+            self.editor.message = "Regra compartilhada legado: crie uma nova faixa por camera e depois remova a antiga."
+            return
+        profile = self.stream_store.get_selected_profile()
+        for item in self.stream_store.list_profiles():
+            if str(item.get("id") or "") == camera_id:
+                profile = item
+                break
+        rule_name = self._schedule_name_var.get().strip() or (
+            f"Horario {str(profile.get('camera_id') or camera_id)} "
+            f"{self._schedule_start_var.get().strip()}-{self._schedule_end_var.get().strip()}"
+        )
+        try:
+            rule = self.on_save_stream_schedule_rule(
+                self._selected_schedule_rule_id,
+                rule_name,
+                self._schedule_start_var.get(),
+                self._schedule_end_var.get(),
+                [camera_id],
+                bool(self._schedule_enabled_var.get()),
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self._selected_schedule_rule_id = str(rule.get("id") or "")
+        self._refresh_schedule_cameras(selected_camera_id=camera_id)
+        self._refresh_schedule_rules(selected_rule_id=self._selected_schedule_rule_id)
+        self._populate_schedule_form(rule)
+        self.editor.message = f"Horario salvo para {str(profile.get('camera_id') or camera_id)}."
+
+    def delete_schedule_rule(self):
+        rule_id = self._get_selected_schedule_rule_id()
+        if not rule_id:
+            self.editor.message = "Selecione uma faixa para apagar."
+            return
+        try:
+            deleted = self.on_delete_stream_schedule_rule(rule_id)
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self.new_schedule_rule()
+        self._refresh_schedule_cameras(selected_camera_id=self._selected_schedule_camera_id)
+        self._refresh_schedule_rules()
+        self.editor.message = f"Faixa removida: {str(deleted.get('name') or '').strip() or rule_id}"
+
+    def toggle_schedule_rule(self):
+        rule_id = self._get_selected_schedule_rule_id()
+        if not rule_id:
+            self.editor.message = "Selecione uma faixa para ativar ou desativar."
+            return
+        try:
+            rule = self.on_toggle_stream_schedule_rule(rule_id)
+        except (ValueError, RuntimeError) as exc:
+            self.editor.message = str(exc)
+            return
+        self._selected_schedule_rule_id = str(rule.get("id") or "")
+        self._refresh_schedule_cameras(selected_camera_id=self._selected_schedule_camera_id)
+        self._refresh_schedule_rules(selected_rule_id=self._selected_schedule_rule_id)
+        self._populate_schedule_form(rule)
+        self.editor.message = "Faixa ativada." if rule.get("enabled") else "Faixa desativada."
+
+    def _refresh_stream_profiles(self, selected_profile_id: str | None = None):
+        profiles = self.stream_store.list_profiles()
+        self._stream_profile_ids = [str(profile.get("id") or "") for profile in profiles]
+        self._stream_selector["values"] = [format_stream_profile_label(profile) for profile in profiles]
+        active_id = str(self.stream_store.get_selected_profile().get("id") or "")
+        target_id = selected_profile_id or active_id
+        schedule_status = get_stream_schedule_status()
+        rotation_status = get_stream_rotation_status()
+        eligible_ids = {
+            str(profile_id or "").strip()
+            for profile_id in schedule_status.get("eligibleProfileIds", [])
+            if str(profile_id or "").strip()
+        }
+        pending_id = str(rotation_status.get("pendingProfileId") or "").strip()
+        self._updating_stream_selection = True
+        try:
+            for item_id in self._stream_table.get_children():
+                self._stream_table.delete(item_id)
+            for profile in profiles:
+                profile_id = str(profile.get("id") or "")
+                status_badges = []
+                if profile_id == active_id:
+                    status_badges.append("Ativa")
+                if profile_id == pending_id:
+                    status_badges.append("Pendente")
+                if profile_id in eligible_ids:
+                    status_badges.append("Em agenda")
+                _, name, camera_id, _stream_url = format_stream_profile_table_row(profile, active=profile_id == active_id)
+                self._stream_table.insert(
+                    "",
+                    "end",
+                    iid=profile_id,
+                    values=(" | ".join(status_badges) if status_badges else "-", name, camera_id),
+                )
+            if target_id in self._stream_profile_ids:
+                self._stream_selector.current(self._stream_profile_ids.index(target_id))
+                self._stream_table.selection_set(target_id)
+                self._stream_table.focus(target_id)
+                self._stream_table.see(target_id)
+            elif self._stream_profile_ids:
+                self._stream_selector.current(0)
+                self._stream_table.selection_set(self._stream_profile_ids[0])
+                self._stream_table.focus(self._stream_profile_ids[0])
+        finally:
+            self._updating_stream_selection = False
+        self._update_stream_summary()
+
+    def _refresh_schedule_cameras(self, selected_camera_id: str | None = None):
+        profiles = self.stream_store.list_profiles()
+        self._schedule_camera_ids = [str(profile.get("id") or "") for profile in profiles]
+        target_camera_id = selected_camera_id or self._selected_schedule_camera_id or (
+            self._schedule_camera_ids[0] if self._schedule_camera_ids else ""
+        )
+        self._updating_schedule_camera = True
+        try:
+            for item_id in self._schedule_camera_table.get_children():
+                self._schedule_camera_table.delete(item_id)
+            for profile in profiles:
+                profile_id = str(profile.get("id") or "")
+                self._schedule_camera_table.insert(
+                    "",
+                    "end",
+                    iid=profile_id,
+                    values=(
+                        self._build_camera_schedule_status(profile),
+                        str(profile.get("camera_id") or profile_id),
+                        self._build_camera_schedule_summary(profile),
+                    ),
+                )
+            if target_camera_id in self._schedule_camera_ids:
+                self._selected_schedule_camera_id = target_camera_id
+                self._schedule_camera_table.selection_set(target_camera_id)
+                self._schedule_camera_table.focus(target_camera_id)
+                self._schedule_camera_table.see(target_camera_id)
+        finally:
+            self._updating_schedule_camera = False
+        self._update_schedule_editor_summary()
+
+    def _refresh_schedule_rules(self, selected_rule_id: str | None = None):
+        profile_id = self._selected_schedule_camera_id
+        rules = self._get_schedule_rules_for_camera(profile_id)
+        schedule_status = get_stream_schedule_status()
+        active_rule_ids = {
+            str(rule_id or "").strip()
+            for rule_id in schedule_status.get("activeRuleIds", [])
+            if str(rule_id or "").strip()
+        }
+        target_rule_id = selected_rule_id or self._selected_schedule_rule_id
+        self._camera_rule_ids = [str(rule.get("id") or "") for rule in rules]
+        self._updating_schedule_rule = True
+        try:
+            for item_id in self._camera_rule_table.get_children():
+                self._camera_rule_table.delete(item_id)
+            for rule in rules:
+                rule_id = str(rule.get("id") or "")
+                status = "Ativa agora" if rule_id in active_rule_ids else ("Ligada" if bool(rule.get("enabled", True)) else "Pausada")
+                if len(normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))) > 1:
+                    status = f"{status} | Legado"
+                self._camera_rule_table.insert(
+                    "",
+                    "end",
+                    iid=rule_id,
+                    values=(
+                        status,
+                        format_stream_schedule_window(rule),
+                        str(rule.get("name") or "").strip(),
+                    ),
+                )
+            if target_rule_id in self._camera_rule_ids:
+                self._selected_schedule_rule_id = target_rule_id
+                self._camera_rule_table.selection_set(target_rule_id)
+                self._camera_rule_table.focus(target_rule_id)
+                self._camera_rule_table.see(target_rule_id)
+            elif self._camera_rule_ids:
+                first_rule_id = self._camera_rule_ids[0]
+                self._selected_schedule_rule_id = first_rule_id
+                self._camera_rule_table.selection_set(first_rule_id)
+                self._camera_rule_table.focus(first_rule_id)
+                self._camera_rule_table.see(first_rule_id)
+        finally:
+            self._updating_schedule_rule = False
+        selected_rule = self._get_selected_rule()
+        if selected_rule is not None:
+            self._populate_schedule_form(selected_rule)
+        else:
+            self.new_schedule_rule()
+
+    def _handle_profile_preview(self, _event=None):
+        if self._updating_stream_selection:
+            return
+        index = self._stream_selector.current()
+        if index < 0 or index >= len(self._stream_profile_ids):
+            return
+        profile_id = self._stream_profile_ids[index]
+        self._stream_table.selection_set(profile_id)
+        self._stream_table.focus(profile_id)
+        self._handle_profile_table_select()
+
+    def _handle_profile_table_select(self, _event=None):
+        if self._updating_stream_selection:
+            return
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
+            return
+        if profile_id in self._stream_profile_ids:
+            self._stream_selector.current(self._stream_profile_ids.index(profile_id))
+        for profile in self.stream_store.list_profiles():
+            if str(profile.get("id") or "") == profile_id:
+                self._populate_stream_form(profile)
+                self._selected_schedule_camera_id = profile_id
+                self._refresh_schedule_cameras(selected_camera_id=profile_id)
+                self._refresh_schedule_rules()
+                break
+
+    def _handle_schedule_camera_select(self, _event=None):
+        if self._updating_schedule_camera:
+            return
+        selection = self._schedule_camera_table.selection()
+        if not selection:
+            return
+        self._selected_schedule_camera_id = str(selection[0])
+        self._selected_schedule_rule_id = ""
+        self._refresh_schedule_rules()
+
+    def _handle_schedule_rule_select(self, _event=None):
+        if self._updating_schedule_rule:
+            return
+        rule = self._get_selected_rule()
+        if rule is None:
+            return
+        self._selected_schedule_rule_id = str(rule.get("id") or "")
+        self._populate_schedule_form(rule)
+
+    def _handle_direction_change(self, _event=None):
+        self._commit_count_direction()
+
+    def _commit_count_direction(self):
+        direction = normalize_count_direction(self._count_direction_var.get())
+        self._count_direction_var.set(count_direction_display_name(direction))
+        self.on_set_count_direction(direction)
+
+    def _get_selected_stream_profile_id(self) -> str:
+        selection = self._stream_table.selection()
+        if selection:
+            return str(selection[0])
+        index = self._stream_selector.current()
+        if 0 <= index < len(self._stream_profile_ids):
+            return self._stream_profile_ids[index]
+        return ""
+
+    def _get_selected_schedule_rule_id(self) -> str:
+        selection = self._camera_rule_table.selection()
+        if selection:
+            return str(selection[0])
+        return str(self._selected_schedule_rule_id or "")
+
+    def _get_selected_rule(self) -> dict | None:
+        target_rule_id = self._get_selected_schedule_rule_id()
+        for rule in self._get_schedule_rules_for_camera(self._selected_schedule_camera_id):
+            if str(rule.get("id") or "") == target_rule_id:
+                return dict(rule)
+        return None
+
+    def _get_schedule_rules_for_camera(self, profile_id: str) -> list[dict]:
+        if not profile_id:
+            return []
+        rules = []
+        for rule in self.schedule_store.list_rules():
+            allowed_ids = normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))
+            if profile_id in allowed_ids:
+                rules.append(dict(rule))
+        rules.sort(key=lambda item: (schedule_time_to_minutes(item.get("start_time")), str(item.get("id") or "")))
+        return rules
+
+    def _populate_stream_form(self, profile: dict):
+        self._stream_name_var.set(str(profile.get("name") or ""))
+        self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
+        self._stream_url_var.set(str(profile.get("stream_url") or ""))
+        self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
+        self._update_stream_summary()
+
+    def _populate_schedule_form(self, rule: dict):
+        allowed_ids = normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))
+        self._selected_rule_is_legacy = len(allowed_ids) > 1
+        self._schedule_name_var.set(str(rule.get("name") or ""))
+        self._schedule_start_var.set(str(rule.get("start_time") or "09:00"))
+        self._schedule_end_var.set(str(rule.get("end_time") or "19:00"))
+        self._schedule_enabled_var.set(bool(rule.get("enabled", True)))
+        if self._selected_rule_is_legacy:
+            self._schedule_legacy_var.set("Regra legado compartilhada entre cameras. Edite criando uma nova faixa por camera.")
+            self._schedule_save_button.state(["disabled"])
+        else:
+            self._schedule_legacy_var.set("")
+            self._schedule_save_button.state(["!disabled"])
+        self._update_schedule_editor_summary()
+
+    def _update_stream_summary(self):
+        profile_id = self._get_selected_stream_profile_id()
+        if not profile_id:
+            self._stream_summary_var.set("Selecione um preset para carregar, editar ou trocar.")
+            return
+        for profile in self.stream_store.list_profiles():
+            if str(profile.get("id") or "") == profile_id:
+                self._stream_summary_var.set(
+                    " | ".join(
+                        [
+                            f"{format_stream_profile_label(profile)}",
+                            f"Direcao: {count_direction_display_name(str(profile.get('count_direction') or 'any'))}",
+                            shorten_text(str(profile.get("stream_url") or ""), max_len=78),
+                        ]
+                    )
+                )
+                return
+
+    def _update_schedule_editor_summary(self):
+        profile = None
+        for item in self.stream_store.list_profiles():
+            if str(item.get("id") or "") == self._selected_schedule_camera_id:
+                profile = item
+                break
+        if profile is None:
+            self._schedule_summary_var.set("Selecione uma camera na lista para editar horarios.")
+        else:
+            camera_label = str(profile.get("camera_id") or profile.get("name") or self._selected_schedule_camera_id)
+            self._schedule_summary_var.set(
+                f"Camera: {camera_label} | Faixa: {self._schedule_start_var.get().strip() or '--:--'}-{self._schedule_end_var.get().strip() or '--:--'}"
+            )
+        self._update_schedule_validation()
+
+    def _update_schedule_validation(self):
+        camera_id = self._selected_schedule_camera_id
+        if not camera_id:
+            self._schedule_validation_var.set("Selecione uma camera para criar ou editar a faixa.")
+            return
+        if self._selected_rule_is_legacy:
+            self._schedule_validation_var.set("Regra legado compartilhada: leia, ative/desative ou apague; para editar, crie nova faixa por camera.")
+            return
+        try:
+            candidate_rule_id = self._selected_schedule_rule_id or "__draft__"
+            candidate_rule = {
+                "id": candidate_rule_id,
+                "name": self._schedule_name_var.get(),
+                "enabled": bool(self._schedule_enabled_var.get()),
+                "start_time": self._schedule_start_var.get(),
+                "end_time": self._schedule_end_var.get(),
+                "allowed_profile_ids": [camera_id],
+            }
+            rules = []
+            replaced = False
+            for rule in self.schedule_store.list_rules():
+                if str(rule.get("id") or "").strip() == candidate_rule_id:
+                    rules.append(candidate_rule)
+                    replaced = True
+                else:
+                    rules.append(rule)
+            if not replaced:
+                rules.append(candidate_rule)
+            validate_stream_schedule_rules(rules, set(self._schedule_camera_ids))
+        except ValueError as exc:
+            self._schedule_validation_var.set(str(exc))
+            return
+        self._schedule_validation_var.set("Faixa valida para salvar.")
+
+    def _build_camera_schedule_summary(self, profile: dict) -> str:
+        profile_id = str(profile.get("id") or "")
+        rules = self._get_schedule_rules_for_camera(profile_id)
+        if not rules:
+            return "Sem horario"
+        windows = []
+        for rule in rules:
+            window = format_stream_schedule_window(rule)
+            if not window:
+                continue
+            suffix = " legado" if len(normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))) > 1 else ""
+            windows.append(f"{window}{suffix}")
+        return ", ".join(windows[:3]) + (f" +{len(windows) - 3}" if len(windows) > 3 else "")
+
+    def _build_camera_schedule_status(self, profile: dict) -> str:
+        profile_id = str(profile.get("id") or "")
+        rules = self._get_schedule_rules_for_camera(profile_id)
+        schedule_status = get_stream_schedule_status()
+        eligible_ids = {
+            str(item or "").strip()
+            for item in schedule_status.get("eligibleProfileIds", [])
+            if str(item or "").strip()
+        }
+        if profile_id in eligible_ids and rules:
+            return "Ativa agora"
+        if rules:
+            return "Fora do horario"
+        return "Sem horario"
+
+    def _update_state_summary(self):
+        schedule_status = get_stream_schedule_status()
+        rotation_status = get_stream_rotation_status()
+        activation_status = get_camera_activation_status()
+        self._schedule_status_var.set(self._build_schedule_status_text(schedule_status))
+        self._rotation_status_var.set(str(rotation_status.get("lastMessage") or "").strip())
+        self._active_stream_var.set(
+            str(activation_status.get("readyProfileLabel") or rotation_status.get("activeProfileLabel") or "-")
+        )
+        self._next_stream_var.set(self._build_next_stream_status(schedule_status, rotation_status))
+        self._active_schedule_var.set(self._build_active_schedule_status(schedule_status))
+        self._rotation_state_var.set(self._build_rotation_state(rotation_status))
+        self._safe_window_var.set(self._build_safe_window_status(schedule_status, rotation_status, activation_status))
+
+    def _build_schedule_status_text(self, schedule_status: dict) -> str:
+        active_rule_name = str(schedule_status.get("activeRuleName") or "").strip()
+        active_window = str(schedule_status.get("activeWindow") or "").strip()
+        status_parts = []
+        if active_rule_name or active_window:
+            status_parts.append(active_rule_name or active_window)
+        elif schedule_status.get("restricted"):
+            status_parts.append("Agenda ativa")
+        else:
+            status_parts.append("Sem restricao por horario")
+        if schedule_status.get("pendingEnforcement"):
+            status_parts.append("troca pendente")
+        if schedule_status.get("lastMessage"):
+            status_parts.append(str(schedule_status["lastMessage"]))
+        return " | ".join(part for part in status_parts if part)
+
+    def _build_active_schedule_status(self, schedule_status: dict) -> str:
+        active_rule_name = str(schedule_status.get("activeRuleName") or "").strip()
+        active_window = str(schedule_status.get("activeWindow") or "").strip()
+        if active_rule_name or active_window:
+            details = active_rule_name or "Agenda ativa"
+            if active_window:
+                details = f"{details} | {active_window}"
+            return details
+        return "Sem restricao por horario"
+
+    def _build_rotation_state(self, rotation_status: dict) -> str:
+        if rotation_status.get("pending"):
+            return str(rotation_status.get("lastMessage") or "Troca pendente para a proxima janela segura.")
+        if rotation_status.get("enabled"):
+            return str(rotation_status.get("lastMessage") or "Rotacao ativa entre rounds.")
+        return "Rotacao desativada"
+
+    def _build_next_stream_status(self, schedule_status: dict, rotation_status: dict) -> str:
+        pending_profile_id = str(rotation_status.get("pendingProfileId") or "").strip()
+        if pending_profile_id:
+            for profile in self.stream_store.list_profiles():
+                if str(profile.get("id") or "").strip() == pending_profile_id:
+                    return f"Pendente: {format_stream_profile_label(profile)}"
+        if schedule_status.get("pendingEnforcement"):
+            return str(schedule_status.get("lastMessage") or "Agenda aguardando janela segura.")
+        return "Nenhuma troca pendente"
+
+    def _build_safe_window_status(self, schedule_status: dict, rotation_status: dict, activation_status: dict) -> str:
+        if not activation_status.get("readyForRounds", True):
+            return "Nao pronta para rounds: aguardando ativacao da stream."
+        if schedule_status.get("pendingEnforcement"):
+            return str(schedule_status.get("lastMessage") or "Agenda aguardando janela segura.")
+        if rotation_status.get("pending"):
+            return str(rotation_status.get("lastMessage") or "Rotacao aguardando janela segura.")
+        return "Livre para operar na stream atual."
 
     def request_close(self):
         self.should_close = True
@@ -3566,7 +4804,8 @@ def main():
     update_stream_schedule_status(
         timezone=initial_schedule_state.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
         activeRuleId=str((initial_schedule_state.get("activeRule") or {}).get("id") or ""),
-        activeRuleName=str((initial_schedule_state.get("activeRule") or {}).get("name") or ""),
+        activeRuleIds=list(initial_schedule_state.get("activeRuleIds", [])),
+        activeRuleName=str(initial_schedule_state.get("activeRuleName") or ""),
         activeWindow=initial_schedule_state.get("activeWindow", ""),
         restricted=bool(initial_schedule_state.get("isRestricted")),
         eligibleProfileIds=list(initial_schedule_state.get("eligibleProfileIds", [])),
@@ -3578,16 +4817,16 @@ def main():
     initial_processed_path = str(cfg.get("processed_stream_path") or f"processed/{initial_camera_id}" if initial_camera_id else "").strip()
     initial_profile_label = format_stream_profile_label(selected_profile) if selected_profile else initial_camera_id
     update_camera_activation_status(
-        phase="ready",
+        phase="waiting_stream",
         requestedCameraId=initial_camera_id,
-        readyCameraId=initial_camera_id,
+        readyCameraId="",
         requestedStreamProfileId=initial_profile_id,
-        readyStreamProfileId=initial_profile_id,
+        readyStreamProfileId="",
         requestedProcessedStreamPath=initial_processed_path,
-        readyProcessedStreamPath=initial_processed_path,
+        readyProcessedStreamPath="",
         requestedProfileLabel=initial_profile_label,
-        readyProfileLabel=initial_profile_label,
-        readyForRounds=True,
+        readyProfileLabel="",
+        readyForRounds=False,
     )
     streamer.set_jpeg_quality(int(cfg.get("mjpeg_jpeg_quality", 70)))
     streamer.set_fps_limit(float(cfg.get("mjpeg_fps_limit", 0)))
@@ -3652,7 +4891,20 @@ def main():
     editor = None
     control_panel = None
     pending_stream_profile = None
-    pending_camera_activation = None
+    pending_camera_activation = (
+        {
+            "phase": "waiting_stream",
+            "requestedCameraId": initial_camera_id,
+            "requestedStreamProfileId": initial_profile_id,
+            "requestedProcessedStreamPath": initial_processed_path,
+            "requestedProfileLabel": initial_profile_label,
+            "autoSwitchRound": False,
+            "requestNotified": False,
+            "readyNotified": False,
+        }
+        if initial_camera_id and initial_profile_id
+        else None
+    )
     pending_rotation_profile = None
     pending_schedule_profile = None
     last_rotation_round_id = ""
@@ -3663,6 +4915,16 @@ def main():
     last_visual_detections: list[dict] = []
     last_operator_preview = None
     last_operator_preview_at = 0.0
+
+    if isinstance(pending_camera_activation, dict) and not bool(pending_camera_activation.get("requestNotified")):
+        if backend.notify_stream_profile_activated(
+            initial_camera_id,
+            initial_profile_id,
+            allow_settling=True,
+            auto_switch_round=False,
+            phase="requested",
+        ):
+            pending_camera_activation["requestNotified"] = True
 
     original_model_track = model.track
 
@@ -3715,7 +4977,8 @@ def main():
         update_stream_schedule_status(
             timezone=schedule_state.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
             activeRuleId=str((schedule_state.get("activeRule") or {}).get("id") or ""),
-            activeRuleName=str((schedule_state.get("activeRule") or {}).get("name") or ""),
+            activeRuleIds=list(schedule_state.get("activeRuleIds", [])),
+            activeRuleName=str(schedule_state.get("activeRuleName") or ""),
             activeWindow=schedule_state.get("activeWindow", ""),
             restricted=bool(schedule_state.get("isRestricted")),
             eligibleProfileIds=list(schedule_state.get("eligibleProfileIds", [])),
@@ -4057,12 +5320,13 @@ def main():
 
         target_url = str(stream_url or "").strip()
         target_camera_id = str(camera_id or "").strip()
-        if profile_id and (not target_url or not target_camera_id):
+        target_profile_id = str(profile_id or "").strip()
+        if target_profile_id:
             for existing_profile in stream_store.list_profiles():
-                if str(existing_profile.get("id") or "") == str(profile_id or ""):
-                    target_url = target_url or str(existing_profile.get("stream_url") or "").strip()
-                    target_camera_id = target_camera_id or str(existing_profile.get("camera_id") or "").strip()
-                    stream_name = stream_name or str(existing_profile.get("name") or "").strip()
+                if str(existing_profile.get("id") or "") == target_profile_id:
+                    target_url = str(existing_profile.get("stream_url") or "").strip()
+                    target_camera_id = str(existing_profile.get("camera_id") or "").strip()
+                    stream_name = str(existing_profile.get("name") or "").strip()
                     break
 
         current_camera_id = str(cfg.get("camera_id") or "").strip()
@@ -4317,7 +5581,7 @@ def main():
         except Exception:
             pass
         cv2.setMouseCallback(WINDOW_NAME, lambda event, x, y, flags, param: editor.handle_mouse(event, x, y, flags, param))
-        control_panel = EditorControlPanel(
+        control_panel = CompactEditorControlPanel(
             editor,
             stream_store,
             save_editor_state,

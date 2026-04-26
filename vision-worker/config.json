@@ -1,5 +1,5 @@
 {
-  "stream_url": "https://stream.myt.mu/prod/LA_CHAUSSEE_STREET.stream_720p/playlist.m3u8",
+  "stream_url": "http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8",
   "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct",
   "stream_buffer_size": 1,
   "stream_open_timeout_ms": 5000,
@@ -18,7 +18,7 @@
   "backend_url": "http://127.0.0.1:8080/rounds/current?cameraId=cam_001",
   "api_key": "CHANGE_ME",
   "mjpeg_token": "CHANGE_ME",
-  "camera_id": "cam_006",
+  "camera_id": "cam_008",
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
@@ -30,16 +30,16 @@
   "operator_preview_max_width": 960,
   "operator_preview_fps_limit": 10,
   "line": {
-    "x1": 215,
-    "y1": 413,
-    "x2": 641,
-    "y2": 467
+    "x1": 0,
+    "y1": 0,
+    "x2": 0,
+    "y2": 0
   },
   "roi": {
-    "x": 230,
-    "y": 313,
-    "w": 474,
-    "h": 241
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
   },
   "count_direction": "any",
   "show_window": true,
@@ -62,28 +62,28 @@
     "strategy": "uniform_excluding_current",
     "min_rounds_per_stream": 2,
     "max_rounds_per_stream": 2,
-    "current_stream_profile_id": "stream_1776744835421",
-    "rounds_on_current_stream": 1,
+    "current_stream_profile_id": "stream_1777109591220",
+    "rounds_on_current_stream": 0,
     "target_rounds_for_current_stream": 2,
-    "last_counted_round_id": "179204a0-7921-4e2a-bd26-420f4ec15395"
+    "last_counted_round_id": ""
   },
   "stream_profiles": [
     {
       "id": "stream_default",
-      "name": "cam_001",
+      "name": "Sp-125",
       "stream_url": "https://34.104.32.249.nip.io/SP125-KM093B/stream.m3u8",
       "camera_id": "cam_001",
       "roi": {
-        "x": 214,
-        "y": 164,
-        "w": 479,
-        "h": 298
+        "x": 281,
+        "y": 227,
+        "w": 423,
+        "h": 253
       },
       "line": {
-        "x1": 258,
-        "y1": 333,
-        "x2": 609,
-        "y2": 258
+        "x1": 367,
+        "y1": 347,
+        "x2": 649,
+        "y2": 299
       },
       "count_direction": "any"
     },
@@ -105,11 +105,89 @@
         "y2": 467
       },
       "count_direction": "any"
+    },
+    {
+      "id": "stream_1777105536777",
+      "name": "teste",
+      "stream_url": "https://streaming1.dsatmacau.com/traffic/m1082.m3u8",
+      "camera_id": "cam_004",
+      "roi": {
+        "x": 159,
+        "y": 102,
+        "w": 176,
+        "h": 179
+      },
+      "line": {
+        "x1": 174,
+        "y1": 163,
+        "x2": 349,
+        "y2": 177
+      },
+      "count_direction": "any"
+    },
+    {
+      "id": "stream_1777109467268",
+      "name": "teste2",
+      "stream_url": "https://streaming1.highwaytraffic.go.th/Phase8/PER_8_038.stream/playlist.m3u8",
+      "camera_id": "cam_007",
+      "roi": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "line": {
+        "x1": 0,
+        "y1": 0,
+        "x2": 0,
+        "y2": 0
+      },
+      "count_direction": "any"
+    },
+    {
+      "id": "stream_1777109591220",
+      "name": "teste3",
+      "stream_url": "http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8",
+      "camera_id": "cam_008",
+      "roi": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "line": {
+        "x1": 0,
+        "y1": 0,
+        "x2": 0,
+        "y2": 0
+      },
+      "count_direction": "any"
     }
   ],
-  "selected_stream_profile_id": "stream_1776744835421",
+  "selected_stream_profile_id": "stream_1777109591220",
   "stream_schedule": {
     "timezone": "America/Sao_Paulo",
-    "rules": []
+    "rules": [
+      {
+        "id": "schedule_1777108359194",
+        "name": "Horario cam_001 09:00-19:00",
+        "enabled": true,
+        "start_time": "09:00",
+        "end_time": "19:00",
+        "allowed_profile_ids": [
+          "stream_default"
+        ]
+      },
+      {
+        "id": "schedule_1777108383835",
+        "name": "Horario cam_006 09:00-19:00",
+        "enabled": true,
+        "start_time": "09:00",
+        "end_time": "19:00",
+        "allowed_profile_ids": [
+          "stream_1776744835421"
+        ]
+      }
+    ]
   }
 }

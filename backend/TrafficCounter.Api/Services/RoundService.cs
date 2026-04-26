@@ -321,7 +321,7 @@ public class RoundService
                 .FirstOrDefaultAsync()
             : null;
 
-        if (sameProfile && !autoSwitchRound)
+        if (sameProfile && !autoSwitchRound && normalizedPhase != "ready")
             return;
 
         state.ActiveStreamProfileId = normalizedProfileId;

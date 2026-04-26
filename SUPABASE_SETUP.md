@@ -15,6 +15,9 @@ Usar o Supabase como banco PostgreSQL oficial do backend, mantendo:
 - [AppDbContextFactory.cs](/c:/Users/Marcus/Desktop/projetos/videoBetTransit/backend/TrafficCounter.Api/Data/AppDbContextFactory.cs)
 - [docker-compose.supabase.yml](/c:/Users/Marcus/Desktop/projetos/videoBetTransit/infra/docker-compose.supabase.yml)
 - [.env.supabase.example](/c:/Users/Marcus/Desktop/projetos/videoBetTransit/.env.supabase.example)
+- [supabase_round_core.sql](/c:/Users/Marcus/Desktop/projetos/videoBetTransit/supabase_round_core.sql)
+- [supabase_stream_profiles.sql](/c:/Users/Marcus/Desktop/projetos/videoBetTransit/supabase_stream_profiles.sql)
+- [supabase_stream_schedule_rules.sql](/c:/Users/Marcus/Desktop/projetos/videoBetTransit/supabase_stream_schedule_rules.sql)
 
 ## Modo de operacao
 
@@ -36,7 +39,13 @@ cd backend\TrafficCounter.Api
 dotnet ef database update
 ```
 
-6. Suba a stack com compose dedicado:
+6. Se precisar bootstrap manual do schema operacional no painel SQL do Supabase, execute os arquivos nesta ordem:
+
+- `supabase_round_core.sql`
+- `supabase_stream_profiles.sql`
+- `supabase_stream_schedule_rules.sql`
+
+7. Suba a stack com compose dedicado:
 
 ```powershell
 cd infra
@@ -45,11 +54,19 @@ docker compose -f docker-compose.supabase.yml --env-file ..\.env up --build
 
 ## Observacoes
 
-- o backend continua sendo a fonte oficial de `rounds`, `markets` e `crossing_events`
+- o backend continua sendo a fonte oficial de `rounds`, `round_markets`, `round_events` e `vehicle_crossing_events`
 - o frontend nao deve acessar tabelas do Supabase diretamente
 - o worker continua enviando eventos para o backend, nunca direto para o banco
 - o worker aceita `BACKEND_URL`, `BACKEND_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `CAMERA_ID` e `LINE_ID` por ambiente
 - se quiser usar Supabase em dev local sem Docker, basta exportar `ConnectionStrings__DefaultConnection` antes do `dotnet run`
+- `supabase_round_core.sql` agora usa os mesmos nomes fisicos do EF/Npgsql para evitar drift com migrations:
+  - `Round` -> `Rounds`
+  - `RoundMarket` -> `RoundMarkets`
+  - `RoundEvent` -> `RoundEvents`
+  - `VehicleCrossingEvent` -> `VehicleCrossingEvents`
+- o escopo atual do SQL do core nao inclui tabelas legadas de stream como `camera_sources`, `stream_sessions`, `recording_segments` e `stream_health_logs`
+- o acesso inicial do core no Supabase e `backend only`, com RLS habilitado e policy apenas para `service_role`
+- `VehicleCrossingEvents.SessionId` permanece opcional; o SQL cria a FK para `StreamSessions` somente se essa tabela ja existir no banco
 
 ## Conexao recomendada
 

@@ -331,16 +331,44 @@ class StreamScheduleTests(unittest.TestCase):
                 cfg["stream_profiles"],
             )
 
-    def test_normalize_stream_schedule_rejects_overlapping_enabled_rules(self):
+    def test_normalize_stream_schedule_allows_overlapping_enabled_rules_for_different_cameras(self):
+        cfg = make_cfg_with_two_profiles()
+        schedule = normalize_stream_schedule_config(
+            {
+                "rules": [
+                    {
+                        "id": "morning-a",
+                        "name": "A",
+                        "enabled": True,
+                        "start_time": "08:00",
+                        "end_time": "11:00",
+                        "allowed_profile_ids": ["profile-a"],
+                    },
+                    {
+                        "id": "morning-b",
+                        "name": "B",
+                        "enabled": True,
+                        "start_time": "10:30",
+                        "end_time": "12:00",
+                        "allowed_profile_ids": ["profile-b"],
+                    },
+                ]
+            },
+            cfg["stream_profiles"],
+        )
+
+        self.assertEqual(2, len(schedule["rules"]))
+
+    def test_normalize_stream_schedule_rejects_overlapping_enabled_rules_for_same_camera(self):
         cfg = make_cfg_with_two_profiles()
 
-        with self.assertRaisesRegex(ValueError, "nao podem se sobrepor"):
+        with self.assertRaisesRegex(ValueError, "mesma camera"):
             normalize_stream_schedule_config(
                 {
                     "rules": [
                         {
                             "id": "morning-a",
-                            "name": "A",
+                            "name": "A1",
                             "enabled": True,
                             "start_time": "08:00",
                             "end_time": "11:00",
@@ -348,11 +376,11 @@ class StreamScheduleTests(unittest.TestCase):
                         },
                         {
                             "id": "morning-b",
-                            "name": "B",
+                            "name": "A2",
                             "enabled": True,
                             "start_time": "10:30",
                             "end_time": "12:00",
-                            "allowed_profile_ids": ["profile-b"],
+                            "allowed_profile_ids": ["profile-a"],
                         },
                     ]
                 },

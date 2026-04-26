@@ -517,10 +517,21 @@ body {
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
   border: none;
   opacity: 1;
   transition: opacity 0.28s ease, transform 0.45s ease;
+}
+
+img.video-element,
+video.video-element {
+  object-fit: contain;
+  object-position: center center;
+  background: #000;
+}
+
+iframe.video-element {
+  display: block;
+  background: #000;
 }
 
 .video-count-overlay {

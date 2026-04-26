@@ -17,6 +17,8 @@ Ao final da execucao, o projeto deve operar como um provider de jogo live com:
 - `round engine` como fonte oficial do resultado
 - `provider API` para integracao com operadoras
 - `ops API` e backoffice para calibracao, suporte e auditoria
+- arquitetura 24/7 com supervisao, restart automatico e failover operacional
+- modelo `multi-tenant` para varias casas de aposta com isolamento logico por operador
 - persistencia de rounds, eventos, evidencias e configuracoes
 - trilha de auditoria, `void`, reprocessamento e reconciliacao
 - readiness para rollout regulado e certificacao
@@ -31,6 +33,8 @@ Premissas assumidas para este plano:
 - Supabase pode ser usado como camada operacional e administrativa
 - o backend persistido deve ser a fonte oficial do resultado
 - o video e evidencia operacional e UX, nao soberania de settlement
+- o sistema precisa nascer preparado para operacao `24/7`, com tolerancia a falhas, monitoracao e recuperacao automatica
+- a integracao com varias casas deve ser tratada como problema `multi-tenant`, nao como customizacao ad hoc por operador
 
 Principios que guiam todas as fases:
 
@@ -39,6 +43,9 @@ Principios que guiam todas as fases:
 - tratar `void` como fluxo formal
 - manter trilha de auditoria forte
 - separar operacao interna de contrato com operadora
+- tratar o backend como unica fonte soberana de round, bet, wallet, settlement e reconciliacao
+- manter `worker`, `provider API`, webhook e wallet como fluxos idempotentes
+- isolar configuracao, credenciais, politicas comerciais e rollout por `tenant`
 
 ## 3. Frentes de Trabalho
 
@@ -87,6 +94,14 @@ O plano esta organizado em seis frentes paralelas, mas com ordem de dependencia 
 - release e rollback
 - rollout por operador e camera
 
+### 3.7 Escala 24/7 e multi-tenant
+
+- supervisao de processos e auto-recuperacao
+- particionamento por camera, worker e operador
+- isolamento logico por `tenant`
+- filas, retries e `dead-letter`
+- failover operacional e reconstrucao de estado
+
 ## 4. Ordem de Execucao Recomendada
 
 Executar nesta ordem:
@@ -94,11 +109,12 @@ Executar nesta ordem:
 1. consolidar a base operacional atual
 2. formalizar o `round engine`
 3. persistir eventos e evidencias
-4. expor `provider API` e webhooks
-5. fechar contrato financeiro e reconciliacao
-6. construir backoffice operacional
-7. implementar seguranca, auditoria e compliance
-8. preparar rollout regulado e escala
+4. endurecer a plataforma para operacao `24/7`
+5. expor `provider API` e webhooks
+6. fechar contrato financeiro e reconciliacao
+7. construir backoffice operacional
+8. implementar seguranca, auditoria e compliance
+9. preparar rollout regulado, multi-tenant e escala
 
 ## 5. Fase 0 - Consolidacao da Base Atual
 
@@ -119,6 +135,8 @@ Transformar o estado atual em uma base unica e estavel para evolucao como provid
 - `vision-worker` definido como entrypoint oficial
 - `config.json` do worker contendo stream profiles e integracao operacional
 - esteira funcionando com `Carregar`, `Salvar na Esteira`, `camera_id` por preset e reaplicacao de ROI/line
+- agenda por hora com allowlist por camera, enforcement em janela segura e status exposto no `/health`
+- painel operacional local com status de stream ativa, proxima stream, agenda, rotacao e janela segura
 - rotacao randômica opcional entre rounds, desativada por padrao
 - health operacional cobrindo stream, backend, pipeline, perfil ativo e estado da rotacao
 - documentacao curta da arquitetura atual
@@ -139,6 +157,7 @@ Transformar o estado atual em uma base unica e estavel para evolucao como provid
 - confirmar abertura do worker correto
 - carregar stream salva
 - trocar perfil e validar reaplicacao de ROI/line
+- validar agenda por camera no painel local e no `/health`
 - validar que a rotacao randômica fica pendente durante round contavel e aplica apenas em janela segura
 - validar `/health`
 
@@ -147,6 +166,14 @@ Transformar o estado atual em uma base unica e estavel para evolucao como provid
 - existe um unico fluxo Python oficial
 - a esteira funciona no entrypoint real
 - configuracao operacional relevante esta consolidada
+
+Estado atual da Fase 0:
+
+- `vision-worker` esta consolidado como worker canonico e a raiz permanece como shim/legado
+- a esteira de streams ja suporta `camera_id`, ROI, line, direcao, rotacao opcional e agenda por hora por camera
+- o painel local evoluiu para um fluxo operacional mais claro, com status de agenda, rotacao e ativacao de camera
+- `/health` ja expoe stream ativa, perfil ativo, rotacao, agenda e readiness operacional da camera
+- a pendencia principal de Fase 0 deixou de ser arquitetura e passou a ser endurecimento de startup real, validacao manual e sincronizacao operacional em ambiente vivo
 
 ## 6. Fase 1 - Provider Core
 
@@ -777,6 +804,9 @@ Tasks:
 - [ ] validar sincronizacao local e remota de `stream_profiles`
 - [ ] registrar o stream atual como baseline antes de retomar evolucao do provider
 - [x] adicionar `camera_id` por preset de stream
+- [x] adicionar agenda por hora com allowlist por camera e enforcement em janela segura
+- [x] expor status de agenda, ativacao de camera e stream elegivel no `/health`
+- [x] redesenhar o painel local para operacao centrada em camera
 - [x] adicionar rotacao randômica opcional entre rounds
 - [x] expor perfil ativo e estado da rotacao no `/health` do worker
 
@@ -804,11 +834,13 @@ Status atual:
 Estado operacional de `EP01`:
 
 - consolidado parcialmente, com esteira operacional ampliada
+- a agenda por hora por camera ja existe com persistencia local, integracao operacional e enforcement entre rounds
 - o worker oficial ja esta identificado, mas ainda convive com legado na raiz
 - cada preset agora pode carregar `camera_id`, URL, ROI, line e direcao como pacote operacional
+- o painel local ja oferece leitura de stream ativa, proxima stream, agenda, rotacao e janela segura em uma UI mais enxuta
 - a rotacao randômica fica desativada por padrao e, quando ativada, sorteia outro perfil elegivel sem alterar `VideoPlayer.jsx`
-- `/health` do worker ja expoe `selectedStreamProfileId` e `streamRotation`
-- a pendencia principal de `EP01` agora e validacao manual de startup completo e sincronizacao Supabase em ambiente real
+- `/health` do worker ja expoe `selectedStreamProfileId`, `streamRotation`, `streamSchedule` e `cameraActivation`
+- a pendencia principal de `EP01` agora e validacao manual de startup completo, sincronizacao Supabase em ambiente real e fechamento das ultimas ambiguidades de legado
 
 Atualizacao de implementacao em 2026-04-17:
 
@@ -817,6 +849,13 @@ Atualizacao de implementacao em 2026-04-17:
 - o painel local do Vision recebeu campo `Camera ID`, toggle de rotacao e acao `Sortear Proxima`
 - a troca randômica fica pendente durante round contavel e so aplica em janela segura validada pelo backend
 - testes adicionados: `tests/test_stream_profiles.py`, cobrindo criacao/salvamento de preset, sorteio, pendencia por status de round e contratos de `/health` e `/pipeline/start`
+
+Atualizacao de implementacao em 2026-04-25:
+
+- o worker passou a suportar agenda por hora por camera, com allowlist por faixa, persistencia e status no `/health`
+- a UI local foi reorganizada para fluxo centrado em camera, com agenda mais legivel e quadro operacional de status
+- o contrato de ativacao de camera entre worker e backend foi endurecido com `cameraActivation`, `readyForRounds` e handshake de startup
+- o bootstrap do worker passou a notificar o backend sobre o perfil inicial, evitando ficar localmente `ready` sem rearmar o round engine
 
 ### EP02 - Persistencia do Core de Rounds
 
@@ -931,6 +970,8 @@ Criterio de aceite:
 Estado operacional de `EP04`:
 
 - o contrato worker x backend ja esta auditavel e idempotente
+- o worker e o backend agora trocam estado explicito de ativacao de camera e readiness para rounds
+- o fluxo de startup e troca de profile passou a depender de handshake real antes de liberar a camera para novos rounds
 - a integracao ainda precisa de contingencia operacional e incidente automatizado quando houver perda de integridade
 
 ### EP05 - Regras de Jogo e Mercados
@@ -1029,9 +1070,11 @@ Repositorio principal:
 Tasks:
 
 - [ ] definir endpoints `sessions`, `rounds`, `events` e `reconciliation`
+- [ ] definir autenticacao, credenciais e escopo por operador
 - [ ] padronizar payloads e erros
 - [ ] adicionar versionamento de API
 - [ ] implementar idempotencia por request
+- [ ] carregar contexto `tenant` ou operador em todo request externo
 - [ ] documentar exemplos de request e response
 - [ ] publicar contrato OpenAPI
 
@@ -1058,6 +1101,7 @@ Tasks:
 
 - [ ] modelar `webhook_deliveries`
 - [ ] implementar assinatura HMAC
+- [ ] segregar endpoint, segredo, tentativas e status por operador
 - [ ] implementar retries exponenciais
 - [ ] implementar `dead-letter queue`
 - [ ] criar reenvio manual
@@ -1089,6 +1133,7 @@ Tasks:
 - [ ] definir `settle`
 - [ ] definir `rollback`
 - [x] padronizar `transaction_id`, `game_session_id` e `round_id` na aposta v1
+- [ ] segregar limites, moeda, credenciais e reconciliacao por operador
 - [ ] definir erros financeiros
 - [ ] suportar reconciliacao diaria
 
@@ -1172,6 +1217,7 @@ Tasks:
 - [ ] abrir incidente por backend indisponivel
 - [ ] abrir incidente por drift ou contagem suspeita
 - [ ] definir alertas por camada
+- [ ] definir alertas por operador, camera e worker
 - [ ] escrever runbook de stream indisponivel
 - [ ] escrever runbook de settlement atrasado
 - [ ] escrever runbook de `void`
@@ -1304,6 +1350,41 @@ Criterio de aceite:
 
 - o produto pode ser habilitado de forma controlada por operador e ambiente
 
+### EP16 - Plataforma 24/7 e Multi-tenant
+
+Objetivo:
+
+- suportar operacao continua e integracao com varias casas de aposta sem fork operacional
+
+Prioridade:
+
+- `P2`
+
+Repositorio principal:
+
+- `vision-worker/`
+- `backend/`
+- `infra/`
+
+Tasks:
+
+- [ ] definir empacotamento do `vision-worker` como servico supervisionado
+- [ ] adicionar `heartbeat`, `last_seen`, `worker_status` e sinais de `health` por camera
+- [ ] definir estrategia de restart automatico e failover por camera
+- [ ] introduzir isolamento por `tenant` nas integracoes externas
+- [ ] segregar credenciais, webhooks, limites e moedas por operador
+- [ ] introduzir fila para entrega assincrona e `dead-letter`
+- [ ] garantir idempotencia ponta a ponta em eventos, bets e webhooks
+- [ ] criar dashboards e alertas por camera, worker e operador
+- [ ] definir rollout e feature flags por operador
+- [ ] documentar runbook de degradacao 24/7
+
+Criterio de aceite:
+
+- a plataforma opera `24/7` com supervisao minima
+- uma operadora nova pode ser integrada sem alterar soberania do core
+- falhas isoladas nao causam perda silenciosa de settlement ou entrega
+
 ## 23. Sequencia Recomendada de Ataque
 
 Se formos executar agora, a ordem mais eficiente e:
@@ -1311,33 +1392,35 @@ Se formos executar agora, a ordem mais eficiente e:
 1. validar `EP01` em startup real, incluindo esteira com `camera_id`, rotacao randômica e sincronizacao Supabase
 2. considerar `EP02` Persistencia do Core de Rounds como baseline funcional
 3. considerar `EP03` Round Engine como baseline funcional
-4. endurecer `EP04` Integracao Worker x Round Engine
+4. concluir a validacao real do handshake de ativacao de camera e endurecer `EP04` para contingencia
 5. manter o frontend consumindo o lifecycle oficial de round, e nao inferencias do stream
 6. concluir `EP06` com auditoria de tentativas bloqueadas e freeze de configuracao comercial
 7. seguir com `EP05` Regras de Jogo e Mercados
 8. seguir com `EP07` Provider API
 9. seguir com `EP08` Webhooks e Entrega Assincrona
 10. seguir com `EP09` Wallet e Contrato Financeiro
-11. evoluir `EP10` Backoffice Operacional com replay, export e acoes controladas
-12. seguir com `EP11` Incidentes, Alertas e Runbooks
-13. seguir com `EP12` Evidencias, Replay e Reprocessamento
-14. seguir com `EP13` Seguranca, RBAC e Auditoria Administrativa
-15. seguir com `EP14` LGPD, Retencao e Pacote Regulatorio
-16. seguir com `EP15` Embed, Front Comercial e Rollout
+11. abrir `EP16` Plataforma 24/7 e Multi-tenant em paralelo ao contrato externo
+12. evoluir `EP10` Backoffice Operacional com replay, export e acoes controladas
+13. seguir com `EP11` Incidentes, Alertas e Runbooks
+14. seguir com `EP12` Evidencias, Replay e Reprocessamento
+15. seguir com `EP13` Seguranca, RBAC e Auditoria Administrativa
+16. seguir com `EP14` LGPD, Retencao e Pacote Regulatorio
+17. seguir com `EP15` Embed, Front Comercial e Rollout
 
 ## 24. Proxima Sprint Recomendada
 
 Sprint tecnica inicial sugerida:
 
 - fechar `EP06` Freeze Operacional por Round
-- endurecer contingencia de `EP04` quando backend ficar indisponivel
+- endurecer contingencia de `EP04` quando backend ficar indisponivel ou perder o handshake de ativacao
 - abrir a base de `EP11` para incidentes, alertas e runbooks
 - evoluir `EP10` com export minimo de evidencias e acoes operacionais futuras
-- preparar `EP07` e `EP08` sem reabrir mudanca estrutural no stream
+- preparar `EP07`, `EP08` e `EP16` sem reabrir mudanca estrutural no stream
 
 Resultado esperado da primeira sprint:
 
 - o round deixa de aceitar contaminacao operacional durante sua janela oficial
 - worker e backend passam a ter comportamento mais previsivel em contingencia
 - operacao ganha base para tratar incidente sem banco e sem depender do stream
-- a plataforma fica pronta para abrir contrato externo e camada de evidencias com menos risco
+- a plataforma fica pronta para abrir contrato externo, escala 24/7 e camada de evidencias com menos risco
+

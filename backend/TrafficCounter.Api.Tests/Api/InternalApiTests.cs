@@ -1353,6 +1353,49 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
+    public async Task NotifyStreamProfileActivated_ready_phase_rearms_same_profile_when_camera_was_inactive()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            db.CameraRoundStates.Add(new CameraRoundState
+            {
+                CameraId = "cam_same_profile_ready",
+                ActiveStreamProfileId = "profile-same-ready",
+                ActivationPhase = "inactive",
+                ReadyForRounds = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_same_profile_ready",
+            "profile-same-ready",
+            allowSettling: true,
+            autoSwitchRound: false,
+            phase: "ready");
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var stateReady = await db.CameraRoundStates.SingleAsync(item => item.CameraId == "cam_same_profile_ready");
+            var activeRound = await db.Rounds
+                .Where(r => r.CameraId == "cam_same_profile_ready")
+                .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing || r.Status == RoundStatus.Settling)
+                .SingleAsync();
+
+            Assert.Equal("ready", stateReady.ActivationPhase);
+            Assert.True(stateReady.ReadyForRounds);
+            Assert.Equal("profile-same-ready", stateReady.ActiveStreamProfileId);
+            Assert.Equal(RoundStatus.Open, activeRound.Status);
+        }
+    }
+
+    [Fact]
     public async Task CreateBet_accepts_market_purchase_for_open_round()
     {
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_create");
