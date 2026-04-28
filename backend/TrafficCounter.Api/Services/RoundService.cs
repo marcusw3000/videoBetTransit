@@ -231,6 +231,8 @@ public class RoundService
             SnapshotUrl = string.IsNullOrWhiteSpace(dto.SnapshotUrl) ? null : dto.SnapshotUrl.Trim(),
             Source = string.IsNullOrWhiteSpace(dto.Source) ? "vision_worker_round_count" : dto.Source.Trim(),
             StreamProfileId = string.IsNullOrWhiteSpace(dto.StreamProfileId) ? null : dto.StreamProfileId.Trim(),
+            CountMethod = string.IsNullOrWhiteSpace(dto.CountMethod) ? null : dto.CountMethod.Trim(),
+            FallbackBandPx = dto.FallbackBandPx,
             CountBefore = dto.CountBefore ?? officialCountBefore,
             CountAfter = dto.CountAfter ?? officialCountAfter,
             PreviousEventHash = string.IsNullOrWhiteSpace(dto.PreviousEventHash) ? null : dto.PreviousEventHash.Trim(),

@@ -111,6 +111,8 @@ class StreamProfileStoreTests(unittest.TestCase):
         self.assertEqual(DEFAULT_ROI, profile["roi"])
         self.assertEqual(DEFAULT_LINE, profile["line"])
         self.assertEqual("any", profile["count_direction"])
+        self.assertFalse(profile["secondary_verification_enabled"])
+        self.assertEqual(18, profile["secondary_verification_band_px"])
         self.assertEqual("cam_b", cfg["camera_id"])
         self.assertEqual(profile["id"], cfg["selected_stream_profile_id"])
 
@@ -125,6 +127,8 @@ class StreamProfileStoreTests(unittest.TestCase):
             roi={"x": 5, "y": 6, "w": 70, "h": 40},
             line={"x1": 7, "y1": 8, "x2": 90, "y2": 91},
             count_direction="up",
+            secondary_verification_enabled=True,
+            secondary_verification_band_px=24,
         )
 
         self.assertEqual("cam_a_adjusted", profile["camera_id"])
@@ -132,6 +136,8 @@ class StreamProfileStoreTests(unittest.TestCase):
         self.assertEqual({"x": 5, "y": 6, "w": 70, "h": 40}, profile["roi"])
         self.assertEqual({"x1": 7, "y1": 8, "x2": 90, "y2": 91}, profile["line"])
         self.assertEqual("up", profile["count_direction"])
+        self.assertTrue(profile["secondary_verification_enabled"])
+        self.assertEqual(24, profile["secondary_verification_band_px"])
         self.assertEqual("cam_a_adjusted", cfg["camera_id"])
 
     def test_save_selected_profile_accepts_horizontal_count_direction(self):
@@ -180,6 +186,8 @@ class StreamProfileStoreTests(unittest.TestCase):
         self.assertEqual(DEFAULT_ROI, profile["roi"])
         self.assertEqual(DEFAULT_LINE, profile["line"])
         self.assertEqual("any", profile["count_direction"])
+        self.assertFalse(profile["secondary_verification_enabled"])
+        self.assertEqual(18, profile["secondary_verification_band_px"])
         self.assertEqual("profile-a", cfg["selected_stream_profile_id"])
         self.assertEqual("cam_a", cfg["camera_id"])
 
@@ -210,6 +218,8 @@ class StreamProfileStoreTests(unittest.TestCase):
         self.assertEqual(saved["roi"], profile["roi"])
         self.assertEqual(saved["line"], profile["line"])
         self.assertEqual("right", profile["count_direction"])
+        self.assertEqual(saved["secondary_verification_enabled"], profile["secondary_verification_enabled"])
+        self.assertEqual(saved["secondary_verification_band_px"], profile["secondary_verification_band_px"])
         self.assertEqual("profile-a", cfg["selected_stream_profile_id"])
 
     def test_normalize_config_adds_disabled_stream_rotation_defaults(self):
@@ -229,6 +239,8 @@ class StreamProfileStoreTests(unittest.TestCase):
             },
             cfg["stream_rotation"],
         )
+        self.assertFalse(cfg["secondary_verification_enabled"])
+        self.assertEqual(18, cfg["secondary_verification_band_px"])
 
     def test_list_profiles_preserves_multiple_saved_streams(self):
         cfg = make_cfg()
@@ -243,6 +255,8 @@ class StreamProfileStoreTests(unittest.TestCase):
             ["rtsp://camera-a/live", "rtsp://camera-b/live"],
             [profile["stream_url"] for profile in profiles],
         )
+        self.assertIn("secondary_verification_enabled", profiles[0])
+        self.assertIn("secondary_verification_band_px", profiles[0])
 
     def test_format_stream_profile_table_row_includes_name_camera_id_and_url(self):
         profile = {
@@ -818,6 +832,39 @@ class SupabaseSyncTests(unittest.TestCase):
             "not.in.(rush)",
             fake_session.deletes[0]["params"]["id"],
         )
+
+    def test_profile_round_trip_includes_secondary_verification_fields(self):
+        sync = SupabaseStreamProfileSync(
+            url="https://example.supabase.co",
+            service_key="service-role",
+            table="stream_profiles",
+            schedule_table="stream_schedule_rules",
+            scope="videoBetTransit",
+        )
+        fake_session = _FakeSession()
+        sync._session = fake_session
+        fake_session.get_payloads["https://example.supabase.co/rest/v1/stream_profiles"] = [
+            {
+                "id": "profile-a",
+                "name": "Camera A",
+                "stream_url": "rtsp://camera-a/live",
+                "camera_id": "cam_a",
+                "roi": {"x": 1, "y": 2, "w": 3, "h": 4},
+                "line": {"x1": 10, "y1": 20, "x2": 30, "y2": 40},
+                "count_direction": "down",
+                "secondary_verification_enabled": True,
+                "secondary_verification_band_px": 22,
+                "is_selected": True,
+            }
+        ]
+
+        profiles, selected_profile_id = sync.fetch_profiles()
+        sync.upsert_profiles(profiles, selected_profile_id)
+
+        self.assertTrue(profiles[0]["secondary_verification_enabled"])
+        self.assertEqual(22, profiles[0]["secondary_verification_band_px"])
+        self.assertTrue(fake_session.posts[0]["json"][0]["secondary_verification_enabled"])
+        self.assertEqual(22, fake_session.posts[0]["json"][0]["secondary_verification_band_px"])
 
 
 if __name__ == "__main__":

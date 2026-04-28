@@ -103,6 +103,12 @@ export default function RoundTimeline({
                     {item.countBefore != null && item.countAfter != null && (
                       <span>Count: {item.countBefore} {'->'} {item.countAfter}</span>
                     )}
+                    {item.countMethod && (
+                      <span>
+                        Metodo: {item.countMethod === 'fallback' ? 'fallback' : 'primary'}
+                        {item.countMethod === 'fallback' && item.fallbackBandPx != null ? ` (${item.fallbackBandPx}px)` : ''}
+                      </span>
+                    )}
                     <span>Direcao: {item.direction || '--'}</span>
                     {item.lineId && <span>Linha: {item.lineId}</span>}
                     {item.streamProfileId && <span>Perfil: {item.streamProfileId}</span>}

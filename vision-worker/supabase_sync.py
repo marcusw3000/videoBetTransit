@@ -68,7 +68,7 @@ class SupabaseStreamProfileSync:
             self._table_url(self.table),
             headers=self._headers(),
             params={
-                "select": "id,name,stream_url,camera_id,roi,line,count_direction,is_selected,updated_at",
+                "select": "id,name,stream_url,camera_id,roi,line,count_direction,secondary_verification_enabled,secondary_verification_band_px,is_selected,updated_at",
                 "scope": f"eq.{self.scope}",
                 "order": "updated_at.desc.nullslast,id.asc",
             },
@@ -88,6 +88,8 @@ class SupabaseStreamProfileSync:
                 "roi": row.get("roi") if isinstance(row.get("roi"), dict) else {},
                 "line": row.get("line") if isinstance(row.get("line"), dict) else {},
                 "count_direction": str(row.get("count_direction") or "any").strip(),
+                "secondary_verification_enabled": bool(row.get("secondary_verification_enabled", False)),
+                "secondary_verification_band_px": int(row.get("secondary_verification_band_px") or 18),
             }
             if not profile["id"] or not profile["stream_url"]:
                 continue
@@ -116,6 +118,8 @@ class SupabaseStreamProfileSync:
                     "roi": profile.get("roi") if isinstance(profile.get("roi"), dict) else {},
                     "line": profile.get("line") if isinstance(profile.get("line"), dict) else {},
                     "count_direction": str(profile.get("count_direction") or "any").strip(),
+                    "secondary_verification_enabled": bool(profile.get("secondary_verification_enabled", False)),
+                    "secondary_verification_band_px": int(profile.get("secondary_verification_band_px") or 18),
                     "is_selected": profile_id == selected_profile_id,
                 }
             )

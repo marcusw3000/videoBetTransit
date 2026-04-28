@@ -53,6 +53,12 @@ export default function CrossingEventsCard({
               </div>
               <div className="crossing-event-meta">
                 <span>Count: {event.countBefore ?? '--'} {'->'} {event.countAfter ?? '--'}</span>
+                {event.countMethod && (
+                  <span>
+                    Metodo: {event.countMethod === 'fallback' ? 'fallback' : 'primary'}
+                    {event.countMethod === 'fallback' && event.fallbackBandPx != null ? ` (${event.fallbackBandPx}px)` : ''}
+                  </span>
+                )}
                 <span>Direcao: {event.direction || '--'}</span>
                 <span>Linha: {event.lineId || '--'}</span>
                 {event.streamProfileId && <span>Perfil: {event.streamProfileId}</span>}

@@ -351,6 +351,8 @@ class BackendClient:
                 ),
                 "snapshotUrl": payload.get("snapshotUrl", ""),
                 "source": payload.get("source", "vision_worker_round_count"),
+                "countMethod": payload.get("countMethod", ""),
+                "fallbackBandPx": payload.get("fallbackBandPx"),
                 "previousEventHash": payload.get("previousEventHash", ""),
                 "eventHash": payload.get("eventHash", ""),
                 "countBefore": payload.get("countBefore"),
@@ -400,6 +402,8 @@ class BackendClient:
             "lineId": self.line_id,
             "confidence": confidence,
             "frameNumber": frame_number,
+            "countMethod": payload.get("countMethod", ""),
+            "fallbackBandPx": payload.get("fallbackBandPx"),
             "previousEventHash": self._previous_event_hash,
             "eventHash": event_hash,
         }

@@ -17,6 +17,8 @@ public class RoundCountEventDto
     public DateTime CrossedAt { get; set; }
     public string? SnapshotUrl { get; set; }
     public string? Source { get; set; }
+    public string? CountMethod { get; set; }
+    public int? FallbackBandPx { get; set; }
     public string? PreviousEventHash { get; set; }
     public string? EventHash { get; set; }
     public int? CountBefore { get; set; }

@@ -110,6 +110,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             TrackId = "42",
             VehicleType = "car",
             CrossedAt = DateTime.UtcNow,
+            CountMethod = "fallback",
+            FallbackBandPx = 18,
             TotalCount = 1,
         };
 
@@ -126,6 +128,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.Equal(Guid.Parse(round.RoundId), events[0].RoundId);
         Assert.Equal(42, events[0].TrackId);
         Assert.Equal("car", events[0].ObjectClass);
+        Assert.Equal("fallback", events[0].CountMethod);
+        Assert.Equal(18, events[0].FallbackBandPx);
     }
 
     [Fact]
@@ -1179,6 +1183,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             VehicleType = "car",
             CrossedAt = DateTime.UtcNow,
             SnapshotUrl = "snapshots/timeline.jpg",
+            CountMethod = "primary",
             TotalCount = 1,
         };
 
@@ -1192,7 +1197,12 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         Assert.NotNull(timeline);
         Assert.Contains(timeline!, item => item.Kind == "round_event" && item.EventType == "opened");
-        Assert.Contains(timeline!, item => item.Kind == "crossing_event" && item.TrackId == 21 && item.SnapshotUrl == "snapshots/timeline.jpg");
+        Assert.Contains(
+            timeline!,
+            item => item.Kind == "crossing_event"
+                && item.TrackId == 21
+                && item.SnapshotUrl == "snapshots/timeline.jpg"
+                && item.CountMethod == "primary");
     }
 
     [Fact]

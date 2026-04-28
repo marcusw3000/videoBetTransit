@@ -10,6 +10,8 @@ public class CrossingEventInboundDto
     public string LineId { get; set; } = string.Empty;
     public double Confidence { get; set; }
     public long FrameNumber { get; set; }
+    public string? CountMethod { get; set; }
+    public int? FallbackBandPx { get; set; }
     public string? PreviousEventHash { get; set; }
     public string EventHash { get; set; } = string.Empty;
 }

@@ -1052,6 +1052,10 @@ DEFAULT_STREAM_SCHEDULE = {
     "outside_window_behavior": "allow_all",
     "rules": [],
 }
+DEFAULT_SECONDARY_VERIFICATION_ENABLED = False
+DEFAULT_SECONDARY_VERIFICATION_BAND_PX = 18
+SECONDARY_VERIFICATION_MIN_BAND_FRAMES = 2
+SECONDARY_VERIFICATION_MIN_PROGRESS_PX = 6
 STREAM_ROTATION_SAFE_STATUSES = {"settling", "settled", "void"}
 STREAM_ROTATION_DEFER_STATUSES = {"open", "closing"}
 
@@ -1095,6 +1099,25 @@ def normalize_count_direction(value) -> str:
     if direction in {"up", "down", "left", "right", "any"}:
         return direction
     return "any"
+
+
+def normalize_secondary_verification_enabled(value) -> bool:
+    if isinstance(value, str):
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "sim"}
+    return bool(value)
+
+
+def normalize_secondary_verification_band_px(value, fallback: int | None = None) -> int:
+    base = (
+        DEFAULT_SECONDARY_VERIFICATION_BAND_PX
+        if fallback is None
+        else int(fallback or DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+    )
+    try:
+        band_px = int(value if value is not None else base)
+    except (TypeError, ValueError):
+        band_px = base
+    return max(4, min(120, band_px))
 
 
 def normalize_schedule_timezone(value) -> str:
@@ -1618,6 +1641,17 @@ def build_stream_profile(source: dict | None, fallback_cfg: dict, *, index: int)
         "count_direction": normalize_count_direction(
             source.get("count_direction") or fallback_cfg.get("count_direction", "any")
         ),
+        "secondary_verification_enabled": normalize_secondary_verification_enabled(
+            source.get("secondary_verification_enabled")
+            if "secondary_verification_enabled" in source
+            else fallback_cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+        ),
+        "secondary_verification_band_px": normalize_secondary_verification_band_px(
+            source.get("secondary_verification_band_px")
+            if "secondary_verification_band_px" in source
+            else fallback_cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
+            fallback=int(fallback_cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
+        ),
     }
     if not profile["name"]:
         profile["name"] = guess_stream_profile_name(stream_url, camera_id, index=index)
@@ -1630,6 +1664,17 @@ def sync_config_with_selected_profile(cfg: dict, profile: dict) -> dict:
     profile["count_direction"] = normalize_count_direction(
         profile.get("count_direction") or cfg.get("count_direction", "any")
     )
+    profile["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
+        profile.get("secondary_verification_enabled")
+        if "secondary_verification_enabled" in profile
+        else cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+    )
+    profile["secondary_verification_band_px"] = normalize_secondary_verification_band_px(
+        profile.get("secondary_verification_band_px")
+        if "secondary_verification_band_px" in profile
+        else cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
+        fallback=int(cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
+    )
     profile["camera_id"] = str(profile.get("camera_id") or cfg.get("camera_id", "")).strip()
     profile["stream_url"] = validate_stream_url(profile.get("stream_url") or "")
     if not profile["name"]:
@@ -1641,11 +1686,19 @@ def sync_config_with_selected_profile(cfg: dict, profile: dict) -> dict:
     cfg["roi"] = dict(profile["roi"])
     cfg["line"] = dict(profile["line"])
     cfg["count_direction"] = profile["count_direction"]
+    cfg["secondary_verification_enabled"] = bool(profile["secondary_verification_enabled"])
+    cfg["secondary_verification_band_px"] = int(profile["secondary_verification_band_px"])
     return profile
 
 
 def normalize_config(cfg: dict | None) -> dict:
     cfg = dict(cfg or {})
+    cfg["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
+        cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+    )
+    cfg["secondary_verification_band_px"] = normalize_secondary_verification_band_px(
+        cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+    )
     cfg["stream_rotation"] = normalize_stream_rotation_config(cfg.get("stream_rotation"))
     raw_profiles = cfg.get("stream_profiles")
     profiles = []
@@ -1892,6 +1945,8 @@ class StreamProfileStore:
         roi: dict | None = None,
         line: dict | None = None,
         count_direction: str | None = None,
+        secondary_verification_enabled: bool | None = None,
+        secondary_verification_band_px: int | None = None,
     ) -> dict:
         current = get_selected_stream_profile(self.cfg)
         target_url = validate_stream_url(stream_url or current.get("stream_url") or "")
@@ -1920,6 +1975,12 @@ class StreamProfileStore:
                     "roi": dict(self.cfg.get("roi") or DEFAULT_ROI),
                     "line": dict(self.cfg.get("line") or DEFAULT_LINE),
                     "count_direction": self.cfg.get("count_direction", "any"),
+                    "secondary_verification_enabled": normalize_secondary_verification_enabled(
+                        self.cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+                    ),
+                    "secondary_verification_band_px": normalize_secondary_verification_band_px(
+                        self.cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+                    ),
                 }
                 self.cfg.setdefault("stream_profiles", []).append(current)
 
@@ -1933,6 +1994,15 @@ class StreamProfileStore:
             current["line"] = normalize_line_config(line, current.get("line"))
         if count_direction is not None:
             current["count_direction"] = normalize_count_direction(count_direction)
+        if secondary_verification_enabled is not None:
+            current["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
+                secondary_verification_enabled
+            )
+        if secondary_verification_band_px is not None:
+            current["secondary_verification_band_px"] = normalize_secondary_verification_band_px(
+                secondary_verification_band_px,
+                fallback=int(current.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
+            )
 
         return dict(sync_config_with_selected_profile(self.cfg, current))
 
@@ -1969,6 +2039,8 @@ class StreamProfileStore:
                 "roi": dict(DEFAULT_ROI),
                 "line": dict(DEFAULT_LINE),
                 "count_direction": "any",
+                "secondary_verification_enabled": DEFAULT_SECONDARY_VERIFICATION_ENABLED,
+                "secondary_verification_band_px": DEFAULT_SECONDARY_VERIFICATION_BAND_PX,
             }
             self.cfg.setdefault("stream_profiles", []).append(current)
 
@@ -2017,6 +2089,8 @@ class StreamProfileStore:
             "roi": dict(DEFAULT_ROI),
             "line": dict(DEFAULT_LINE),
             "count_direction": "any",
+            "secondary_verification_enabled": DEFAULT_SECONDARY_VERIFICATION_ENABLED,
+            "secondary_verification_band_px": DEFAULT_SECONDARY_VERIFICATION_BAND_PX,
         }
         self.cfg.setdefault("stream_profiles", []).append(profile)
         return dict(sync_config_with_selected_profile(self.cfg, profile)), True
@@ -2459,6 +2533,133 @@ def crossed_vertical_segment(
 
 def count_line_is_horizontal(line: dict) -> bool:
     return abs(int(line["x2"]) - int(line["x1"])) >= abs(int(line["y2"]) - int(line["y1"]))
+
+
+def line_geometry_metrics(point: tuple[int, int], line: dict) -> dict:
+    px, py = point
+    x1 = float(line["x1"])
+    y1 = float(line["y1"])
+    x2 = float(line["x2"])
+    y2 = float(line["y2"])
+    dx = x2 - x1
+    dy = y2 - y1
+    length = float(np.hypot(dx, dy))
+    if length < 1.0:
+        return {
+            "length": 0.0,
+            "projection": 0.0,
+            "signed_distance": 0.0,
+        }
+
+    tx = dx / length
+    ty = dy / length
+    nx = -dy / length
+    ny = dx / length
+    rel_x = float(px) - x1
+    rel_y = float(py) - y1
+    return {
+        "length": length,
+        "projection": rel_x * tx + rel_y * ty,
+        "signed_distance": rel_x * nx + rel_y * ny,
+    }
+
+
+def point_inside_line_band(point: tuple[int, int], line: dict, band_px: int) -> bool:
+    metrics = line_geometry_metrics(point, line)
+    length = float(metrics["length"])
+    if length < 1.0:
+        return False
+    band = float(normalize_secondary_verification_band_px(band_px))
+    projection = float(metrics["projection"])
+    return (
+        -band <= projection <= length + band
+        and abs(float(metrics["signed_distance"])) <= band
+    )
+
+
+def movement_delta_for_direction(
+    prev_position: tuple[int, int],
+    curr_position: tuple[int, int],
+    line: dict,
+) -> int:
+    prev_x, prev_y = prev_position
+    curr_x, curr_y = curr_position
+    if count_line_is_horizontal(line):
+        return int(curr_y - prev_y)
+    return int(curr_x - prev_x)
+
+
+def movement_matches_direction(delta: int, direction: str) -> bool:
+    normalized = normalize_count_direction(direction)
+    if normalized == "down":
+        return delta > 0
+    if normalized == "up":
+        return delta < 0
+    if normalized == "right":
+        return delta > 0
+    if normalized == "left":
+        return delta < 0
+    return delta != 0
+
+
+def should_count_track_fallback(
+    prev_position: tuple[int, int] | None,
+    curr_position: tuple[int, int],
+    line: dict,
+    direction: str,
+    hits: int,
+    min_hits_to_count: int,
+    already_counted: bool,
+    band_px: int,
+    state: dict | None,
+) -> bool:
+    if prev_position is None or already_counted or hits < min_hits_to_count:
+        return False
+
+    state = state if isinstance(state, dict) else {}
+    band = normalize_secondary_verification_band_px(band_px)
+    prev_in_band = point_inside_line_band(prev_position, line, band)
+    curr_in_band = point_inside_line_band(curr_position, line, band)
+    delta = movement_delta_for_direction(prev_position, curr_position, line)
+    progress_px = abs(delta)
+
+    if not curr_in_band:
+        return False
+    if progress_px < SECONDARY_VERIFICATION_MIN_PROGRESS_PX:
+        return False
+    if not movement_matches_direction(delta, direction):
+        return False
+
+    current_metrics = line_geometry_metrics(curr_position, line)
+    best_distance = state.get("bestDistanceToLine")
+    current_distance = abs(float(current_metrics["signed_distance"]))
+    if best_distance is None:
+        best_distance = current_distance
+    else:
+        best_distance = min(float(best_distance), current_distance)
+
+    prior_direction_sign = int(state.get("fallbackDirectionSign") or 0)
+    current_direction_sign = 1 if delta > 0 else -1
+    if prior_direction_sign and current_direction_sign != prior_direction_sign:
+        return False
+
+    if not bool(state.get("enteredFallbackBand")):
+        eligible_frames = 1 if prev_in_band or curr_in_band else 0
+        state["fallbackProgressPx"] = float(progress_px)
+    else:
+        eligible_frames = int(state.get("fallbackEligibleFrames") or 0) + 1
+        state["fallbackProgressPx"] = float(state.get("fallbackProgressPx") or 0.0) + float(progress_px)
+
+    state["enteredFallbackBand"] = True
+    state["bestDistanceToLine"] = best_distance
+    state["fallbackDirectionSign"] = current_direction_sign
+    state["fallbackEligibleFrames"] = eligible_frames
+
+    return (
+        eligible_frames >= SECONDARY_VERIFICATION_MIN_BAND_FRAMES
+        and float(state.get("fallbackProgressPx") or 0.0) >= (SECONDARY_VERIFICATION_MIN_PROGRESS_PX * 2)
+        and best_distance <= (band * 0.55)
+    )
 
 
 def should_count_track(
@@ -3065,6 +3266,12 @@ class EditorControlPanel:
         self._stream_camera_id_var = tk.StringVar()
         self._stream_url_var = tk.StringVar()
         self._count_direction_var = tk.StringVar(value=count_direction_display_name("any"))
+        self._secondary_verification_enabled_var = tk.BooleanVar(
+            value=bool(DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+        )
+        self._secondary_verification_band_var = tk.IntVar(
+            value=int(DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+        )
         self._stream_rotation_enabled_var = tk.BooleanVar(value=bool(stream_rotation_enabled))
         schedule = self.schedule_store.get_schedule()
         self._schedule_name_var = tk.StringVar()
@@ -3371,10 +3578,13 @@ class EditorControlPanel:
     def save_stream_profile(self):
         try:
             self._commit_count_direction()
+            secondary_enabled, secondary_band_px = self._get_secondary_verification_settings()
             profile = self.on_save_stream_profile(
                 self._stream_name_var.get(),
                 self._stream_url_var.get(),
                 self._stream_camera_id_var.get(),
+                secondary_enabled,
+                secondary_band_px,
             )
         except (ValueError, RuntimeError) as exc:
             self.editor.message = str(exc)
@@ -3918,6 +4128,12 @@ class CompactEditorControlPanel:
         self._stream_camera_id_var = tk.StringVar()
         self._stream_url_var = tk.StringVar()
         self._count_direction_var = tk.StringVar(value=count_direction_display_name("any"))
+        self._secondary_verification_enabled_var = tk.BooleanVar(
+            value=bool(DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+        )
+        self._secondary_verification_band_var = tk.IntVar(
+            value=int(DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+        )
         self._stream_rotation_enabled_var = tk.BooleanVar(value=bool(stream_rotation_enabled))
 
         schedule = self.schedule_store.get_schedule()
@@ -4194,20 +4410,36 @@ class CompactEditorControlPanel:
         )
         self._count_direction_selector.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         self._count_direction_selector.bind("<<ComboboxSelected>>", self._handle_direction_change)
+        ttk.Checkbutton(
+            frame,
+            text="Ativar dupla verificacao da markline",
+            variable=self._secondary_verification_enabled_var,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        ttk.Label(frame, text="Faixa secundaria (px)").grid(row=3, column=0, sticky="w")
+        self._secondary_verification_band_spinbox = ttk.Spinbox(
+            frame,
+            from_=4,
+            to=120,
+            textvariable=self._secondary_verification_band_var,
+            increment=1,
+            width=10,
+            command=self._normalize_secondary_verification_band_value,
+        )
+        self._secondary_verification_band_spinbox.grid(row=3, column=1, sticky="ew", pady=(0, 8))
         ttk.Button(frame, text="Editar ROI", command=self.editor.begin_roi_mode).grid(
-            row=2, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=4, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Editar Linha", command=self.editor.begin_line_mode).grid(
-            row=2, column=1, sticky="ew", pady=(0, 6)
+            row=4, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Salvar calibracao", command=self.save).grid(
-            row=3, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+            row=5, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
         )
         ttk.Button(frame, text="Cancelar", command=self.cancel).grid(
-            row=3, column=1, sticky="ew", pady=(0, 6)
+            row=5, column=1, sticky="ew", pady=(0, 6)
         )
         ttk.Button(frame, text="Resetar Stream", command=self.reset_stream).grid(
-            row=4, column=0, columnspan=2, sticky="ew"
+            row=6, column=0, columnspan=2, sticky="ew"
         )
 
     def _build_footer(self, root_frame: ttk.Frame):
@@ -4639,7 +4871,29 @@ class CompactEditorControlPanel:
         self._stream_camera_id_var.set(str(profile.get("camera_id") or ""))
         self._stream_url_var.set(str(profile.get("stream_url") or ""))
         self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
+        self._secondary_verification_enabled_var.set(
+            bool(profile.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED))
+        )
+        self._secondary_verification_band_var.set(
+            int(profile.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+        )
+        self._normalize_secondary_verification_band_value()
         self._update_stream_summary()
+
+    def _normalize_secondary_verification_band_value(self):
+        self._secondary_verification_band_var.set(
+            normalize_secondary_verification_band_px(
+                self._secondary_verification_band_var.get(),
+                fallback=DEFAULT_SECONDARY_VERIFICATION_BAND_PX,
+            )
+        )
+
+    def _get_secondary_verification_settings(self) -> tuple[bool, int]:
+        self._normalize_secondary_verification_band_value()
+        return (
+            bool(self._secondary_verification_enabled_var.get()),
+            int(self._secondary_verification_band_var.get()),
+        )
 
     def _handle_schedule_form_change(self):
         if not self._programmatic_schedule_form_update:
@@ -4718,6 +4972,14 @@ class CompactEditorControlPanel:
                         [
                             f"{format_stream_profile_label(profile)}",
                             f"Direcao: {count_direction_display_name(str(profile.get('count_direction') or 'any'))}",
+                            (
+                                "Dupla verificacao: "
+                                + (
+                                    f"ligada ({int(profile.get('secondary_verification_band_px', DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX)} px)"
+                                    if bool(profile.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED))
+                                    else "desligada"
+                                )
+                            ),
                             shorten_text(str(profile.get("stream_url") or ""), max_len=78),
                         ]
                     )
@@ -5187,6 +5449,7 @@ def main():
     last_positions: dict[int, tuple[int, int]] = {}
     last_seen: dict[int, int] = {}
     track_hits: dict[int, int] = {}
+    fallback_states: dict[int, dict] = {}
     counted_ids: set[int] = set()
 
     total = 0
@@ -5200,6 +5463,12 @@ def main():
     roi = cfg["roi"]
     line = cfg["line"]
     count_direction = cfg["count_direction"]
+    secondary_verification_enabled = normalize_secondary_verification_enabled(
+        cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+    )
+    secondary_verification_band_px = normalize_secondary_verification_band_px(
+        cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+    )
     min_hits_to_count = int(cfg.get("min_hits_to_count", 4))
     max_track_history_age = int(cfg.get("max_track_history_age", 300))
     min_bbox_area = int(cfg.get("min_bbox_area", 100))
@@ -5273,6 +5542,7 @@ def main():
         last_positions.clear()
         last_seen.clear()
         track_hits.clear()
+        fallback_states.clear()
         counted_ids.clear()
 
     def publish_rotation_status(message: str = ""):
@@ -5569,20 +5839,29 @@ def main():
         maybe_schedule_stream_rotation(backend_round)
 
     def save_editor_state():
-        nonlocal roi, line
+        nonlocal roi, line, secondary_verification_enabled, secondary_verification_band_px
 
         if editor is None:
             return
+
+        next_secondary_enabled = secondary_verification_enabled
+        next_secondary_band_px = secondary_verification_band_px
+        if control_panel is not None:
+            next_secondary_enabled, next_secondary_band_px = control_panel._get_secondary_verification_settings()
 
         stream_store.save_selected_profile(
             roi=editor.roi,
             line=editor.line,
             count_direction=count_direction,
+            secondary_verification_enabled=next_secondary_enabled,
+            secondary_verification_band_px=next_secondary_band_px,
         )
         editor.save(cfg, config_path)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
         roi = dict(editor.roi)
         line = dict(editor.line)
+        secondary_verification_enabled = next_secondary_enabled
+        secondary_verification_band_px = next_secondary_band_px
         if control_panel is not None:
             control_panel.set_active_stream_profile(stream_store.get_selected_profile())
 
@@ -5601,11 +5880,18 @@ def main():
 
     def queue_stream_profile(profile: dict, *, message: str):
         nonlocal pending_stream_profile, roi, line, count_direction
+        nonlocal secondary_verification_enabled, secondary_verification_band_px
 
         pending_stream_profile = dict(profile)
         roi = dict(profile["roi"])
         line = dict(profile["line"])
         count_direction = profile["count_direction"]
+        secondary_verification_enabled = normalize_secondary_verification_enabled(
+            profile.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+        )
+        secondary_verification_band_px = normalize_secondary_verification_band_px(
+            profile.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+        )
 
         if editor is not None:
             editor.load_values(roi, line, message=message)
@@ -5792,7 +6078,13 @@ def main():
         )
         return profile
 
-    def save_stream_profile(stream_name: str, stream_url: str, camera_id: str) -> dict:
+    def save_stream_profile(
+        stream_name: str,
+        stream_url: str,
+        camera_id: str,
+        secondary_enabled: bool | None = None,
+        secondary_band_px: int | None = None,
+    ) -> dict:
         unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "salvar stream profile")
         if not unlocked:
             target_url = stream_url or cfg.get("stream_url", "")
@@ -5831,6 +6123,8 @@ def main():
             roi=editor.roi if editor is not None else roi,
             line=editor.line if editor is not None else line,
             count_direction=count_direction,
+            secondary_verification_enabled=secondary_enabled,
+            secondary_verification_band_px=secondary_band_px,
         )
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
@@ -6165,9 +6459,17 @@ def main():
             cfg["roi"] = dict(profile["roi"])
             cfg["line"] = dict(profile["line"])
             cfg["count_direction"] = profile["count_direction"]
+            cfg["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
+                profile.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+            )
+            cfg["secondary_verification_band_px"] = normalize_secondary_verification_band_px(
+                profile.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+            )
             roi = dict(profile["roi"])
             line = dict(profile["line"])
             count_direction = profile["count_direction"]
+            secondary_verification_enabled = cfg["secondary_verification_enabled"]
+            secondary_verification_band_px = cfg["secondary_verification_band_px"]
             try:
                 current_pipeline_cfg = build_pipeline_config(cfg)
                 pipeline_runtime.start(current_pipeline_cfg)
@@ -6422,12 +6724,13 @@ def main():
                 is_inside = inside_roi(cx, cy, roi)
                 is_counted = track_id in counted_ids
                 did_cross = False
+                count_reason = ""
 
                 if is_inside and inference_is_fresh:
                     last_seen[track_id] = frame_count
 
                     prev = last_positions.get(track_id)
-                    if should_count_track(
+                    primary_cross = should_count_track(
                         prev_position=prev,
                         curr_position=(cx, cy),
                         line=line,
@@ -6435,7 +6738,38 @@ def main():
                         hits=track_hits.get(track_id, 0),
                         min_hits_to_count=min_hits_to_count,
                         already_counted=track_id in counted_ids,
+                    )
+                    fallback_state = fallback_states.setdefault(
+                        track_id,
+                        {
+                            "enteredFallbackBand": False,
+                            "bestDistanceToLine": None,
+                            "fallbackDirectionSign": 0,
+                            "fallbackEligibleFrames": 0,
+                            "fallbackProgressPx": 0.0,
+                            "countReason": "",
+                        },
+                    )
+                    fallback_cross = False
+                    if (
+                        not primary_cross
+                        and secondary_verification_enabled
                     ):
+                        fallback_cross = should_count_track_fallback(
+                            prev_position=prev,
+                            curr_position=(cx, cy),
+                            line=line,
+                            direction=count_direction,
+                            hits=track_hits.get(track_id, 0),
+                            min_hits_to_count=min_hits_to_count,
+                            already_counted=track_id in counted_ids,
+                            band_px=secondary_verification_band_px,
+                            state=fallback_state,
+                        )
+
+                    if primary_cross or fallback_cross:
+                        count_reason = "primary" if primary_cross else "fallback"
+                        fallback_state["countReason"] = count_reason
                         counted_ids.add(track_id)
                         total += 1
                         is_counted = True
@@ -6481,6 +6815,8 @@ def main():
                                 "crossedAt": now(),
                                 "snapshotUrl": path,
                                 "source": "vision_worker_round_count",
+                                "countMethod": count_reason,
+                                "fallbackBandPx": secondary_verification_band_px if count_reason == "fallback" else None,
                                 "countBefore": total - 1,
                                 "countAfter": total,
                                 "totalCount": total,
@@ -6488,10 +6824,11 @@ def main():
                         )
 
                         logger.info(
-                            "Count: %d (%s #%d)",
+                            "Count: %d (%s #%d) via %s",
                             total,
                             vehicle_name,
                             track_id,
+                            count_reason,
                         )
 
                     last_positions[track_id] = (cx, cy)
@@ -6510,6 +6847,7 @@ def main():
                         "confidence": round(conf, 2),
                         "insideRoi": is_inside,
                         "crossedLine": did_cross,
+                        "countReason": count_reason or fallback_state.get("countReason", ""),
                         "counted": is_counted,
                     }
                 )
@@ -6553,6 +6891,7 @@ def main():
                 last_positions.pop(tid, None)
                 last_seen.pop(tid, None)
                 track_hits.pop(tid, None)
+                fallback_states.pop(tid, None)
                 counted_ids.discard(tid)
 
         browser_stream = annotate_frame(

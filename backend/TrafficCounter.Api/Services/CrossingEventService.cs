@@ -86,6 +86,8 @@ public class CrossingEventService
             Confidence = dto.Confidence,
             SnapshotUrl = null,
             Source = "vision_worker_crossing_event",
+            CountMethod = string.IsNullOrWhiteSpace(dto.CountMethod) ? null : dto.CountMethod.Trim(),
+            FallbackBandPx = dto.FallbackBandPx,
             PreviousEventHash = previousHash,
             EventHash = expectedHash, // store the server-computed hash
         };

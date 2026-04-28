@@ -6,8 +6,10 @@ from app import (
     crossed_vertical_segment,
     inside_roi,
     normalize_count_direction,
+    point_inside_line_band,
     resolve_round_sync,
     should_count_track,
+    should_count_track_fallback,
 )
 
 
@@ -302,6 +304,83 @@ class ShouldCountTrackTests(unittest.TestCase):
                 already_counted=False,
             )
         )
+
+
+class SecondaryVerificationTests(unittest.TestCase):
+    def test_point_inside_line_band_supports_diagonal_lines(self):
+        diagonal_line = {"x1": 20, "y1": 20, "x2": 80, "y2": 80}
+
+        self.assertTrue(point_inside_line_band((50, 54), diagonal_line, 8))
+        self.assertFalse(point_inside_line_band((50, 70), diagonal_line, 8))
+
+    def test_fallback_counts_after_multiple_band_hits_with_progress(self):
+        line = {"x1": 20, "y1": 100, "x2": 140, "y2": 100}
+        state = {}
+
+        first = should_count_track_fallback(
+            prev_position=(60, 88),
+            curr_position=(60, 95),
+            line=line,
+            direction="down",
+            hits=4,
+            min_hits_to_count=4,
+            already_counted=False,
+            band_px=18,
+            state=state,
+        )
+        second = should_count_track_fallback(
+            prev_position=(60, 95),
+            curr_position=(60, 102),
+            line=line,
+            direction="down",
+            hits=5,
+            min_hits_to_count=4,
+            already_counted=False,
+            band_px=18,
+            state=state,
+        )
+
+        self.assertFalse(first)
+        self.assertTrue(second)
+        self.assertTrue(state["enteredFallbackBand"])
+        self.assertGreaterEqual(state["fallbackEligibleFrames"], 2)
+
+    def test_fallback_does_not_count_parallel_touch_without_progress(self):
+        line = {"x1": 20, "y1": 100, "x2": 140, "y2": 100}
+        state = {}
+
+        counted = should_count_track_fallback(
+            prev_position=(60, 96),
+            curr_position=(72, 97),
+            line=line,
+            direction="down",
+            hits=4,
+            min_hits_to_count=4,
+            already_counted=False,
+            band_px=18,
+            state=state,
+        )
+
+        self.assertFalse(counted)
+        self.assertEqual(0, state.get("fallbackEligibleFrames", 0))
+
+    def test_fallback_respects_double_count_guard(self):
+        line = {"x1": 20, "y1": 100, "x2": 140, "y2": 100}
+        state = {}
+
+        counted = should_count_track_fallback(
+            prev_position=(60, 88),
+            curr_position=(60, 98),
+            line=line,
+            direction="down",
+            hits=4,
+            min_hits_to_count=4,
+            already_counted=True,
+            band_px=18,
+            state=state,
+        )
+
+        self.assertFalse(counted)
 
 
 class ResolveRoundSyncTests(unittest.TestCase):

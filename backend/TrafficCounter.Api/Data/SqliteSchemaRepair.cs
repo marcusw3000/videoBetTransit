@@ -235,7 +235,7 @@ internal static class SqliteSchemaRepair
         CancellationToken cancellationToken)
     {
         var existingColumns = await GetColumnNamesAsync(connection, "VehicleCrossingEvents", cancellationToken);
-        var requiredColumns = new[] { "CountAfter", "CountBefore", "StreamProfileId" };
+        var requiredColumns = new[] { "CountAfter", "CountBefore", "StreamProfileId", "CountMethod", "FallbackBandPx" };
 
         if (!requiredColumns.Any(existingColumns.Contains))
             return;
@@ -249,6 +249,8 @@ internal static class SqliteSchemaRepair
                 "CountAfter" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN CountAfter INTEGER NULL;""",
                 "CountBefore" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN CountBefore INTEGER NULL;""",
                 "StreamProfileId" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN StreamProfileId TEXT NULL;""",
+                "CountMethod" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN CountMethod TEXT NULL;""",
+                "FallbackBandPx" => """ALTER TABLE VehicleCrossingEvents ADD COLUMN FallbackBandPx INTEGER NULL;""",
                 _ => null,
             };
 
