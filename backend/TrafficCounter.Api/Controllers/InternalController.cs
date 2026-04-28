@@ -84,7 +84,9 @@ public class InternalController : ControllerBase
                 dto.StreamProfileId,
                 dto.AllowSettling,
                 dto.AutoSwitchRound,
-                dto.Phase);
+                dto.Phase,
+                dto.ActivationNonce,
+                dto.ActivationSessionId);
             return Ok(new { received = true });
         }
         catch (InvalidOperationException ex)

@@ -7,4 +7,6 @@ public class StreamProfileActivatedDto
     public bool AllowSettling { get; set; } = false;
     public bool AutoSwitchRound { get; set; } = false;
     public string Phase { get; set; } = "requested";
+    public string? ActivationNonce { get; set; }
+    public string? ActivationSessionId { get; set; }
 }

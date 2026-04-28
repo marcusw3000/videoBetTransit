@@ -16,6 +16,11 @@ public class CameraRoundStateConfiguration : IEntityTypeConfiguration<CameraRoun
         builder.Property(x => x.LastSourceUrl).HasMaxLength(1024);
         builder.Property(x => x.ActivationPhase).HasMaxLength(32).HasDefaultValue("ready");
         builder.Property(x => x.ReadyForRounds).HasDefaultValue(true);
+        builder.Property(x => x.ExpectedFrontendAckNonce).HasMaxLength(128);
+        builder.Property(x => x.ActivationSessionId).HasMaxLength(128);
+        builder.Property(x => x.LastReadyActivationSessionId).HasMaxLength(128);
+        builder.Property(x => x.FrontendAckReceived).HasDefaultValue(false);
+        builder.Property(x => x.LastFrontendAckSessionId).HasMaxLength(128);
 
         builder.HasIndex(x => x.ActiveStreamProfileId);
     }

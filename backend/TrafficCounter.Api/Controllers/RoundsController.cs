@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using TrafficCounter.Api.Contracts.Inbound;
 using TrafficCounter.Api.Contracts.Responses;
 using TrafficCounter.Api.Data;
 using TrafficCounter.Api.Domain.Enums;
@@ -179,6 +180,33 @@ public class RoundsController : ControllerBase
             .ToList();
 
         return Ok(timeline);
+    }
+
+    [HttpPost("frontend-ready")]
+    public async Task<IActionResult> FrontendReady([FromBody] FrontendReadyAckDto dto)
+    {
+        try
+        {
+            var result = await _roundService.AcknowledgeFrontendReadyAsync(
+                dto.CameraId,
+                dto.StreamProfileId,
+                dto.GameSessionId,
+                dto.ActivationNonce,
+                dto.ActivationSessionId);
+
+            return Ok(new FrontendReadyAckResponse
+            {
+                Accepted = result.Accepted,
+                RoundCreated = result.RoundCreated,
+                CameraId = result.CameraId,
+                ActivationPhase = result.ActivationPhase,
+                ActivationSessionId = result.ActivationSessionId,
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
     }
 
     private static RoundResponse ToResponse(Domain.Entities.Round r) => new()

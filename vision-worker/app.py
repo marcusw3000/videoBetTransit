@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import atexit
+import uuid
 import tkinter as tk
 from tkinter import ttk
 from dataclasses import dataclass
@@ -28,10 +29,18 @@ from supabase_sync import SupabaseStreamProfileSync
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+LOG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
+LOG_FILE = os.path.join(LOG_DIR, "vision-worker.log")
+os.makedirs(LOG_DIR, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -155,6 +164,17 @@ class RuntimeStats:
             if active_transport:
                 self._active_transport = str(active_transport)
 
+    def reset_pipeline_readiness(self):
+        with self._lock:
+            self._last_capture_at = None
+            self._last_capture_frame_at = None
+            self._last_frame_at = None
+            self._last_publish_at = None
+            self._stream_connected = False
+            self._stream_failures = 0
+            self._publisher_healthy = False
+            self._active_transport = "mjpeg"
+
     def snapshot(self, backend_health: dict | None = None) -> dict:
         now_ts = time.time()
         with self._lock:
@@ -234,6 +254,13 @@ stream_schedule_status_ref = {
 camera_activation_status_lock = threading.Lock()
 camera_activation_status_ref = {
     "phase": "ready",
+    "activationSessionId": "",
+    "lastRenderableActivationSessionId": "",
+    "activationRequestedAt": None,
+    "firstCaptureAt": None,
+    "firstProcessedAt": None,
+    "firstRenderableFrameAt": None,
+    "firstPublishedAt": None,
     "requestedCameraId": "",
     "readyCameraId": "",
     "requestedStreamProfileId": "",
@@ -243,7 +270,13 @@ camera_activation_status_ref = {
     "requestedProfileLabel": "",
     "readyProfileLabel": "",
     "readyForRounds": True,
+    "frontendAckRequired": True,
+    "frontendAckPhase": "ready",
+    "frontendAckNonce": "",
 }
+RECENT_RUNTIME_CAMERA_IDS_LIMIT = 4
+recent_runtime_camera_ids_lock = threading.Lock()
+recent_runtime_camera_ids_ref: list[str] = []
 
 # ---------------------------------------------------------------------------
 # Annotated MJPEG stream
@@ -541,6 +574,7 @@ class PipelineRuntime:
             self._config = dict(config)
             self._running = True
 
+        self.stats.reset_pipeline_readiness()
         self.raw_frames.clear()
         self.annotated_frames.clear()
         capture_thread.start()
@@ -578,6 +612,7 @@ class PipelineRuntime:
         if publisher is not None:
             publisher.stop()
 
+        self.stats.reset_pipeline_readiness()
         self.raw_frames.clear()
         self.annotated_frames.clear()
 
@@ -693,9 +728,64 @@ def update_camera_activation_status(**values):
         camera_activation_status_ref.update(values)
 
 
+def mark_camera_activation_observation(
+    activation_session_id: str,
+    *,
+    camera_id: str = "",
+    stream_profile_id: str = "",
+    captured_at: float | None = None,
+    processed_at: float | None = None,
+    renderable_at: float | None = None,
+    published_at: float | None = None,
+):
+    normalized_session_id = str(activation_session_id or "").strip()
+    if not normalized_session_id:
+        return
+
+    normalized_camera_id = str(camera_id or "").strip()
+    normalized_profile_id = str(stream_profile_id or "").strip()
+
+    with camera_activation_status_lock:
+        if str(camera_activation_status_ref.get("activationSessionId") or "").strip() != normalized_session_id:
+            return
+
+        requested_camera_id = str(camera_activation_status_ref.get("requestedCameraId") or "").strip()
+        requested_profile_id = str(camera_activation_status_ref.get("requestedStreamProfileId") or "").strip()
+        if normalized_camera_id and requested_camera_id and normalized_camera_id != requested_camera_id:
+            return
+        if normalized_profile_id and requested_profile_id and normalized_profile_id != requested_profile_id:
+            return
+
+        if captured_at is not None and not camera_activation_status_ref.get("firstCaptureAt"):
+            camera_activation_status_ref["firstCaptureAt"] = float(captured_at)
+        if processed_at is not None and not camera_activation_status_ref.get("firstProcessedAt"):
+            camera_activation_status_ref["firstProcessedAt"] = float(processed_at)
+        if renderable_at is not None and not camera_activation_status_ref.get("firstRenderableFrameAt"):
+            camera_activation_status_ref["firstRenderableFrameAt"] = float(renderable_at)
+            camera_activation_status_ref["lastRenderableActivationSessionId"] = normalized_session_id
+        if published_at is not None and not camera_activation_status_ref.get("firstPublishedAt"):
+            camera_activation_status_ref["firstPublishedAt"] = float(published_at)
+
+
 def get_camera_activation_status() -> dict:
     with camera_activation_status_lock:
         return dict(camera_activation_status_ref)
+
+
+def remember_recent_runtime_camera_id(camera_id: str):
+    normalized_camera_id = str(camera_id or "").strip()
+    if not normalized_camera_id:
+        return
+    with recent_runtime_camera_ids_lock:
+        if normalized_camera_id in recent_runtime_camera_ids_ref:
+            recent_runtime_camera_ids_ref.remove(normalized_camera_id)
+        recent_runtime_camera_ids_ref.insert(0, normalized_camera_id)
+        del recent_runtime_camera_ids_ref[RECENT_RUNTIME_CAMERA_IDS_LIMIT:]
+
+
+def get_recent_runtime_camera_ids() -> list[str]:
+    with recent_runtime_camera_ids_lock:
+        return list(recent_runtime_camera_ids_ref)
 
 
 def is_mjpeg_request_authorized() -> bool:
@@ -743,6 +833,11 @@ def create_mjpeg_app() -> Flask:
             or get_stream_rotation_status().get("selectedStreamProfileId", "")
         )
         payload["streamProfileCameraIds"] = eligible_camera_ids
+        payload["recentRuntimeCameraIds"] = get_recent_runtime_camera_ids()
+        payload["frontendAckRequired"] = bool(activation.get("frontendAckRequired", True))
+        payload["frontendAckPhase"] = str(activation.get("frontendAckPhase") or "")
+        payload["frontendAckNonce"] = str(activation.get("frontendAckNonce") or "")
+        payload["activationSessionId"] = str(activation.get("activationSessionId") or "")
         payload["streamRotation"] = get_stream_rotation_status()
         payload["streamSchedule"] = get_stream_schedule_status()
         payload["cameraActivation"] = activation
@@ -2444,16 +2539,111 @@ def annotate_frame(
     show_labels: bool = True,
     show_centers: bool = True,
     show_total: bool = True,
+    style: str = "classic",
 ):
     annotated = frame.copy()
 
-    cv2.line(
-        annotated,
-        (line["x1"], line["y1"]),
-        (line["x2"], line["y2"]),
-        (0, 0, 255),
-        3,
-    )
+    def blend_shape(draw_fn, alpha: float):
+        overlay = annotated.copy()
+        draw_fn(overlay)
+        cv2.addWeighted(overlay, alpha, annotated, 1.0 - alpha, 0, annotated)
+
+    def draw_clean_reference_band():
+        x1 = int(line["x1"])
+        y1 = int(line["y1"])
+        x2 = int(line["x2"])
+        y2 = int(line["y2"])
+        dx = x2 - x1
+        dy = y2 - y1
+        length = float(np.hypot(dx, dy))
+        if length < 1.0:
+            cv2.line(annotated, (x1, y1), (x2, y2), (64, 224, 255), 3)
+            return
+
+        nx = -dy / length
+        ny = dx / length
+        band_half = max(12, min(24, int(length * 0.045)))
+        glow_half = band_half + 8
+
+        def build_band(half_width: int):
+            return np.array(
+                [
+                    [int(round(x1 + nx * half_width)), int(round(y1 + ny * half_width))],
+                    [int(round(x2 + nx * half_width)), int(round(y2 + ny * half_width))],
+                    [int(round(x2 - nx * half_width)), int(round(y2 - ny * half_width))],
+                    [int(round(x1 - nx * half_width)), int(round(y1 - ny * half_width))],
+                ],
+                dtype=np.int32,
+            )
+
+        glow_pts = build_band(glow_half)
+        band_pts = build_band(band_half)
+        blend_shape(lambda overlay: cv2.fillConvexPoly(overlay, glow_pts, (90, 255, 255)), 0.16)
+        blend_shape(lambda overlay: cv2.fillConvexPoly(overlay, band_pts, (34, 220, 240)), 0.34)
+        cv2.polylines(annotated, [band_pts], True, (215, 255, 255), 1, lineType=cv2.LINE_AA)
+        cv2.line(annotated, (x1, y1), (x2, y2), (255, 255, 255), 2, lineType=cv2.LINE_AA)
+
+    def draw_stylized_box(x: int, y: int, w: int, h: int, color: tuple[int, int, int], label: str | None):
+        x = int(x)
+        y = int(y)
+        w = max(1, int(w))
+        h = max(1, int(h))
+        x2 = x + w
+        y2 = y + h
+
+        blend_shape(lambda overlay: cv2.rectangle(overlay, (x, y), (x2, y2), color, -1), 0.12)
+
+        corner = max(10, min(24, min(w, h) // 4))
+        thickness = 2
+        line_type = cv2.LINE_AA
+
+        cv2.line(annotated, (x, y), (x + corner, y), color, thickness, lineType=line_type)
+        cv2.line(annotated, (x, y), (x, y + corner), color, thickness, lineType=line_type)
+        cv2.line(annotated, (x2, y), (x2 - corner, y), color, thickness, lineType=line_type)
+        cv2.line(annotated, (x2, y), (x2, y + corner), color, thickness, lineType=line_type)
+        cv2.line(annotated, (x, y2), (x + corner, y2), color, thickness, lineType=line_type)
+        cv2.line(annotated, (x, y2), (x, y2 - corner), color, thickness, lineType=line_type)
+        cv2.line(annotated, (x2, y2), (x2 - corner, y2), color, thickness, lineType=line_type)
+        cv2.line(annotated, (x2, y2), (x2, y2 - corner), color, thickness, lineType=line_type)
+
+        if not label:
+            return
+
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.45
+        weight = 1
+        (text_w, text_h), baseline = cv2.getTextSize(label, font, scale, weight)
+        chip_x = x
+        chip_y2 = max(text_h + 10, y - 6)
+        chip_y1 = max(0, chip_y2 - text_h - baseline - 10)
+        chip_x2 = chip_x + text_w + 16
+
+        blend_shape(
+            lambda overlay: cv2.rectangle(overlay, (chip_x, chip_y1), (chip_x2, chip_y2), color, -1),
+            0.26,
+        )
+        cv2.rectangle(annotated, (chip_x, chip_y1), (chip_x2, chip_y2), color, 1, lineType=line_type)
+        cv2.putText(
+            annotated,
+            label,
+            (chip_x + 8, chip_y2 - 7),
+            font,
+            scale,
+            (255, 255, 255),
+            weight,
+            lineType=line_type,
+        )
+
+    if style == "clean":
+        draw_clean_reference_band()
+    else:
+        cv2.line(
+            annotated,
+            (line["x1"], line["y1"]),
+            (line["x2"], line["y2"]),
+            (0, 0, 255),
+            3,
+        )
 
     if show_roi:
         cv2.rectangle(
@@ -2471,10 +2661,15 @@ def annotate_frame(
         dh = det["bbox"]["h"]
         tid = det["trackId"]
         vtype = det["vehicleType"]
-        color = (0, 255, 0) if det["counted"] else (0, 165, 255)
+        is_counted = det["counted"]
+        color = (80, 255, 160) if is_counted else (34, 220, 240)
+        label = f"#{tid} {vtype}" if show_labels else None
 
-        cv2.rectangle(annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
-        if show_labels:
+        if style == "clean":
+            draw_stylized_box(dx, dy, dw, dh, color, label)
+        else:
+            cv2.rectangle(annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
+        if show_labels and style != "clean":
             cv2.putText(
                 annotated,
                 f"#{tid} {vtype}",
@@ -2491,14 +2686,16 @@ def annotate_frame(
             cv2.circle(annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
 
     if show_total:
+        total_color = (80, 255, 160) if style == "clean" else (0, 255, 0)
         cv2.putText(
             annotated,
             f"TOTAL: {total}",
             (30, 50),
             cv2.FONT_HERSHEY_SIMPLEX,
             1.2,
-            (0, 255, 0),
+            total_color,
             3,
+            lineType=cv2.LINE_AA,
         )
 
     return annotated
@@ -3744,11 +3941,13 @@ class CompactEditorControlPanel:
         self._active_schedule_var = tk.StringVar(value="-")
         self._rotation_state_var = tk.StringVar(value="-")
         self._safe_window_var = tk.StringVar(value="-")
+        self._schedule_form_dirty = False
+        self._programmatic_schedule_form_update = False
 
-        self._schedule_name_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
-        self._schedule_start_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
-        self._schedule_end_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
-        self._schedule_enabled_var.trace_add("write", lambda *_: self._update_schedule_editor_summary())
+        self._schedule_name_var.trace_add("write", lambda *_: self._handle_schedule_form_change())
+        self._schedule_start_var.trace_add("write", lambda *_: self._handle_schedule_form_change())
+        self._schedule_end_var.trace_add("write", lambda *_: self._handle_schedule_form_change())
+        self._schedule_enabled_var.trace_add("write", lambda *_: self._handle_schedule_form_change())
 
         root_frame = ttk.Frame(self._root, padding=10)
         root_frame.grid(row=0, column=0, sticky="nsew")
@@ -3948,17 +4147,14 @@ class CompactEditorControlPanel:
         editor_frame.columnconfigure(0, weight=1)
         editor_frame.columnconfigure(1, weight=1)
         ttk.Label(editor_frame, text="Descricao").grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Entry(editor_frame, textvariable=self._schedule_name_var).grid(
-            row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6)
-        )
+        self._schedule_name_entry = ttk.Entry(editor_frame, textvariable=self._schedule_name_var)
+        self._schedule_name_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         ttk.Label(editor_frame, text="Inicio (HH:MM)").grid(row=2, column=0, sticky="w")
         ttk.Label(editor_frame, text="Fim (HH:MM)").grid(row=2, column=1, sticky="w")
-        ttk.Entry(editor_frame, textvariable=self._schedule_start_var).grid(
-            row=3, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
-        )
-        ttk.Entry(editor_frame, textvariable=self._schedule_end_var).grid(
-            row=3, column=1, sticky="ew", pady=(0, 6)
-        )
+        self._schedule_start_entry = ttk.Entry(editor_frame, textvariable=self._schedule_start_var)
+        self._schedule_start_entry.grid(row=3, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+        self._schedule_end_entry = ttk.Entry(editor_frame, textvariable=self._schedule_end_var)
+        self._schedule_end_entry.grid(row=3, column=1, sticky="ew", pady=(0, 6))
         ttk.Checkbutton(editor_frame, text="Faixa ativa", variable=self._schedule_enabled_var).grid(
             row=4, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
@@ -4031,8 +4227,11 @@ class CompactEditorControlPanel:
         self._mode_var.set(f"Modo: {self.editor.mode}")
         self._message_var.set(self.editor.message)
         self._update_state_summary()
-        self._refresh_schedule_cameras()
-        self._refresh_schedule_rules()
+        if self._should_pause_schedule_refresh():
+            self._update_schedule_editor_summary()
+        else:
+            self._refresh_schedule_cameras()
+            self._refresh_schedule_rules()
         try:
             self._root.update_idletasks()
             self._root.update()
@@ -4150,10 +4349,7 @@ class CompactEditorControlPanel:
             return
         self._selected_schedule_rule_id = ""
         self._selected_rule_is_legacy = False
-        self._schedule_name_var.set("")
-        self._schedule_start_var.set("09:00")
-        self._schedule_end_var.set("19:00")
-        self._schedule_enabled_var.set(True)
+        self._set_schedule_form_values("", "09:00", "19:00", True)
         self._schedule_legacy_var.set("")
         self._update_schedule_editor_summary()
 
@@ -4170,18 +4366,19 @@ class CompactEditorControlPanel:
             if str(item.get("id") or "") == camera_id:
                 profile = item
                 break
-        rule_name = self._schedule_name_var.get().strip() or (
+        schedule_name, start_time, end_time, enabled = self._read_schedule_form_values()
+        rule_name = schedule_name or (
             f"Horario {str(profile.get('camera_id') or camera_id)} "
-            f"{self._schedule_start_var.get().strip()}-{self._schedule_end_var.get().strip()}"
+            f"{start_time}-{end_time}"
         )
         try:
             rule = self.on_save_stream_schedule_rule(
                 self._selected_schedule_rule_id,
                 rule_name,
-                self._schedule_start_var.get(),
-                self._schedule_end_var.get(),
+                start_time,
+                end_time,
                 [camera_id],
-                bool(self._schedule_enabled_var.get()),
+                enabled,
             )
         except (ValueError, RuntimeError) as exc:
             self.editor.message = str(exc)
@@ -4189,7 +4386,7 @@ class CompactEditorControlPanel:
         self._selected_schedule_rule_id = str(rule.get("id") or "")
         self._refresh_schedule_cameras(selected_camera_id=camera_id)
         self._refresh_schedule_rules(selected_rule_id=self._selected_schedule_rule_id)
-        self._populate_schedule_form(rule)
+        self._populate_schedule_form(rule, force=True)
         self.editor.message = f"Horario salvo para {str(profile.get('camera_id') or camera_id)}."
 
     def delete_schedule_rule(self):
@@ -4394,7 +4591,7 @@ class CompactEditorControlPanel:
         if rule is None:
             return
         self._selected_schedule_rule_id = str(rule.get("id") or "")
-        self._populate_schedule_form(rule)
+        self._populate_schedule_form(rule, force=True)
 
     def _handle_direction_change(self, _event=None):
         self._commit_count_direction()
@@ -4444,13 +4641,63 @@ class CompactEditorControlPanel:
         self._count_direction_var.set(count_direction_display_name(str(profile.get("count_direction") or "any")))
         self._update_stream_summary()
 
-    def _populate_schedule_form(self, rule: dict):
+    def _handle_schedule_form_change(self):
+        if not self._programmatic_schedule_form_update:
+            self._schedule_form_dirty = True
+        self._update_schedule_editor_summary()
+
+    def _is_editing_schedule_form(self) -> bool:
+        focused_widget = self._root.focus_get()
+        return focused_widget in {
+            getattr(self, "_schedule_name_entry", None),
+            getattr(self, "_schedule_start_entry", None),
+            getattr(self, "_schedule_end_entry", None),
+        }
+
+    def _should_pause_schedule_refresh(self) -> bool:
+        return self._schedule_form_dirty or self._is_editing_schedule_form()
+
+    def _set_schedule_form_values(self, name: str, start_time: str, end_time: str, enabled: bool):
+        self._programmatic_schedule_form_update = True
+        try:
+            self._schedule_name_var.set(name)
+            self._schedule_start_var.set(start_time)
+            self._schedule_end_var.set(end_time)
+            self._schedule_enabled_var.set(enabled)
+        finally:
+            self._programmatic_schedule_form_update = False
+        self._schedule_form_dirty = False
+
+    def _read_schedule_form_values(self) -> tuple[str, str, str, bool]:
+        name = self._schedule_name_entry.get().strip()
+        start_time = self._schedule_start_entry.get().strip()
+        end_time = self._schedule_end_entry.get().strip()
+        enabled = bool(self._schedule_enabled_var.get())
+        self._programmatic_schedule_form_update = True
+        try:
+            self._schedule_name_var.set(name)
+            self._schedule_start_var.set(start_time)
+            self._schedule_end_var.set(end_time)
+        finally:
+            self._programmatic_schedule_form_update = False
+        self._schedule_form_dirty = False
+        return name, start_time, end_time, enabled
+
+    def _populate_schedule_form(self, rule: dict, force: bool = False):
         allowed_ids = normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))
-        self._selected_rule_is_legacy = len(allowed_ids) > 1
-        self._schedule_name_var.set(str(rule.get("name") or ""))
-        self._schedule_start_var.set(str(rule.get("start_time") or "09:00"))
-        self._schedule_end_var.set(str(rule.get("end_time") or "19:00"))
-        self._schedule_enabled_var.set(bool(rule.get("enabled", True)))
+        is_legacy = len(allowed_ids) > 1
+        if self._schedule_form_dirty and not force:
+            current_rule_id = str(self._selected_schedule_rule_id or "")
+            incoming_rule_id = str(rule.get("id") or "")
+            if current_rule_id and incoming_rule_id == current_rule_id:
+                return
+        self._selected_rule_is_legacy = is_legacy
+        self._set_schedule_form_values(
+            str(rule.get("name") or ""),
+            str(rule.get("start_time") or "09:00"),
+            str(rule.get("end_time") or "19:00"),
+            bool(rule.get("enabled", True)),
+        )
         if self._selected_rule_is_legacy:
             self._schedule_legacy_var.set("Regra legado compartilhada entre cameras. Edite criando uma nova faixa por camera.")
             self._schedule_save_button.state(["disabled"])
@@ -4873,8 +5120,17 @@ def main():
     initial_profile_id = str(selected_profile.get("id") or cfg.get("selected_stream_profile_id") or "").strip()
     initial_processed_path = str(cfg.get("processed_stream_path") or f"processed/{initial_camera_id}" if initial_camera_id else "").strip()
     initial_profile_label = format_stream_profile_label(selected_profile) if selected_profile else initial_camera_id
+    initial_activation_session_id = uuid.uuid4().hex if initial_camera_id and initial_profile_id and not startup_blocked_by_schedule else ""
+    initial_activation_requested_at = time.time() if initial_activation_session_id else None
     update_camera_activation_status(
         phase="outside_schedule" if startup_blocked_by_schedule else "waiting_stream",
+        activationSessionId=initial_activation_session_id,
+        lastRenderableActivationSessionId="",
+        activationRequestedAt=initial_activation_requested_at,
+        firstCaptureAt=None,
+        firstProcessedAt=None,
+        firstRenderableFrameAt=None,
+        firstPublishedAt=None,
         requestedCameraId=initial_camera_id,
         readyCameraId="",
         requestedStreamProfileId=initial_profile_id,
@@ -4884,6 +5140,9 @@ def main():
         requestedProfileLabel=initial_profile_label,
         readyProfileLabel="",
         readyForRounds=False,
+        frontendAckRequired=True,
+        frontendAckPhase="requested",
+        frontendAckNonce="",
     )
     streamer.set_jpeg_quality(int(cfg.get("mjpeg_jpeg_quality", 70)))
     streamer.set_fps_limit(float(cfg.get("mjpeg_fps_limit", 0)))
@@ -4955,10 +5214,12 @@ def main():
     pending_camera_activation = (
         {
             "phase": "waiting_stream",
+            "activationSessionId": initial_activation_session_id,
             "requestedCameraId": initial_camera_id,
             "requestedStreamProfileId": initial_profile_id,
             "requestedProcessedStreamPath": initial_processed_path,
             "requestedProfileLabel": initial_profile_label,
+            "activationStartedAt": initial_activation_requested_at,
             "autoSwitchRound": False,
             "requestNotified": False,
             "readyNotified": False,
@@ -4984,6 +5245,7 @@ def main():
             allow_settling=True,
             auto_switch_round=False,
             phase="requested",
+            activation_session_id=str(pending_camera_activation.get("activationSessionId") or ""),
         ):
             pending_camera_activation["requestNotified"] = True
 
@@ -5128,11 +5390,20 @@ def main():
                 queue_pipeline_stop()
             update_camera_activation_status(
                 phase="outside_schedule",
+                activationSessionId="",
+                activationRequestedAt=None,
+                firstCaptureAt=None,
+                firstProcessedAt=None,
+                firstRenderableFrameAt=None,
+                firstPublishedAt=None,
                 readyCameraId="",
                 readyStreamProfileId="",
                 readyProcessedStreamPath="",
                 readyProfileLabel="",
                 readyForRounds=False,
+                frontendAckRequired=True,
+                frontendAckPhase="requested",
+                frontendAckNonce="",
             )
             publish_schedule_status("Fora da agenda configurada; pipeline pausada ate a proxima faixa ativa.")
             return
@@ -5904,23 +6175,40 @@ def main():
                 requested_profile_id = str(profile.get("id") or "").strip()
                 requested_processed_path = str(current_pipeline_cfg.get("processed_stream_path") or "").strip()
                 requested_profile_label = format_stream_profile_label(profile)
+                activation_started_at = time.time()
+                activation_session_id = uuid.uuid4().hex
                 pending_camera_activation = {
                     "phase": "waiting_stream",
+                    "activationSessionId": activation_session_id,
                     "requestedCameraId": requested_camera_id,
                     "requestedStreamProfileId": requested_profile_id,
                     "requestedProcessedStreamPath": requested_processed_path,
                     "requestedProfileLabel": requested_profile_label,
+                    "activationStartedAt": activation_started_at,
                     "autoSwitchRound": bool(profile.get("_activation_auto_switch_round")),
                     "requestNotified": False,
                     "readyNotified": False,
                 }
                 update_camera_activation_status(
                     phase="waiting_stream",
+                    activationSessionId=activation_session_id,
+                    activationRequestedAt=activation_started_at,
+                    firstCaptureAt=None,
+                    firstProcessedAt=None,
+                    firstRenderableFrameAt=None,
+                    firstPublishedAt=None,
                     requestedCameraId=requested_camera_id,
                     requestedStreamProfileId=requested_profile_id,
                     requestedProcessedStreamPath=requested_processed_path,
                     requestedProfileLabel=requested_profile_label,
+                    readyCameraId="",
+                    readyStreamProfileId="",
+                    readyProcessedStreamPath="",
+                    readyProfileLabel="",
                     readyForRounds=False,
+                    frontendAckRequired=True,
+                    frontendAckPhase="requested",
+                    frontendAckNonce="",
                 )
                 if ensure_stream_rotation_profile_state(stream_rotation, str(profile.get("id") or ""), rng=random):
                     cfg["stream_rotation"] = dict(stream_rotation)
@@ -5945,6 +6233,7 @@ def main():
                         allow_settling=bool(profile.get("_activation_allow_settling")),
                         auto_switch_round=bool(profile.get("_activation_auto_switch_round")),
                         phase="requested",
+                        activation_session_id=activation_session_id,
                     )
                     if isinstance(pending_camera_activation, dict):
                         pending_camera_activation["requestNotified"] = True
@@ -5984,6 +6273,17 @@ def main():
 
         frame_count += 1
         youtube_retry_after = 0.0
+        current_activation_status = get_camera_activation_status()
+        current_activation_session_id = str(current_activation_status.get("activationSessionId") or "").strip()
+        current_camera_id = str(cfg.get("camera_id") or "").strip()
+        current_profile_id = str(cfg.get("selected_stream_profile_id") or "").strip()
+        if current_activation_session_id:
+            mark_camera_activation_observation(
+                current_activation_session_id,
+                camera_id=current_camera_id,
+                stream_profile_id=current_profile_id,
+                captured_at=captured_at,
+            )
 
         if frame_count == 1 and pending_stream_refresh_started_at is not None:
             logger.info(
@@ -6002,39 +6302,6 @@ def main():
             activation_requested_profile = str(pending_camera_activation.get("requestedStreamProfileId") or "").strip()
             activation_requested_path = str(pending_camera_activation.get("requestedProcessedStreamPath") or "").strip()
             activation_requested_label = str(pending_camera_activation.get("requestedProfileLabel") or activation_requested_camera).strip()
-            current_camera_id = str(cfg.get("camera_id") or "").strip()
-            current_profile_id = str(cfg.get("selected_stream_profile_id") or "").strip()
-            runtime_snapshot = runtime_stats.snapshot()
-            stream_ready = (
-                activation_requested_camera
-                and activation_requested_camera == current_camera_id
-                and activation_requested_profile == current_profile_id
-                and bool(runtime_snapshot.get("streamConnected"))
-                and bool(runtime_snapshot.get("publisherHealthy"))
-            )
-            if stream_ready:
-                if not bool(pending_camera_activation.get("readyNotified")):
-                    backend.notify_stream_profile_activated(
-                        activation_requested_camera,
-                        activation_requested_profile,
-                        allow_settling=True,
-                        auto_switch_round=bool(pending_camera_activation.get("autoSwitchRound")),
-                        phase="ready",
-                    )
-                    pending_camera_activation["readyNotified"] = True
-                update_camera_activation_status(
-                    phase="ready",
-                    requestedCameraId=activation_requested_camera,
-                    readyCameraId=activation_requested_camera,
-                    requestedStreamProfileId=activation_requested_profile,
-                    readyStreamProfileId=activation_requested_profile,
-                    requestedProcessedStreamPath=activation_requested_path,
-                    readyProcessedStreamPath=activation_requested_path,
-                    requestedProfileLabel=activation_requested_label,
-                    readyProfileLabel=activation_requested_label,
-                    readyForRounds=True,
-                )
-                pending_camera_activation = None
 
         now_ts = time.time()
         if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
@@ -6298,6 +6565,7 @@ def main():
             show_labels=False,
             show_centers=False,
             show_total=False,
+            style="clean",
         )
         browser_stream = resize_frame_max_width(browser_stream, browser_stream_max_width)
 
@@ -6305,7 +6573,14 @@ def main():
         if cfg.get("show_window", True):
             preview_interval = 1.0 / max(1.0, operator_preview_fps_limit)
             if last_operator_preview is None or (time.time() - last_operator_preview_at) >= preview_interval:
-                operator_stream = annotate_frame(frame, roi, line, detections_list, total)
+                operator_stream = annotate_frame(
+                    frame,
+                    roi,
+                    line,
+                    detections_list,
+                    total,
+                    style="clean",
+                )
                 operator_stream = resize_frame_max_width(operator_stream, operator_preview_max_width)
                 if editor is not None:
                     editor.draw_overlay(operator_stream)
@@ -6317,6 +6592,79 @@ def main():
         runtime_stats.record_processed_frame(total)
         pipeline_runtime.push_annotated_frame(browser_stream)
         runtime_stats.record_pipeline_ms((time.time() - captured_at) * 1000)
+        renderable_at = time.time()
+        if current_activation_session_id:
+            mark_camera_activation_observation(
+                current_activation_session_id,
+                camera_id=current_camera_id,
+                stream_profile_id=current_profile_id,
+                processed_at=renderable_at,
+                renderable_at=renderable_at,
+            )
+            published_at = float((runtime_stats.snapshot().get("lastPublishAt")) or 0.0)
+            if published_at > 0:
+                mark_camera_activation_observation(
+                    current_activation_session_id,
+                    camera_id=current_camera_id,
+                    stream_profile_id=current_profile_id,
+                    published_at=published_at,
+                )
+
+        if isinstance(pending_camera_activation, dict):
+            activation_session_id = str(pending_camera_activation.get("activationSessionId") or "").strip()
+            activation_requested_camera = str(pending_camera_activation.get("requestedCameraId") or "").strip()
+            activation_requested_profile = str(pending_camera_activation.get("requestedStreamProfileId") or "").strip()
+            activation_requested_path = str(pending_camera_activation.get("requestedProcessedStreamPath") or "").strip()
+            activation_requested_label = str(pending_camera_activation.get("requestedProfileLabel") or activation_requested_camera).strip()
+            activation_started_at = float(pending_camera_activation.get("activationStartedAt") or 0.0)
+            runtime_snapshot = runtime_stats.snapshot()
+            last_capture_at = float(runtime_snapshot.get("lastCaptureAt") or 0.0)
+            last_frame_at = float(runtime_snapshot.get("lastFrameAt") or 0.0)
+            last_publish_at = float(runtime_snapshot.get("lastPublishAt") or 0.0)
+            stream_ready = (
+                activation_requested_camera
+                and activation_requested_camera == current_camera_id
+                and activation_requested_profile == current_profile_id
+                and bool(runtime_snapshot.get("streamConnected"))
+                and bool(runtime_snapshot.get("publisherHealthy"))
+                and last_capture_at >= activation_started_at
+                and last_frame_at >= activation_started_at
+                and last_publish_at >= activation_started_at
+            )
+            if stream_ready:
+                activation_nonce = str(pending_camera_activation.get("frontendAckNonce") or "").strip()
+                if not activation_nonce:
+                    activation_nonce = uuid.uuid4().hex
+                    pending_camera_activation["frontendAckNonce"] = activation_nonce
+                if not bool(pending_camera_activation.get("readyNotified")):
+                    backend.notify_stream_profile_activated(
+                        activation_requested_camera,
+                        activation_requested_profile,
+                        allow_settling=True,
+                        auto_switch_round=bool(pending_camera_activation.get("autoSwitchRound")),
+                        phase="frontend_pending",
+                        activation_nonce=activation_nonce,
+                        activation_session_id=activation_session_id,
+                    )
+                    pending_camera_activation["readyNotified"] = True
+                remember_recent_runtime_camera_id(activation_requested_camera)
+                update_camera_activation_status(
+                    phase="ready",
+                    activationSessionId=activation_session_id,
+                    requestedCameraId=activation_requested_camera,
+                    readyCameraId=activation_requested_camera,
+                    requestedStreamProfileId=activation_requested_profile,
+                    readyStreamProfileId=activation_requested_profile,
+                    requestedProcessedStreamPath=activation_requested_path,
+                    readyProcessedStreamPath=activation_requested_path,
+                    requestedProfileLabel=activation_requested_label,
+                    readyProfileLabel=activation_requested_label,
+                    readyForRounds=False,
+                    frontendAckRequired=True,
+                    frontendAckPhase="frontend_pending",
+                    frontendAckNonce=activation_nonce,
+                )
+                pending_camera_activation = None
 
         if cfg.get("show_window", True):
             if control_panel is not None:
@@ -6351,8 +6699,28 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("Encerrando por Ctrl+C.")
-        cleanup_runtime()
+    restart_attempt = 0
+
+    while True:
+        try:
+            if restart_attempt > 0:
+                logger.warning(
+                    "Reiniciando loop principal do worker apos falha inesperada (tentativa %d).",
+                    restart_attempt,
+                )
+            main()
+            break
+        except KeyboardInterrupt:
+            logger.info("Encerrando por Ctrl+C.")
+            cleanup_runtime()
+            break
+        except Exception:
+            restart_attempt += 1
+            logger.exception(
+                "Falha nao tratada no worker principal. O loop sera reiniciado em 2 segundos."
+            )
+            try:
+                cleanup_runtime()
+            except Exception:
+                logger.exception("Falha ao limpar runtime apos excecao nao tratada.")
+            time.sleep(2.0)

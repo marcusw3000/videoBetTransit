@@ -273,7 +273,18 @@ internal static class SqliteSchemaRepair
             return;
 
         var existingColumns = await GetColumnNamesAsync(connection, "CameraRoundStates", cancellationToken);
-        var requiredColumns = new[] { "ActivationPhase", "ReadyForRounds" };
+        var requiredColumns = new[]
+        {
+            "ActivationPhase",
+            "ReadyForRounds",
+            "ExpectedFrontendAckNonce",
+            "ActivationSessionId",
+            "LastReadyActivationSessionId",
+            "FrontendAckReceived",
+            "FrontendAckedAt",
+            "LastFrontendAckSessionId",
+            "ActivationRequestedAt",
+        };
 
         if (requiredColumns.All(existingColumns.Contains))
             return;
@@ -286,6 +297,13 @@ internal static class SqliteSchemaRepair
             {
                 "ActivationPhase" => """ALTER TABLE CameraRoundStates ADD COLUMN ActivationPhase TEXT NOT NULL DEFAULT 'ready';""",
                 "ReadyForRounds" => """ALTER TABLE CameraRoundStates ADD COLUMN ReadyForRounds INTEGER NOT NULL DEFAULT 1;""",
+                "ExpectedFrontendAckNonce" => """ALTER TABLE CameraRoundStates ADD COLUMN ExpectedFrontendAckNonce TEXT NULL;""",
+                "ActivationSessionId" => """ALTER TABLE CameraRoundStates ADD COLUMN ActivationSessionId TEXT NULL;""",
+                "LastReadyActivationSessionId" => """ALTER TABLE CameraRoundStates ADD COLUMN LastReadyActivationSessionId TEXT NULL;""",
+                "FrontendAckReceived" => """ALTER TABLE CameraRoundStates ADD COLUMN FrontendAckReceived INTEGER NOT NULL DEFAULT 0;""",
+                "FrontendAckedAt" => """ALTER TABLE CameraRoundStates ADD COLUMN FrontendAckedAt TEXT NULL;""",
+                "LastFrontendAckSessionId" => """ALTER TABLE CameraRoundStates ADD COLUMN LastFrontendAckSessionId TEXT NULL;""",
+                "ActivationRequestedAt" => """ALTER TABLE CameraRoundStates ADD COLUMN ActivationRequestedAt TEXT NULL;""",
                 _ => null,
             };
 

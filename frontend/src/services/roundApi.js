@@ -85,6 +85,24 @@ export async function getCurrentRound(cameraId) {
   return normalizeRoundContract(data)
 }
 
+export async function acknowledgeFrontendReady({ cameraId, streamProfileId, gameSessionId, activationNonce, activationSessionId }) {
+  const payload = {
+    cameraId: String(cameraId || '').trim(),
+    streamProfileId: String(streamProfileId || '').trim() || null,
+    gameSessionId: String(gameSessionId || '').trim(),
+    activationNonce: String(activationNonce || '').trim(),
+    activationSessionId: String(activationSessionId || '').trim(),
+  }
+  const { data } = await withRetry(() => api.post('/rounds/frontend-ready', payload))
+  return {
+    accepted: Boolean(data?.accepted),
+    roundCreated: Boolean(data?.roundCreated),
+    cameraId: data?.cameraId || payload.cameraId,
+    activationPhase: data?.activationPhase || '',
+    activationSessionId: data?.activationSessionId || payload.activationSessionId,
+  }
+}
+
 export async function getRecentRounds(cameraId, limit = 12) {
   const params = { limit }
   if (cameraId) params.cameraId = cameraId

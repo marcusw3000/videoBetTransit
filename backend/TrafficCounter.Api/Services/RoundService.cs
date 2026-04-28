@@ -16,6 +16,15 @@ namespace TrafficCounter.Api.Services;
 
 public class RoundService
 {
+    public sealed class FrontendReadyAckResult
+    {
+        public bool Accepted { get; init; }
+        public bool RoundCreated { get; init; }
+        public string CameraId { get; init; } = string.Empty;
+        public string ActivationPhase { get; init; } = string.Empty;
+        public string ActivationSessionId { get; init; } = string.Empty;
+    }
+
     public const string CameraLockedMessage = "Camera locked while round is active; try again after settlement.";
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> CameraRoundCreationLocks = new(StringComparer.OrdinalIgnoreCase);
 
@@ -290,12 +299,21 @@ public class RoundService
         string? streamProfileId,
         bool allowSettling = false,
         bool autoSwitchRound = false,
-        string phase = "requested")
+        string phase = "requested",
+        string? activationNonce = null,
+        string? activationSessionId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var normalizedCameraId = NormalizeCameraId(cameraId);
         var normalizedPhase = NormalizeActivationPhase(phase);
+        var normalizedNonce = NormalizeOptional(activationNonce);
+        var normalizedActivationSessionId = NormalizeOptional(activationSessionId);
+        if (normalizedPhase == "frontend_pending" && string.IsNullOrWhiteSpace(normalizedNonce))
+            throw new InvalidOperationException("activationNonce is required for frontend_pending phase.");
+        if ((normalizedPhase == "requested" || normalizedPhase == "frontend_pending")
+            && string.IsNullOrWhiteSpace(normalizedActivationSessionId))
+            throw new InvalidOperationException("activationSessionId is required for requested/frontend_pending phase.");
         if (!autoSwitchRound)
         {
             var locked = allowSettling
@@ -307,6 +325,7 @@ public class RoundService
 
         var normalizedProfileId = NormalizeOptional(streamProfileId);
         var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+        var effectiveActivationSessionId = normalizedActivationSessionId ?? state.ActivationSessionId;
         var previousProfileId = state.ActiveStreamProfileId;
         var sameProfile = string.Equals(state.ActiveStreamProfileId, normalizedProfileId, StringComparison.Ordinal);
         var activeRound = autoSwitchRound
@@ -318,25 +337,46 @@ public class RoundService
                 .FirstOrDefaultAsync()
             : null;
 
-        if (sameProfile && !autoSwitchRound && normalizedPhase != "ready")
+        if (sameProfile
+            && !autoSwitchRound
+            && normalizedPhase == "requested"
+            && string.Equals(state.ActivationSessionId, effectiveActivationSessionId, StringComparison.Ordinal))
             return;
 
         state.ActiveStreamProfileId = normalizedProfileId;
         state.RoundsSinceProfileSwitch = 0;
         state.LastProfileChangedAt = DateTime.UtcNow;
         state.UpdatedAt = DateTime.UtcNow;
+        state.ActivationRequestedAt = DateTime.UtcNow;
+        state.ActivationSessionId = normalizedPhase == "ready" ? effectiveActivationSessionId : normalizedActivationSessionId;
+        state.FrontendAckReceived = false;
+        state.FrontendAckedAt = null;
+        state.LastFrontendAckSessionId = null;
+        _logger.LogInformation(
+            "[Activation] Camera {CameraId} solicitou fase {Phase} para profile {StreamProfileId} session={ActivationSessionId} nonce={ActivationNonce}.",
+            normalizedCameraId,
+            normalizedPhase,
+            normalizedProfileId ?? "none",
+            effectiveActivationSessionId ?? "none",
+            normalizedNonce ?? "none");
 
         if (normalizedPhase == "ready")
         {
             state.ActivationPhase = "ready";
             state.ReadyForRounds = true;
+            state.ExpectedFrontendAckNonce = normalizedNonce;
+            state.ActivationSessionId = effectiveActivationSessionId;
+            state.LastReadyActivationSessionId = effectiveActivationSessionId;
+            state.FrontendAckReceived = true;
+            state.FrontendAckedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
             await EnsureActiveRoundAsync(normalizedCameraId);
             return;
         }
 
-        state.ActivationPhase = "waiting_stream";
+        state.ActivationPhase = normalizedPhase == "frontend_pending" ? "frontend_pending" : "waiting_stream";
         state.ReadyForRounds = false;
+        state.ExpectedFrontendAckNonce = normalizedPhase == "frontend_pending" ? normalizedNonce : null;
 
         if (autoSwitchRound)
         {
@@ -347,6 +387,12 @@ public class RoundService
             {
                 otherState.ReadyForRounds = false;
                 otherState.ActivationPhase = "inactive";
+                otherState.ExpectedFrontendAckNonce = null;
+                otherState.ActivationSessionId = null;
+                otherState.FrontendAckReceived = false;
+                otherState.FrontendAckedAt = null;
+                otherState.LastFrontendAckSessionId = null;
+                otherState.ActivationRequestedAt = DateTime.UtcNow;
                 otherState.UpdatedAt = DateTime.UtcNow;
             }
 
@@ -391,6 +437,91 @@ public class RoundService
             createReplacementRound: false);
     }
 
+    public async Task<FrontendReadyAckResult> AcknowledgeFrontendReadyAsync(
+        string cameraId,
+        string? streamProfileId,
+        string gameSessionId,
+        string activationNonce,
+        string activationSessionId)
+    {
+        var normalizedCameraId = NormalizeCameraId(cameraId);
+        var normalizedProfileId = NormalizeOptional(streamProfileId);
+        var normalizedSessionId = NormalizeRequiredText(gameSessionId, "gameSessionId");
+        var normalizedNonce = NormalizeRequiredText(activationNonce, "activationNonce");
+        var normalizedActivationSessionId = NormalizeRequiredText(activationSessionId, "activationSessionId");
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+
+        if (!string.Equals(state.ActivationPhase, "frontend_pending", StringComparison.Ordinal))
+        {
+            if (string.Equals(state.ActivationPhase, "ready", StringComparison.Ordinal)
+                && string.Equals(state.ExpectedFrontendAckNonce, normalizedNonce, StringComparison.Ordinal)
+                && string.Equals(state.ActivationSessionId, normalizedActivationSessionId, StringComparison.Ordinal))
+            {
+                return new FrontendReadyAckResult
+                {
+                    Accepted = true,
+                    RoundCreated = await HasActiveRoundAsync(db, normalizedCameraId),
+                    CameraId = normalizedCameraId,
+                    ActivationPhase = state.ActivationPhase,
+                    ActivationSessionId = normalizedActivationSessionId,
+                };
+            }
+
+            throw new InvalidOperationException("Camera nao esta aguardando confirmacao do frontend.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.ActiveStreamProfileId)
+            && !string.Equals(state.ActiveStreamProfileId, normalizedProfileId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Stream profile nao corresponde a ativacao pendente.");
+        }
+
+        if (!string.Equals(state.ExpectedFrontendAckNonce, normalizedNonce, StringComparison.Ordinal))
+            throw new InvalidOperationException("Activation nonce invalido ou expirado.");
+        if (!string.Equals(state.ActivationSessionId, normalizedActivationSessionId, StringComparison.Ordinal))
+            throw new InvalidOperationException("Activation session invalida ou expirada.");
+
+        if (state.FrontendAckReceived
+            && string.Equals(state.LastFrontendAckSessionId, normalizedSessionId, StringComparison.Ordinal))
+        {
+            return new FrontendReadyAckResult
+            {
+                Accepted = true,
+                RoundCreated = await HasActiveRoundAsync(db, normalizedCameraId),
+                CameraId = normalizedCameraId,
+                ActivationPhase = "ready",
+                ActivationSessionId = normalizedActivationSessionId,
+            };
+        }
+
+        state.ActivationPhase = "ready";
+        state.ReadyForRounds = true;
+        state.LastReadyActivationSessionId = normalizedActivationSessionId;
+        state.FrontendAckReceived = true;
+        state.FrontendAckedAt = DateTime.UtcNow;
+        state.LastFrontendAckSessionId = normalizedSessionId;
+        state.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation(
+            "[Activation] Frontend ready aceito para camera {CameraId} session={ActivationSessionId} nonce={ActivationNonce} gameSession={GameSessionId}.",
+            normalizedCameraId,
+            normalizedActivationSessionId,
+            normalizedNonce,
+            normalizedSessionId);
+
+        var roundCreated = await EnsureActiveRoundAsync(normalizedCameraId);
+        return new FrontendReadyAckResult
+        {
+            Accepted = true,
+            RoundCreated = roundCreated || await HasActiveRoundAsync(normalizedCameraId),
+            CameraId = normalizedCameraId,
+            ActivationPhase = state.ActivationPhase,
+            ActivationSessionId = normalizedActivationSessionId,
+        };
+    }
+
     public async Task HandleCameraSourceActivationAsync(string cameraId, string sourceUrl)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -427,6 +558,12 @@ public class RoundService
         state.ActiveStreamProfileId = null;
         state.ActivationPhase = "waiting_stream";
         state.ReadyForRounds = false;
+        state.ExpectedFrontendAckNonce = null;
+        state.ActivationSessionId = null;
+        state.FrontendAckReceived = false;
+        state.FrontendAckedAt = null;
+        state.LastFrontendAckSessionId = null;
+        state.ActivationRequestedAt = now;
         state.RoundsSinceProfileSwitch = 0;
         state.LastProfileChangedAt = now;
         state.LastSourceFingerprint = sourceFingerprint;
@@ -512,10 +649,11 @@ public class RoundService
             if (!CanCreateRounds(state))
             {
                 _logger.LogInformation(
-                    "[Round] Criacao adiada para camera {CameraId} porque activationPhase={Phase} readyForRounds={ReadyForRounds}.",
+                    "[Round] Criacao adiada para camera {CameraId} porque activationPhase={Phase} readyForRounds={ReadyForRounds} activationSessionId={ActivationSessionId}.",
                     normalizedCameraId,
                     state.ActivationPhase,
-                    state.ReadyForRounds);
+                    state.ReadyForRounds,
+                    state.ActivationSessionId ?? "none");
                 return null;
             }
 
@@ -579,12 +717,13 @@ public class RoundService
             await db.SaveChangesAsync();
 
             _logger.LogInformation(
-                "[Round {Id}] Iniciado para camera {CameraId} no modo {RoundMode} com {Count} mercado(s). Encerra as {EndsAt:HH:mm:ss} UTC.",
+                "[Round {Id}] Iniciado para camera {CameraId} no modo {RoundMode} com {Count} mercado(s). Encerra as {EndsAt:HH:mm:ss} UTC. activationSessionId={ActivationSessionId}",
                 round.RoundId,
                 round.CameraId,
                 round.RoundMode,
                 markets.Count,
-                round.EndsAt);
+                round.EndsAt,
+                state.ActivationSessionId ?? "none");
 
             return round;
         }
@@ -801,6 +940,10 @@ public class RoundService
 
     private async Task<CameraRoundState> GetOrCreateCameraRoundStateAsync(AppDbContext db, string cameraId)
     {
+        var tracked = db.CameraRoundStates.Local.FirstOrDefault(x => x.CameraId == cameraId);
+        if (tracked is not null)
+            return tracked;
+
         var state = await db.CameraRoundStates.FirstOrDefaultAsync(x => x.CameraId == cameraId);
         if (state is not null)
             return state;
@@ -810,6 +953,7 @@ public class RoundService
             CameraId = cameraId,
             ActivationPhase = "ready",
             CreatedAt = DateTime.UtcNow,
+            FrontendAckReceived = false,
             ReadyForRounds = true,
             UpdatedAt = DateTime.UtcNow,
             RoundsSinceProfileSwitch = 0,
@@ -828,9 +972,30 @@ public class RoundService
         {
             "ready" => "ready",
             "requested" => "requested",
+            "frontend_pending" => "frontend_pending",
             "waiting_stream" => "waiting_stream",
             _ => "requested",
         };
+    }
+
+    private async Task<bool> HasActiveRoundAsync(string cameraId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await HasActiveRoundAsync(db, cameraId);
+    }
+
+    private static Task<bool> HasActiveRoundAsync(AppDbContext db, string cameraId) =>
+        db.Rounds.AnyAsync(r =>
+            r.CameraId == cameraId &&
+            r.Status != RoundStatus.Settled &&
+            r.Status != RoundStatus.Void);
+
+    private static string NormalizeRequiredText(string? value, string fieldName)
+    {
+        var normalized = NormalizeOptional(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+            throw new InvalidOperationException($"{fieldName} is required.");
+        return normalized;
     }
 
     private List<MarketTemplate> GetMarketTemplates()

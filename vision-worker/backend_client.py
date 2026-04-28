@@ -224,6 +224,8 @@ class BackendClient:
         allow_settling: bool = False,
         auto_switch_round: bool = False,
         phase: str = "requested",
+        activation_nonce: str = "",
+        activation_session_id: str = "",
     ) -> bool:
         payload = {
             "cameraId": str(camera_id or "").strip(),
@@ -231,6 +233,8 @@ class BackendClient:
             "allowSettling": bool(allow_settling),
             "autoSwitchRound": bool(auto_switch_round),
             "phase": str(phase or "requested").strip().lower(),
+            "activationNonce": str(activation_nonce or "").strip() or None,
+            "activationSessionId": str(activation_session_id or "").strip() or None,
         }
 
         if not payload["cameraId"]:

@@ -80,6 +80,26 @@ function filterHistoryByPipelineCameras(history, cameraIds) {
   })
 }
 
+function getRuntimeHistoryCameraIds(operations, activeCameraId) {
+  const activated = Array.isArray(operations?.recentRuntimeCameraIds || operations?.health?.recentRuntimeCameraIds)
+    ? (operations?.recentRuntimeCameraIds || operations?.health?.recentRuntimeCameraIds)
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    : []
+
+  if (activated.length > 0) return activated
+
+  const fallback = String(activeCameraId || '').trim()
+  return fallback ? [fallback] : []
+}
+
+function isAwaitingFrontendAck(operations) {
+  const phase = String(operations?.frontendAckPhase || operations?.health?.frontendAckPhase || '').trim().toLowerCase()
+  const required = Boolean(operations?.frontendAckRequired ?? operations?.health?.frontendAckRequired)
+  if (!required) return false
+  return phase === 'requested' || phase === 'frontend_pending'
+}
+
 function isRoundForPipeline(round, cameraIds) {
   const allowed = Array.isArray(cameraIds)
     ? cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
@@ -159,13 +179,13 @@ export default function AdminDashboard() {
   const activeStreamPath = cameraActivation?.readyProcessedStreamPath || operations?.processedStreamPath || operations?.health?.processedStreamPath || ''
   const activeCameraId = cameraActivation?.readyCameraId || operations?.cameraId || operations?.health?.cameraId || embedConfig.cameraId
   const transitionCameraLabel = cameraActivation?.requestedProfileLabel || cameraActivation?.requestedCameraId || activeCameraId
-  const filteredHistory = useMemo(
-    () => filterHistoryByPipelineCameras(history, operations?.streamProfileCameraIds || operations?.health?.streamProfileCameraIds),
-    [history, operations?.health?.streamProfileCameraIds, operations?.streamProfileCameraIds],
-  )
   const pipelineCameraIds = useMemo(
-    () => (operations?.streamProfileCameraIds || operations?.health?.streamProfileCameraIds || []),
-    [operations?.health?.streamProfileCameraIds, operations?.streamProfileCameraIds],
+    () => getRuntimeHistoryCameraIds(operations, activeCameraId),
+    [operations, activeCameraId],
+  )
+  const filteredHistory = useMemo(
+    () => filterHistoryByPipelineCameras(history, pipelineCameraIds),
+    [history, pipelineCameraIds],
   )
   const webrtcSrc = useMemo(
     () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
@@ -259,11 +279,19 @@ export default function AdminDashboard() {
   }, [loadRoundArtifacts])
 
   const loadRounds = useCallback(async (preferredRoundId = '') => {
-    const [nextCurrentRound, roundHistory, nextRecentRounds] = await Promise.all([
-      getCurrentRound(activeCameraId),
+    const [currentRoundResult, roundHistory, nextRecentRounds] = await Promise.all([
+      getCurrentRound(activeCameraId).then((value) => ({ ok: true, value })).catch((error) => ({ ok: false, error })),
       getRoundHistory(),
       getRecentRounds(activeCameraId, 12),
     ])
+
+    if (!currentRoundResult.ok) {
+      if (currentRoundResult.error?.response?.status !== 404 || !isAwaitingFrontendAck(operations)) {
+        throw currentRoundResult.error
+      }
+    }
+
+    const nextCurrentRound = currentRoundResult.ok ? currentRoundResult.value : null
 
     setCurrentRound(nextCurrentRound)
     setHistory(Array.isArray(roundHistory) ? roundHistory : [])

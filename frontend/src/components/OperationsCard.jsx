@@ -52,6 +52,15 @@ export default function OperationsCard({
   const frontendOnline = streamState === 'online'
   const fallbackActive = transportMode !== 'WEBRTC'
   const estimatedLatencyMs = (health?.avgInferenceMs ?? 0) + (health?.avgJpegEncodeMs ?? 0)
+  const frontendAckPhase = String(health?.frontendAckPhase || '').trim().toLowerCase()
+  const activation = health?.cameraActivation || {}
+  const frontendAckStatus = frontendAckPhase === 'frontend_pending'
+    ? 'Aguardando player publico'
+    : frontendAckPhase === 'requested'
+      ? 'Aguardando stream pronta'
+      : frontendAckPhase === 'ready'
+        ? 'Liberado'
+        : '--'
 
   return (
     <div className="card operations-card">
@@ -104,8 +113,16 @@ export default function OperationsCard({
         <Metric label="Backend" value={backendOnline ? 'Online' : 'Degradado'} />
         <Metric label="Contagem worker" value={health?.totalCount ?? 0} />
         <Metric label="Último publish" value={formatDateTime(health?.lastPublishAt)} />
+        <Metric label="Gate round" value={frontendAckStatus} />
       </div>
-
+      <div className="operations-grid">
+        <Metric label="Sessao ativacao" value={activation?.activationSessionId || '--'} />
+        <Metric label="Ativacao pedida" value={formatDateTime(activation?.activationRequestedAt)} />
+        <Metric label="1o frame capturado" value={formatDateTime(activation?.firstCaptureAt)} />
+        <Metric label="1o frame renderizavel" value={formatDateTime(activation?.firstRenderableFrameAt)} />
+        <Metric label="1o frame publicado" value={formatDateTime(activation?.firstPublishedAt)} />
+        <Metric label="Ultima sessao renderizada" value={activation?.lastRenderableActivationSessionId || '--'} />
+      </div>
       <div className="operations-footer">
         <div className="ops-event">
           <span className="ops-footer-label">Último evento recebido</span>

@@ -6,7 +6,7 @@ import HistoryDropdown from './components/HistoryDropdown'
 import LastResults from './components/LastResults'
 import VideoPlayer from './components/VideoPlayer'
 import { placeBet } from './services/betApi'
-import { getCurrentRound, getRoundHistory } from './services/roundApi'
+import { acknowledgeFrontendReady, getCurrentRound, getRoundHistory } from './services/roundApi'
 import { startRoundConnection, stopRoundConnection } from './services/roundSignalr'
 import { getWorkerHealth } from './services/workerHealthApi'
 import { getRoundPhase, getTimeLeftInSeconds, parseTimestampMs } from './utils/time'
@@ -78,6 +78,32 @@ function getRoundDurationLabel(round) {
   const minutes = Math.round((ends - created) / 60000)
   if (minutes <= 0) return null
   return `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`
+}
+
+function isAwaitingFrontendAck(workerHealth) {
+  const phase = String(workerHealth?.frontendAckPhase || '').trim().toLowerCase()
+  if (!workerHealth?.frontendAckRequired) return false
+  return phase === 'requested' || phase === 'frontend_pending'
+}
+
+function getActivationSessionId(workerHealth) {
+  return String(
+    workerHealth?.cameraActivation?.activationSessionId
+    || workerHealth?.activationSessionId
+    || '',
+  ).trim()
+}
+
+function hasRenderableActivationProof(workerHealth, activationSessionId) {
+  const currentActivationSessionId = String(activationSessionId || '').trim()
+  if (!currentActivationSessionId) return false
+
+  const activation = workerHealth?.cameraActivation || {}
+  const renderableSessionId = String(activation?.lastRenderableActivationSessionId || '').trim()
+  const firstRenderableFrameAt = activation?.firstRenderableFrameAt
+  const firstPublishedAt = activation?.firstPublishedAt
+
+  return renderableSessionId === currentActivationSessionId && Boolean(firstRenderableFrameAt || firstPublishedAt)
 }
 
 function LiveBadge({ phase, workerOnline = false }) {
@@ -157,6 +183,17 @@ function filterHistoryByPipelineCameras(history, cameraIds) {
   })
 }
 
+function getRuntimeHistoryCameraIds(workerHealth, activeCameraId) {
+  const activated = Array.isArray(workerHealth?.recentRuntimeCameraIds)
+    ? workerHealth.recentRuntimeCameraIds.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+
+  if (activated.length > 0) return activated
+
+  const fallback = String(activeCameraId || '').trim()
+  return fallback ? [fallback] : []
+}
+
 function MarketPage() {
   const [embedConfig, setEmbedConfig] = useState(() => getEmbedConfig())
   const [round, setRound] = useState(null)
@@ -170,6 +207,7 @@ function MarketPage() {
   const [isSubmittingBet, setIsSubmittingBet] = useState(false)
   const [workerHealth, setWorkerHealth] = useState(null)
   const roundIdRef = useRef('')
+  const lastFrontendAckKeyRef = useRef('')
 
   const roundPhase = getRoundPhase(round)
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
@@ -186,22 +224,37 @@ function MarketPage() {
     () => markets.find((market) => (market.marketId || market.id) === selectedMarketId) || null,
     [markets, selectedMarketId],
   )
-  const filteredHistory = useMemo(
-    () => filterHistoryByPipelineCameras(history, workerHealth?.streamProfileCameraIds),
-    [history, workerHealth?.streamProfileCameraIds],
-  )
   const cameraActivation = workerHealth?.cameraActivation || null
+  const roundCameraId = cameraActivation?.readyCameraId || workerHealth?.cameraId || embedConfig.cameraId
   const pipelineCameraIds = useMemo(
-    () => (Array.isArray(workerHealth?.streamProfileCameraIds) ? workerHealth.streamProfileCameraIds : []),
-    [workerHealth?.streamProfileCameraIds],
+    () => getRuntimeHistoryCameraIds(workerHealth, roundCameraId),
+    [workerHealth, roundCameraId],
+  )
+  const filteredHistory = useMemo(
+    () => filterHistoryByPipelineCameras(history, pipelineCameraIds),
+    [history, pipelineCameraIds],
   )
   const recentHistory = useMemo(() => filteredHistory.slice(0, RECENT_HISTORY_LIMIT), [filteredHistory])
   const isCameraTransitioning = Boolean(cameraActivation && cameraActivation.phase !== 'ready')
-  const roundCameraId = cameraActivation?.readyCameraId || workerHealth?.cameraId || embedConfig.cameraId
   const activeStreamPath = cameraActivation?.readyProcessedStreamPath || workerHealth?.processedStreamPath || ''
   const activeCameraId = roundCameraId
   const activeCameraLabel = cameraActivation?.readyProfileLabel || workerHealth?.streamRotation?.activeProfileLabel || embedConfig.cameraLabel
   const transitionCameraLabel = cameraActivation?.requestedProfileLabel || workerHealth?.streamRotation?.activeProfileLabel || activeCameraLabel
+  const frontendAckPhase = String(workerHealth?.frontendAckPhase || '').trim().toLowerCase()
+  const frontendAckNonce = String(workerHealth?.frontendAckNonce || '').trim()
+  const activationSessionId = getActivationSessionId(workerHealth)
+  const selectedStreamProfileId = String(workerHealth?.selectedStreamProfileId || '').trim()
+  const waitingFrontendAck = isAwaitingFrontendAck(workerHealth)
+  const awaitingFrontendRound = !round && waitingFrontendAck
+  const playbackSourceSignature = useMemo(
+    () => JSON.stringify({
+      cameraId: String(activeCameraId || '').trim(),
+      path: String(activeStreamPath || '').trim(),
+      nonce: frontendAckNonce,
+      activationSessionId,
+    }),
+    [activeCameraId, activeStreamPath, activationSessionId, frontendAckNonce],
+  )
   const webrtcSrc = useMemo(
     () => buildWebRtcWrapperUrlFromPath(activeStreamPath, activeCameraId),
     [activeCameraId, activeStreamPath],
@@ -238,23 +291,76 @@ function MarketPage() {
       updateRound(data)
       setError('')
     } catch (err) {
+      if (err?.response?.status === 404 && waitingFrontendAck) {
+        updateRound(null)
+        setError('')
+        return
+      }
       console.error(err)
       setError('Falha ao carregar o round atual.')
     }
-  }, [activeCameraId, updateRound])
+  }, [activeCameraId, updateRound, waitingFrontendAck])
 
   const loadHistory = useCallback(async () => {
     try {
-      const data = await getRoundHistory(activeCameraId)
+      const data = await getRoundHistory('', pipelineCameraIds)
       setHistory(data)
     } catch (err) {
       console.error(err)
     }
-  }, [activeCameraId])
+  }, [pipelineCameraIds])
 
   const reconcileRecentBets = useCallback((roundData) => {
     setRecentBets((current) => current.map((bet) => reconcileBetWithRound(bet, roundData)))
   }, [])
+
+  const handleFirstPlayableFrame = useCallback(async ({ sourceSignature, mode, activationSessionId: provedActivationSessionId }) => {
+    if (!workerHealth?.frontendAckRequired) return
+    if (frontendAckPhase !== 'frontend_pending') return
+    if (mode !== 'activation-probe') return
+    if (!frontendAckNonce || !activeCameraId || !embedConfig.gameSessionId || !activationSessionId) return
+    if (sourceSignature !== playbackSourceSignature) return
+    if (String(provedActivationSessionId || '').trim() !== activationSessionId) return
+    if (!hasRenderableActivationProof(workerHealth, activationSessionId)) return
+
+    const ackKey = [activeCameraId, selectedStreamProfileId, frontendAckNonce, activationSessionId, sourceSignature].join('|')
+    if (lastFrontendAckKeyRef.current === ackKey) return
+
+    lastFrontendAckKeyRef.current = ackKey
+    try {
+      const ackResult = await acknowledgeFrontendReady({
+        cameraId: activeCameraId,
+        streamProfileId: selectedStreamProfileId,
+        gameSessionId: embedConfig.gameSessionId,
+        activationNonce: frontendAckNonce,
+        activationSessionId,
+      })
+      if (ackResult?.accepted) {
+        setWorkerHealth((current) => current ? {
+          ...current,
+          frontendAckPhase: ackResult.activationPhase || 'ready',
+          cameraActivation: current.cameraActivation ? {
+            ...current.cameraActivation,
+            frontendAckPhase: ackResult.activationPhase || 'ready',
+          } : current.cameraActivation,
+        } : current)
+      }
+      await loadCurrentRound()
+    } catch (err) {
+      lastFrontendAckKeyRef.current = ''
+      console.error(err)
+    }
+  }, [
+    activeCameraId,
+    embedConfig.gameSessionId,
+    activationSessionId,
+    frontendAckNonce,
+    frontendAckPhase,
+    loadCurrentRound,
+    playbackSourceSignature,
+    selectedStreamProfileId,
+    workerHealth?.frontendAckRequired,
+  ])
 
   function handleMarketSelect(market) {
     if (!round) return
@@ -342,13 +448,19 @@ function MarketPage() {
       try {
         const [currentRound, roundHistory] = await Promise.all([
           getCurrentRound(activeCameraId),
-          getRoundHistory(activeCameraId),
+          getRoundHistory('', pipelineCameraIds),
         ])
         if (!active) return
         updateRound(currentRound)
         setHistory(roundHistory)
         setError('')
       } catch (err) {
+        if (err?.response?.status === 404 && waitingFrontendAck) {
+          if (!active) return
+          updateRound(null)
+          setError('')
+          return
+        }
         if (!active) return
         console.error(err)
         setError('Falha ao carregar os dados iniciais.')
@@ -414,7 +526,7 @@ function MarketPage() {
       clearInterval(historyPollId)
       stopRoundConnection().catch(console.error)
     }
-  }, [activeCameraId, loadCurrentRound, loadHistory, pipelineCameraIds, reconcileRecentBets, updateRound])
+  }, [activeCameraId, loadCurrentRound, loadHistory, pipelineCameraIds, reconcileRecentBets, updateRound, waitingFrontendAck])
 
   useEffect(() => {
     let active = true
@@ -423,7 +535,28 @@ function MarketPage() {
       try {
         const data = await getWorkerHealth()
         if (!active) return
-        setWorkerHealth(data)
+        setWorkerHealth((current) => {
+          const currentActivationSessionId = getActivationSessionId(current)
+          const nextActivationSessionId = getActivationSessionId(data)
+          const currentPhase = String(current?.frontendAckPhase || '').trim().toLowerCase()
+          const nextPhase = String(data?.frontendAckPhase || '').trim().toLowerCase()
+          if (
+            currentActivationSessionId
+            && currentActivationSessionId === nextActivationSessionId
+            && currentPhase === 'ready'
+            && nextPhase !== 'ready'
+          ) {
+            return {
+              ...data,
+              frontendAckPhase: 'ready',
+              cameraActivation: data?.cameraActivation ? {
+                ...data.cameraActivation,
+                frontendAckPhase: 'ready',
+              } : data?.cameraActivation,
+            }
+          }
+          return data
+        })
       } catch {
         if (!active) return
         setWorkerHealth((current) => current)
@@ -441,6 +574,10 @@ function MarketPage() {
       clearInterval(intervalId)
     }
   }, [isCameraTransitioning])
+
+  useEffect(() => {
+    lastFrontendAckKeyRef.current = ''
+  }, [activeCameraId, activeStreamPath, activationSessionId, frontendAckNonce, selectedStreamProfileId])
 
   useEffect(() => {
     const handleConfigUpdate = () => {
@@ -549,9 +686,9 @@ function MarketPage() {
           <div className="left-panel">
             <div className="count-bar">
               <div className="count-bar-right">
-                <span className="count-bar-label">TEMPO DO ROUND</span>
+                <span className="count-bar-label">{awaitingFrontendRound ? 'STATUS DO ROUND' : 'TEMPO DO ROUND'}</span>
                 <span className="count-bar-timer">
-                  {padTime(timeLeftSeconds / 60)}:{padTime(timeLeftSeconds % 60)}
+                  {awaitingFrontendRound ? 'AGUARDANDO CAMERA' : `${padTime(timeLeftSeconds / 60)}:${padTime(timeLeftSeconds % 60)}`}
                 </span>
               </div>
             </div>
@@ -561,10 +698,15 @@ function MarketPage() {
                 webrtcSrc={webrtcSrc}
                 src={hlsSrc}
                 fallbackSrc={mjpegSrc}
+                sourceSignature={playbackSourceSignature}
+                activationSessionId={activationSessionId}
+                activationProbeEnabled={waitingFrontendAck}
                 title={activeCameraLabel || 'Transmissão ao vivo'}
                 transitionLabel={transitionCameraLabel || 'Nova câmera'}
                 transitioning={isCameraTransitioning}
                 countValue={displayCount}
+                onFirstPlayableFrame={handleFirstPlayableFrame}
+                playableFrameToken={frontendAckNonce}
               />
             </div>
 
@@ -576,29 +718,43 @@ function MarketPage() {
           </div>
 
           <div className="right-panel">
-            <BettingPanel
-              markets={markets}
-              roundPhase={roundPhase}
-              betCloseSeconds={betCloseSeconds}
-              selectedMarketId={selectedMarketId}
-              onMarketSelect={handleMarketSelect}
-              onSubmitBet={handleSubmitBet}
-              stakeAmount={stakeAmount}
-              onStakeChange={setStakeAmount}
-              stakeOptions={embedConfig.stakeOptions}
-              locale={embedConfig.locale}
-              currency={embedConfig.currency}
-              balance={0}
-              isSuspended={round?.isSuspended}
-              recentBets={recentBets}
-              isSubmittingBet={isSubmittingBet}
-            />
+            {awaitingFrontendRound ? (
+              <div className="betting-panel">
+                <div className="betting-panel-header">
+                  <div className="betting-panel-timer">
+                    <span className="betting-panel-timer-label">Status do round</span>
+                    <strong className="betting-panel-timer-value">Aguardando câmera</strong>
+                  </div>
+                </div>
+                <div className="positions-empty">
+                  A câmera está ficando 100% online no frontend público. O round só será aberto após o primeiro frame confirmado.
+                </div>
+              </div>
+            ) : (
+              <BettingPanel
+                markets={markets}
+                roundPhase={roundPhase}
+                betCloseSeconds={betCloseSeconds}
+                selectedMarketId={selectedMarketId}
+                onMarketSelect={handleMarketSelect}
+                onSubmitBet={handleSubmitBet}
+                stakeAmount={stakeAmount}
+                onStakeChange={setStakeAmount}
+                stakeOptions={embedConfig.stakeOptions}
+                locale={embedConfig.locale}
+                currency={embedConfig.currency}
+                balance={0}
+                isSuspended={round?.isSuspended}
+                recentBets={recentBets}
+                isSubmittingBet={isSubmittingBet}
+              />
+            )}
             <DetectionsList detections={[]} />
           </div>
         </div>
 
         {/* Bottom market bar */}
-        {markets.length > 0 && (
+        {!awaitingFrontendRound && markets.length > 0 && (
           <div className="bottom-market-bar">
             {markets.map((m) => {
               const mId = m.marketId || m.id

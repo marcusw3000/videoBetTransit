@@ -49,8 +49,7 @@
 
         player.addEventListener('load', function () {
           ready = true;
-          emit('first-frame');
-          emit('playing');
+          emit('loaded');
         });
 
         player.addEventListener('error', function () {
@@ -58,7 +57,7 @@
         });
 
         setInterval(function () {
-          if (ready) emit('playing');
+          if (ready) emit('heartbeat');
         }, 5000);
 
         player.src = src;

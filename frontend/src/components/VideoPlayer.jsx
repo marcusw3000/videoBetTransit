@@ -24,10 +24,15 @@ export default function VideoPlayer({
   src = '',
   fallbackSrc = '',
   title = 'Ao Vivo',
+  sourceSignature = '',
+  activationSessionId = '',
+  activationProbeEnabled = false,
   countValue = 0,
   transitionLabel = '',
   transitioning = false,
   onStreamStatusChange,
+  onFirstPlayableFrame,
+  playableFrameToken = '',
 }) {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
@@ -36,6 +41,8 @@ export default function VideoPlayer({
   const transitionStartedAtRef = useRef(0)
   const previousSourceSignatureRef = useRef('')
   const previousExternalTransitioningRef = useRef(false)
+  const lastPlayableNotificationRef = useRef('')
+  const lastPlayableSourceRef = useRef('')
   const [mode, setMode] = useState(() => getPreferredMode(webrtcSrc, src, fallbackSrc))
   const [hasError, setHasError] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
@@ -45,7 +52,7 @@ export default function VideoPlayer({
   const reloadedWebRtcSrc = useMemo(() => buildReloadedSrc(webrtcSrc, reloadToken), [reloadToken, webrtcSrc])
   const primarySrc = useMemo(() => buildReloadedSrc(src, reloadToken), [reloadToken, src])
   const mjpegFallbackSrc = useMemo(() => buildReloadedSrc(fallbackSrc, reloadToken), [fallbackSrc, reloadToken])
-  const sourceSignature = useMemo(
+  const mediaSignature = useMemo(
     () => JSON.stringify({
       webrtcSrc: String(webrtcSrc || '').trim(),
       src: String(src || '').trim(),
@@ -54,6 +61,25 @@ export default function VideoPlayer({
     }),
     [fallbackSrc, src, title, webrtcSrc],
   )
+  const callbackSourceSignature = useMemo(
+    () => String(sourceSignature || '').trim() || mediaSignature,
+    [mediaSignature, sourceSignature],
+  )
+  const normalizedActivationSessionId = useMemo(
+    () => String(activationSessionId || '').trim(),
+    [activationSessionId],
+  )
+  const playbackSessionKey = useMemo(
+    () => JSON.stringify({
+      mediaSignature,
+      playableFrameToken: String(playableFrameToken || '').trim(),
+    }),
+    [mediaSignature, playableFrameToken],
+  )
+  const activationProbeSrc = useMemo(() => {
+    if (!activationProbeEnabled || !fallbackSrc) return ''
+    return buildReloadedSrc(fallbackSrc, playableFrameToken || reloadToken)
+  }, [activationProbeEnabled, fallbackSrc, playableFrameToken, reloadToken])
   const effectiveTransitionLabel = useMemo(
     () => String(transitionLabel || title || 'Nova câmera').trim(),
     [title, transitionLabel],
@@ -62,6 +88,20 @@ export default function VideoPlayer({
   const notifyStatus = useCallback((status) => {
     onStreamStatusChange?.(status)
   }, [onStreamStatusChange])
+
+  const notifyPlayableFrame = useCallback((playbackMode) => {
+    if (transitioning || isTransitioning) return
+    if (!callbackSourceSignature) return
+    const notificationKey = playbackSessionKey
+    if (lastPlayableNotificationRef.current === notificationKey) return
+    lastPlayableNotificationRef.current = notificationKey
+    onFirstPlayableFrame?.({
+      mode: playbackMode,
+      sourceSignature: callbackSourceSignature,
+      activationSessionId: normalizedActivationSessionId,
+      title: String(title || '').trim(),
+    })
+  }, [callbackSourceSignature, isTransitioning, normalizedActivationSessionId, onFirstPlayableFrame, playbackSessionKey, title, transitioning])
 
   const clearTransitionTimer = useCallback(() => {
     if (transitionTimeoutRef.current) {
@@ -150,12 +190,19 @@ export default function VideoPlayer({
     setMode(getPreferredMode(webrtcSrc, src, fallbackSrc))
     setHasError(false)
     setWebrtcReady(false)
-  }, [fallbackSrc, src, webrtcSrc])
+    lastPlayableNotificationRef.current = ''
+    lastPlayableSourceRef.current = ''
+  }, [fallbackSrc, playableFrameToken, src, webrtcSrc])
+
+  useEffect(() => {
+    if (lastPlayableSourceRef.current !== playbackSessionKey) return
+    notifyPlayableFrame(mode)
+  }, [mode, notifyPlayableFrame, playbackSessionKey])
 
   useEffect(() => {
     const previous = previousSourceSignatureRef.current
     const previousExternalTransitioning = previousExternalTransitioningRef.current
-    previousSourceSignatureRef.current = sourceSignature
+    previousSourceSignatureRef.current = playbackSessionKey
     previousExternalTransitioningRef.current = Boolean(transitioning)
 
     if (!previous) {
@@ -163,14 +210,17 @@ export default function VideoPlayer({
     }
 
     if (
-      previous !== sourceSignature
+      previous !== playbackSessionKey
       && (webrtcSrc || src || fallbackSrc)
       && !transitioning
       && !previousExternalTransitioning
     ) {
       beginCameraTransition()
+      setReloadToken(Date.now())
+      lastPlayableNotificationRef.current = ''
+      lastPlayableSourceRef.current = ''
     }
-  }, [beginCameraTransition, fallbackSrc, sourceSignature, src, transitioning, webrtcSrc])
+  }, [beginCameraTransition, fallbackSrc, playbackSessionKey, src, transitioning, webrtcSrc])
 
   useEffect(() => {
     if (!reloadedWebRtcSrc || mode !== 'webrtc') return undefined
@@ -182,7 +232,7 @@ export default function VideoPlayer({
       const payload = event.data
       if (!payload || payload.source !== WRAPPER_SOURCE) return
 
-      if (payload.type === 'first-frame' || payload.type === 'playing') {
+      if (payload.type === 'loaded' || payload.type === 'heartbeat') {
         setWebrtcReady(true)
         setHasError(false)
         finishCameraTransition()
@@ -209,7 +259,7 @@ export default function VideoPlayer({
       window.clearTimeout(timerId)
       window.removeEventListener('message', handleMessage)
     }
-  }, [finishCameraTransition, mode, notifyStatus, reloadedWebRtcSrc, switchToHls])
+  }, [finishCameraTransition, mode, notifyPlayableFrame, notifyStatus, playbackSessionKey, reloadedWebRtcSrc, switchToHls])
 
   useEffect(() => {
     const video = videoRef.current
@@ -224,8 +274,10 @@ export default function VideoPlayer({
       video.src = primarySrc
       const handleLoaded = () => {
         setHasError(false)
+        lastPlayableSourceRef.current = playbackSessionKey
         finishCameraTransition()
         notifyStatus('online')
+        notifyPlayableFrame('hls')
       }
       const handleNativeError = () => switchToFallback()
 
@@ -294,7 +346,7 @@ export default function VideoPlayer({
     return () => {
       clearHlsResources()
     }
-  }, [clearHlsResources, mode, notifyStatus, primarySrc, switchToFallback])
+  }, [clearHlsResources, mode, notifyPlayableFrame, notifyStatus, playbackSessionKey, primarySrc, switchToFallback])
 
   useEffect(() => () => {
     clearHlsResources()
@@ -303,8 +355,14 @@ export default function VideoPlayer({
 
   function handleFallbackLoad() {
     setHasError(false)
+    lastPlayableSourceRef.current = playbackSessionKey
     finishCameraTransition()
     notifyStatus('online')
+    notifyPlayableFrame('mjpeg')
+  }
+
+  function handleActivationProbeLoad() {
+    notifyPlayableFrame('activation-probe')
   }
 
   function handleFallbackError() {
@@ -335,13 +393,13 @@ export default function VideoPlayer({
         </button>
       </div>
 
-      <div className={`video-frame${isTransitioning ? ' video-frame-transitioning' : ''}`}>
+      <div className="video-frame">
         <div className="video-count-overlay">
           <span className="video-count-label">Contagem da Rodada</span>
           <strong className="video-count-value">{countValue ?? 0}</strong>
         </div>
 
-        {(transitioning || isTransitioning) && (
+        {false && (
           <div className="video-transition-overlay" aria-live="polite">
             <div className="video-transition-chip">
               <span className="video-transition-spinner" aria-hidden="true" />
@@ -356,7 +414,18 @@ export default function VideoPlayer({
           <div className="video-overlay-message">Defina uma URL de stream para iniciar.</div>
         )}
 
-        {(webrtcSrc || src || fallbackSrc) && hasError && !(transitioning || isTransitioning) && (
+        {activationProbeSrc && (
+          <img
+            key={activationProbeSrc}
+            src={activationProbeSrc}
+            alt=""
+            aria-hidden="true"
+            style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+            onLoad={handleActivationProbeLoad}
+          />
+        )}
+
+        {(webrtcSrc || src || fallbackSrc) && hasError && (
           <div className="video-overlay-message">
             <div className="video-overlay-stack">
               <span>Falha ao carregar a transmissão.</span>
@@ -367,7 +436,7 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {!hasError && !(transitioning || isTransitioning) && mode === 'webrtc' && reloadedWebRtcSrc && (
+        {!hasError && mode === 'webrtc' && reloadedWebRtcSrc && (
           <iframe
             key={reloadedWebRtcSrc}
             src={reloadedWebRtcSrc}
@@ -377,7 +446,7 @@ export default function VideoPlayer({
           />
         )}
 
-        {!hasError && !(transitioning || isTransitioning) && mode === 'hls' && primarySrc && (
+        {!hasError && mode === 'hls' && primarySrc && (
           <video
             key={primarySrc}
             ref={videoRef}
@@ -389,7 +458,7 @@ export default function VideoPlayer({
           />
         )}
 
-        {!hasError && !(transitioning || isTransitioning) && mode === 'mjpeg' && mjpegFallbackSrc && (
+        {!hasError && mode === 'mjpeg' && mjpegFallbackSrc && (
           <img
             key={mjpegFallbackSrc}
             src={mjpegFallbackSrc}

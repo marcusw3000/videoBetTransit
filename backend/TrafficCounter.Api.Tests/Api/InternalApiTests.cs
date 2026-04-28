@@ -202,7 +202,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     {
         var seedCameraOne = new RoundCountEventDto
         {
-            CameraId = "cam_001",
+            CameraId = "cam_explicit_other_001",
             TrackId = "101",
             VehicleType = "car",
             CrossedAt = DateTime.UtcNow,
@@ -210,7 +210,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         };
         var seedCameraTwo = new RoundCountEventDto
         {
-            CameraId = "cam_002",
+            CameraId = "cam_explicit_other_002",
             TrackId = "201",
             VehicleType = "bus",
             CrossedAt = DateTime.UtcNow.AddSeconds(1),
@@ -220,8 +220,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         (await _client.PostAsJsonAsync("/internal/round-count-event", seedCameraOne)).EnsureSuccessStatusCode();
         (await _client.PostAsJsonAsync("/internal/round-count-event", seedCameraTwo)).EnsureSuccessStatusCode();
 
-        var cameraOneRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_001");
-        var cameraTwoRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_002");
+        var cameraOneRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_001");
+        var cameraTwoRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_002");
 
         Assert.NotNull(cameraOneRound);
         Assert.NotNull(cameraTwoRound);
@@ -229,7 +229,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         var conflictingEvent = new RoundCountEventDto
         {
-            CameraId = "cam_001",
+            CameraId = "cam_explicit_other_001",
             RoundId = cameraTwoRound.RoundId,
             TrackId = "102",
             VehicleType = "truck",
@@ -239,8 +239,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         (await _client.PostAsJsonAsync("/internal/round-count-event", conflictingEvent)).EnsureSuccessStatusCode();
 
-        var updatedCameraOneRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_001");
-        var updatedCameraTwoRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_002");
+        var updatedCameraOneRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_001");
+        var updatedCameraTwoRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_002");
 
         Assert.NotNull(updatedCameraOneRound);
         Assert.NotNull(updatedCameraTwoRound);
@@ -418,7 +418,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         Assert.NotNull(round);
         Assert.Equal("normal", round!.RoundMode);
-        AssertMarketLine(round, underThreshold: 4, rangeMin: 4, rangeMax: 8, exactTarget: 6, overThreshold: 9);
+        AssertMarketLine(round, underThreshold: 2, rangeMin: 2, rangeMax: 6, exactTarget: 4, overThreshold: 7);
     }
 
     [Fact]
@@ -672,6 +672,20 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         await SetCameraSourceSnapshotAsync(dbFactory, "cam_source_reset_idle", "rtsp://camera-a/live");
 
         await roundService.HandleCameraSourceActivationAsync("cam_source_reset_idle", "rtsp://camera-b/live");
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_source_reset_idle",
+            null,
+            allowSettling: true,
+            phase: "frontend_pending",
+            activationNonce: "nonce-source-reset-idle",
+            activationSessionId: "session-source-reset-idle");
+        (await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_source_reset_idle",
+            GameSessionId = "game-source-reset-idle",
+            ActivationNonce = "nonce-source-reset-idle",
+            ActivationSessionId = "session-source-reset-idle",
+        })).EnsureSuccessStatusCode();
         await roundService.EnsureActiveRoundAsync("cam_source_reset_idle");
 
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_reset_idle");
@@ -720,6 +734,20 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var createdBet = await betResponse.Content.ReadFromJsonAsync<BetResponse>();
 
         await roundService.HandleCameraSourceActivationAsync("cam_source_reset_active", "rtsp://camera-b/live");
+        await roundService.NotifyStreamProfileActivatedAsync(
+            "cam_source_reset_active",
+            null,
+            allowSettling: true,
+            phase: "frontend_pending",
+            activationNonce: "nonce-source-reset-active",
+            activationSessionId: "session-source-reset-active");
+        (await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_source_reset_active",
+            GameSessionId = "game-source-reset-active",
+            ActivationNonce = "nonce-source-reset-active",
+            ActivationSessionId = "session-source-reset-active",
+        })).EnsureSuccessStatusCode();
 
         var currentRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_reset_active");
         var voidedBet = await _client.GetFromJsonAsync<BetResponse>($"/bets/{createdBet!.Id}");
@@ -745,14 +773,27 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         using var scope = _factory.Services.CreateScope();
         var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        const string activationNonce = "nonce-normal-only";
 
         (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
         {
             CameraId = "cam_normal_only",
             StreamProfileId = "profile-a",
+            Phase = "frontend_pending",
+            ActivationNonce = activationNonce,
+            ActivationSessionId = "session-normal-only",
         })).EnsureSuccessStatusCode();
 
         await roundService.EnsureActiveRoundAsync("cam_normal_only");
+        var ackResponse = await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_normal_only",
+            StreamProfileId = "profile-a",
+            GameSessionId = "game_normal_only",
+            ActivationNonce = activationNonce,
+            ActivationSessionId = "session-normal-only",
+        });
+        ackResponse.EnsureSuccessStatusCode();
         await ForceSettleCurrentRoundAsync(dbFactory, "cam_normal_only");
         await roundService.EnsureActiveRoundAsync("cam_normal_only");
 
@@ -761,6 +802,129 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.NotNull(round);
         Assert.Equal("normal", round!.RoundMode);
         Assert.Equal("Rodada Normal", round.DisplayName);
+    }
+
+    [Fact]
+    public async Task Frontend_ready_ack_is_required_before_round_creation()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_frontend_ack_required",
+            StreamProfileId = "profile-front",
+            Phase = "frontend_pending",
+            ActivationNonce = "nonce-front-required",
+            ActivationSessionId = "session-front-required",
+        })).EnsureSuccessStatusCode();
+
+        var createdBeforeAck = await roundService.EnsureActiveRoundAsync("cam_frontend_ack_required");
+        Assert.False(createdBeforeAck);
+
+        var missingRoundResponse = await _client.GetAsync("/rounds/current?cameraId=cam_frontend_ack_required");
+        Assert.Equal(HttpStatusCode.NotFound, missingRoundResponse.StatusCode);
+
+        var ackResponse = await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_frontend_ack_required",
+            StreamProfileId = "profile-front",
+            GameSessionId = "game_frontend_ack_required",
+            ActivationNonce = "nonce-front-required",
+            ActivationSessionId = "session-front-required",
+        });
+        ackResponse.EnsureSuccessStatusCode();
+
+        var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_frontend_ack_required");
+        Assert.NotNull(round);
+    }
+
+    [Fact]
+    public async Task Frontend_ready_ack_rejects_stale_nonce_after_new_activation()
+    {
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_frontend_ack_nonce",
+            StreamProfileId = "profile-old",
+            Phase = "frontend_pending",
+            ActivationNonce = "nonce-old",
+            ActivationSessionId = "session-old",
+        })).EnsureSuccessStatusCode();
+
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_frontend_ack_nonce",
+            StreamProfileId = "profile-new",
+            Phase = "frontend_pending",
+            ActivationNonce = "nonce-new",
+            ActivationSessionId = "session-new",
+        })).EnsureSuccessStatusCode();
+
+        var staleAckResponse = await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_frontend_ack_nonce",
+            StreamProfileId = "profile-old",
+            GameSessionId = "game_frontend_ack_nonce",
+            ActivationNonce = "nonce-old",
+            ActivationSessionId = "session-old",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, staleAckResponse.StatusCode);
+
+        var validAckResponse = await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_frontend_ack_nonce",
+            StreamProfileId = "profile-new",
+            GameSessionId = "game_frontend_ack_nonce",
+            ActivationNonce = "nonce-new",
+            ActivationSessionId = "session-new",
+        });
+
+        validAckResponse.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task Frontend_ready_ack_rejects_stale_activation_session_after_new_activation()
+    {
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_frontend_ack_session",
+            StreamProfileId = "profile-shared",
+            Phase = "frontend_pending",
+            ActivationNonce = "nonce-shared",
+            ActivationSessionId = "session-old",
+        })).EnsureSuccessStatusCode();
+
+        (await _client.PostAsJsonAsync("/internal/rounds/profile-activated", new StreamProfileActivatedDto
+        {
+            CameraId = "cam_frontend_ack_session",
+            StreamProfileId = "profile-shared",
+            Phase = "frontend_pending",
+            ActivationNonce = "nonce-shared",
+            ActivationSessionId = "session-new",
+        })).EnsureSuccessStatusCode();
+
+        var staleAckResponse = await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_frontend_ack_session",
+            StreamProfileId = "profile-shared",
+            GameSessionId = "game_frontend_ack_session",
+            ActivationNonce = "nonce-shared",
+            ActivationSessionId = "session-old",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, staleAckResponse.StatusCode);
+
+        var validAckResponse = await _client.PostAsJsonAsync("/rounds/frontend-ready", new FrontendReadyAckDto
+        {
+            CameraId = "cam_frontend_ack_session",
+            StreamProfileId = "profile-shared",
+            GameSessionId = "game_frontend_ack_session",
+            ActivationNonce = "nonce-shared",
+            ActivationSessionId = "session-new",
+        });
+
+        validAckResponse.EnsureSuccessStatusCode();
     }
 
     [Fact]
@@ -860,6 +1024,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         {
             CameraId = "cam_lock_profile",
             StreamProfileId = "profile-z",
+            ActivationSessionId = "session-lock-profile",
         });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -876,6 +1041,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             CameraId = "cam_auto_profile",
             StreamProfileId = "profile-auto",
             AutoSwitchRound = true,
+            ActivationSessionId = "session-auto-profile",
         });
 
         response.EnsureSuccessStatusCode();
@@ -920,6 +1086,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             CameraId = "cam_boundary_profile",
             StreamProfileId = "profile-boundary",
             AllowSettling = true,
+            ActivationSessionId = "session-boundary-profile",
         });
 
         response.EnsureSuccessStatusCode();
@@ -1169,7 +1336,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             "cam_profile_reactivate",
             "stream_same_profile",
             allowSettling: true,
-            autoSwitchRound: true);
+            autoSwitchRound: true,
+            activationSessionId: "session-profile-reactivate");
 
         await roundService.NotifyStreamProfileActivatedAsync(
             "cam_profile_reactivate",
@@ -1195,7 +1363,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
             Assert.NotEqual(initialRoundId, activeRound.RoundId);
             Assert.Equal(initialRoundId, reactivatedRound.RoundId);
-            Assert.Equal("Stream activated for fresh round boundary", reactivatedRound.VoidReason);
+            Assert.Equal("Stream profile changed during active round", reactivatedRound.VoidReason);
             Assert.NotNull(reactivatedRound.VoidedAt);
         }
     }
@@ -1214,7 +1382,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             "cam_switch_primary",
             "stream_primary",
             allowSettling: true,
-            autoSwitchRound: true);
+            autoSwitchRound: true,
+            activationSessionId: "session-switch-primary");
 
         await using var db = await dbFactory.CreateDbContextAsync();
 
@@ -1249,7 +1418,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             "cam_ready_phase",
             "profile-ready-phase",
             allowSettling: true,
-            autoSwitchRound: true);
+            autoSwitchRound: true,
+            activationSessionId: "session-ready-phase");
 
         await using (var db = await dbFactory.CreateDbContextAsync())
         {
