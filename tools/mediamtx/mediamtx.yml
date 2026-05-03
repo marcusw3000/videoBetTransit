@@ -157,7 +157,7 @@ authJWTInHTTPQuery: true
 # Global settings -> Control API
 
 # Enable controlling the server through the Control API.
-api: false
+api: true
 # Address of the Control API listener.
 apiAddress: :9997
 # Enable HTTPS on the Control API server.

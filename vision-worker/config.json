@@ -1,5 +1,5 @@
 {
-  "stream_url": "https://stream.myt.mu/prod/LA_CHAUSSEE_STREET.stream_720p/playlist.m3u8",
+  "stream_url": "https://streaming1.highwaytraffic.go.th/Phase8/PER_8_038.stream/playlist.m3u8",
   "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct",
   "stream_buffer_size": 1,
   "stream_open_timeout_ms": 5000,
@@ -13,12 +13,12 @@
   "publisher_ffmpeg_bin": "ffmpeg",
   "mediamtx_api_url": "http://127.0.0.1:9997",
   "mediamtx_rtsp_url": "rtsp://127.0.0.1:8554",
-  "model": "../yolov8s.pt",
+  "model": "../yolo26n.pt",
   "tracker": "botsort_traffic.yaml",
   "backend_url": "http://127.0.0.1:8080/rounds/current?cameraId=cam_001",
   "api_key": "CHANGE_ME",
   "mjpeg_token": "CHANGE_ME",
-  "camera_id": "cam_006",
+  "camera_id": "cam_007",
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
@@ -30,16 +30,16 @@
   "operator_preview_max_width": 960,
   "operator_preview_fps_limit": 10,
   "line": {
-    "x1": 215,
-    "y1": 413,
-    "x2": 641,
-    "y2": 467
+    "x1": 97,
+    "y1": 215,
+    "x2": 301,
+    "y2": 178
   },
   "roi": {
-    "x": 230,
-    "y": 313,
-    "w": 474,
-    "h": 241
+    "x": 94,
+    "y": 127,
+    "w": 264,
+    "h": 157
   },
   "count_direction": "any",
   "show_window": true,
@@ -62,10 +62,10 @@
     "strategy": "uniform_excluding_current",
     "min_rounds_per_stream": 2,
     "max_rounds_per_stream": 2,
-    "current_stream_profile_id": "stream_1776744835421",
+    "current_stream_profile_id": "stream_1777109467268",
     "rounds_on_current_stream": 1,
     "target_rounds_for_current_stream": 2,
-    "last_counted_round_id": "ec6201af-1783-43b6-be2e-699d744aa891"
+    "last_counted_round_id": "dc5bc344-6243-499c-9115-e037749a235e"
   },
   "stream_profiles": [
     {
@@ -164,17 +164,17 @@
         "h": 168
       },
       "line": {
-        "x1": 149,
-        "y1": 257,
-        "x2": 412,
-        "y2": 256
+        "x1": 162,
+        "y1": 240,
+        "x2": 403,
+        "y2": 237
       },
       "count_direction": "any",
-      "secondary_verification_enabled": false,
-      "secondary_verification_band_px": 18
+      "secondary_verification_enabled": true,
+      "secondary_verification_band_px": 20
     }
   ],
-  "selected_stream_profile_id": "stream_1776744835421",
+  "selected_stream_profile_id": "stream_1777109467268",
   "stream_schedule": {
     "timezone": "America/Sao_Paulo",
     "outside_window_behavior": "allow_all",

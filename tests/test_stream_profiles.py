@@ -588,6 +588,52 @@ class StreamScheduleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "vinculada a uma agenda"):
             store.assert_profile_not_referenced("profile-a")
 
+    def test_detach_profile_references_deletes_empty_rules(self):
+        cfg = normalize_config(make_cfg_with_two_profiles())
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "rules": [
+                {
+                    "id": "rush",
+                    "name": "Rush",
+                    "enabled": True,
+                    "start_time": "08:00",
+                    "end_time": "10:00",
+                    "allowed_profile_ids": ["profile-a"],
+                }
+            ],
+        }
+        store = StreamScheduleStore(normalize_config(cfg))
+
+        result = store.detach_profile_references("profile-a")
+
+        self.assertEqual([], store.list_rules())
+        self.assertEqual([], result["updatedRuleIds"])
+        self.assertEqual(["rush"], result["deletedRuleIds"])
+
+    def test_detach_profile_references_preserves_rules_with_other_profiles(self):
+        cfg = normalize_config(make_cfg_with_two_profiles())
+        cfg["stream_schedule"] = {
+            "timezone": "America/Sao_Paulo",
+            "rules": [
+                {
+                    "id": "rush",
+                    "name": "Rush",
+                    "enabled": True,
+                    "start_time": "08:00",
+                    "end_time": "10:00",
+                    "allowed_profile_ids": ["profile-a", "profile-b"],
+                }
+            ],
+        }
+        store = StreamScheduleStore(normalize_config(cfg))
+
+        result = store.detach_profile_references("profile-a")
+
+        self.assertEqual(["rush"], result["updatedRuleIds"])
+        self.assertEqual([], result["deletedRuleIds"])
+        self.assertEqual(["profile-b"], store.list_rules()[0]["allowed_profile_ids"])
+
 
 class StreamRotationTests(unittest.TestCase):
     def test_rotation_target_is_drawn_inside_configured_range(self):

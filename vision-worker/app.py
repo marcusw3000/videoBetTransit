@@ -1,10 +1,12 @@
 import json
 import logging
+import math
 import numpy as np
 import os
 import queue
 import random
 import requests
+import socket
 import subprocess
 import sys
 import threading
@@ -43,6 +45,43 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+SINGLE_INSTANCE_HOST = "127.0.0.1"
+SINGLE_INSTANCE_PORT = 38759
+single_instance_socket = None
+
+
+def acquire_single_instance_lock() -> bool:
+    global single_instance_socket
+    if single_instance_socket is not None:
+        return True
+
+    lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lock_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        lock_socket.bind((SINGLE_INSTANCE_HOST, SINGLE_INSTANCE_PORT))
+        lock_socket.listen(1)
+    except OSError:
+        try:
+            lock_socket.close()
+        except Exception:
+            pass
+        return False
+
+    single_instance_socket = lock_socket
+    return True
+
+
+def release_single_instance_lock():
+    global single_instance_socket
+    if single_instance_socket is None:
+        return
+    try:
+        single_instance_socket.close()
+    except Exception:
+        pass
+    finally:
+        single_instance_socket = None
 
 
 class RuntimeStats:
@@ -369,6 +408,8 @@ class PipelineStartRequest:
 
 
 class RtspFramePublisher:
+    MAX_RESTART_BACKOFF_SECONDS = 5.0
+
     def __init__(
         self,
         *,
@@ -385,6 +426,8 @@ class RtspFramePublisher:
         self._shape = None
         self._restart_count = 0
         self._lock = threading.Lock()
+        self._next_restart_at = 0.0
+        self._restart_backoff_seconds = 0.5
 
     @property
     def restart_count(self) -> int:
@@ -438,6 +481,8 @@ class RtspFramePublisher:
                 creationflags=creation_flags,
             )
             self._shape = tuple(frame_shape[:2])
+            self._next_restart_at = 0.0
+            self._restart_backoff_seconds = 0.5
             self._set_stats(True)
             return True
         except Exception as exc:
@@ -451,12 +496,28 @@ class RtspFramePublisher:
         if frame is None:
             return False
 
+        now_ts = time.time()
         frame_shape = tuple(frame.shape[:2])
         process = self._process
-        if process is None or self._shape != frame_shape or process.poll() is not None:
+        process_exited = process is not None and process.poll() is not None
+        if process_exited:
+            logger.warning(
+                "Publisher RTSP saiu inesperadamente (code=%s). Novo restart em %.1fs.",
+                process.poll(),
+                max(0.0, self._next_restart_at - now_ts) if self._next_restart_at > now_ts else 0.0,
+            )
+        if process is None or self._shape != frame_shape or process_exited:
+            if self._next_restart_at > now_ts:
+                self._set_stats(False)
+                return False
             with self._lock:
                 self._restart_count += 1
             if not self._start_process(frame.shape):
+                self._next_restart_at = time.time() + self._restart_backoff_seconds
+                self._restart_backoff_seconds = min(
+                    self.MAX_RESTART_BACKOFF_SECONDS,
+                    max(0.5, self._restart_backoff_seconds * 2.0),
+                )
                 return False
             process = self._process
 
@@ -471,6 +532,11 @@ class RtspFramePublisher:
         except Exception as exc:
             logger.warning("Falha ao publicar frame no RTSP: %s", exc)
             self._set_stats(False)
+            self._next_restart_at = time.time() + self._restart_backoff_seconds
+            self._restart_backoff_seconds = min(
+                self.MAX_RESTART_BACKOFF_SECONDS,
+                max(0.5, self._restart_backoff_seconds * 2.0),
+            )
             self.stop()
             return False
 
@@ -501,6 +567,9 @@ class RtspFramePublisher:
 
 
 class PipelineRuntime:
+    DEFAULT_STALL_TIMEOUT_SECONDS = 15.0
+    DEFAULT_STALL_RESET_COOLDOWN_SECONDS = 10.0
+
     def __init__(self, stats: RuntimeStats, mjpeg_streamer: AnnotatedFrameStreamer):
         self.stats = stats
         self.mjpeg_streamer = mjpeg_streamer
@@ -509,12 +578,16 @@ class PipelineRuntime:
         self._lock = threading.Lock()
         self._capture_thread = None
         self._publish_thread = None
+        self._watchdog_thread = None
         self._capture_stop = None
         self._publish_stop = None
+        self._watchdog_stop = None
         self._stream = None
         self._publisher = None
         self._config = None
         self._running = False
+        self._stall_timeout_seconds = self.DEFAULT_STALL_TIMEOUT_SECONDS
+        self._stall_reset_cooldown_seconds = self.DEFAULT_STALL_RESET_COOLDOWN_SECONDS
 
     def is_running(self) -> bool:
         with self._lock:
@@ -528,12 +601,14 @@ class PipelineRuntime:
         self.stop()
 
         capture_source_url = str(config.get("capture_source_url") or config.get("stream_url") or "").strip()
+        capture_fallback_source_url = str(config.get("capture_fallback_source_url") or "").strip()
         if not capture_source_url:
             raise ValueError("Nenhuma URL de captura configurada para a pipeline.")
 
         stream = StreamCapture(
             capture_source_url,
             stats=self.stats,
+            fallback_url=capture_fallback_source_url,
             ffmpeg_options=config.get("ffmpeg_capture_options"),
             buffer_size=int(config.get("stream_buffer_size", 1)),
             open_timeout_ms=int(config.get("stream_open_timeout_ms", 5000)),
@@ -550,6 +625,7 @@ class PipelineRuntime:
 
         capture_stop = threading.Event()
         publish_stop = threading.Event()
+        watchdog_stop = threading.Event()
 
         capture_thread = threading.Thread(
             target=self._capture_loop,
@@ -563,22 +639,44 @@ class PipelineRuntime:
             daemon=True,
             name="publish-loop",
         )
+        watchdog_thread = threading.Thread(
+            target=self._watchdog_loop,
+            args=(stream, capture_thread, watchdog_stop),
+            daemon=True,
+            name="capture-watchdog",
+        )
 
         with self._lock:
             self._stream = stream
             self._publisher = publisher
             self._capture_stop = capture_stop
             self._publish_stop = publish_stop
+            self._watchdog_stop = watchdog_stop
             self._capture_thread = capture_thread
             self._publish_thread = publish_thread
+            self._watchdog_thread = watchdog_thread
             self._config = dict(config)
             self._running = True
+            self._stall_timeout_seconds = max(
+                5.0,
+                float(config.get("stream_stall_timeout_seconds", self.DEFAULT_STALL_TIMEOUT_SECONDS)),
+            )
+            self._stall_reset_cooldown_seconds = max(
+                3.0,
+                float(
+                    config.get(
+                        "stream_stall_reset_cooldown_seconds",
+                        self.DEFAULT_STALL_RESET_COOLDOWN_SECONDS,
+                    )
+                ),
+            )
 
         self.stats.reset_pipeline_readiness()
         self.raw_frames.clear()
         self.annotated_frames.clear()
         capture_thread.start()
         publish_thread.start()
+        watchdog_thread.start()
 
     def stop(self):
         with self._lock:
@@ -586,14 +684,18 @@ class PipelineRuntime:
             publisher = self._publisher
             capture_stop = self._capture_stop
             publish_stop = self._publish_stop
+            watchdog_stop = self._watchdog_stop
             capture_thread = self._capture_thread
             publish_thread = self._publish_thread
+            watchdog_thread = self._watchdog_thread
             self._stream = None
             self._publisher = None
             self._capture_stop = None
             self._publish_stop = None
+            self._watchdog_stop = None
             self._capture_thread = None
             self._publish_thread = None
+            self._watchdog_thread = None
             self._config = None
             self._running = False
 
@@ -601,11 +703,15 @@ class PipelineRuntime:
             capture_stop.set()
         if publish_stop is not None:
             publish_stop.set()
+        if watchdog_stop is not None:
+            watchdog_stop.set()
 
         if capture_thread is not None and capture_thread.is_alive():
             capture_thread.join(timeout=2)
         if publish_thread is not None and publish_thread.is_alive():
             publish_thread.join(timeout=2)
+        if watchdog_thread is not None and watchdog_thread.is_alive():
+            watchdog_thread.join(timeout=2)
 
         if stream is not None:
             stream.release()
@@ -631,7 +737,13 @@ class PipelineRuntime:
 
     def _capture_loop(self, stream: "StreamCapture", stop_event: threading.Event):
         while not stop_event.is_set():
-            ret, frame = stream.read()
+            try:
+                ret, frame = stream.read()
+            except Exception as exc:
+                logger.warning("Falha inesperada na captura; resetando stream: %s", exc)
+                stream.request_reset()
+                time.sleep(0.1)
+                continue
             if not ret:
                 time.sleep(0.005)
                 continue
@@ -639,6 +751,35 @@ class PipelineRuntime:
             captured_at = time.time()
             self.stats.record_capture(captured_at)
             self.raw_frames.update(frame, captured_at)
+
+    def _watchdog_loop(
+        self,
+        stream: "StreamCapture",
+        capture_thread: threading.Thread,
+        stop_event: threading.Event,
+    ):
+        last_reset_at = 0.0
+        while not stop_event.wait(0.5):
+            if not capture_thread.is_alive():
+                logger.warning("Thread de captura encerrou inesperadamente; aguardando restart da pipeline.")
+                return
+
+            diagnostics = stream.get_stall_diagnostics()
+            read_duration_seconds = float(diagnostics.get("readDurationSeconds") or 0.0)
+            if read_duration_seconds < self._stall_timeout_seconds:
+                continue
+
+            now_ts = time.time()
+            if now_ts - last_reset_at < self._stall_reset_cooldown_seconds:
+                continue
+
+            if stream.force_interrupt_stalled_read(
+                reason=(
+                    "watchdog de captura sem novos frames "
+                    f"por {read_duration_seconds:.1f}s"
+                )
+            ):
+                last_reset_at = now_ts
 
     def _publish_loop(self, publisher: RtspFramePublisher, stop_event: threading.Event, fps: float):
         interval = 1.0 / max(1.0, fps)
@@ -1027,6 +1168,7 @@ def cleanup_runtime():
         active_snapshot_writer_ref = None
 
     cv2.destroyAllWindows()
+    release_single_instance_lock()
 
 
 atexit.register(cleanup_runtime)
@@ -2229,6 +2371,47 @@ class StreamScheduleStore:
             if target_id in rule.get("allowed_profile_ids", []):
                 raise ValueError("A stream esta vinculada a uma agenda por hora ativa ou salva.")
 
+    def detach_profile_references(self, profile_id: str) -> dict:
+        target_id = str(profile_id or "").strip()
+        schedule = self.get_schedule()
+        updated_rule_ids: list[str] = []
+        deleted_rule_ids: list[str] = []
+        next_rules: list[dict] = []
+
+        for rule in schedule["rules"]:
+            allowed_ids = [
+                str(allowed_profile_id or "").strip()
+                for allowed_profile_id in rule.get("allowed_profile_ids", [])
+                if str(allowed_profile_id or "").strip()
+            ]
+            if target_id not in allowed_ids:
+                next_rules.append(dict(rule))
+                continue
+
+            remaining_ids = [allowed_id for allowed_id in allowed_ids if allowed_id != target_id]
+            rule_id = str(rule.get("id") or "").strip()
+            if remaining_ids:
+                next_rule = dict(rule)
+                next_rule["allowed_profile_ids"] = remaining_ids
+                next_rules.append(next_rule)
+                updated_rule_ids.append(rule_id)
+            else:
+                deleted_rule_ids.append(rule_id)
+
+        if updated_rule_ids or deleted_rule_ids:
+            self.cfg["stream_schedule"] = normalize_stream_schedule_config(
+                {
+                    "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
+                    "rules": next_rules,
+                },
+                self.cfg.get("stream_profiles", []),
+            )
+
+        return {
+            "updatedRuleIds": updated_rule_ids,
+            "deletedRuleIds": deleted_rule_ids,
+        }
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -2348,9 +2531,68 @@ def normalize_media_path_name(value: str, fallback: str = "cam_001") -> str:
     return path_name or fallback
 
 
+def can_reach_mediamtx_api(api_base: str) -> bool:
+    normalized_api_base = str(api_base or "").strip().rstrip("/")
+    if not normalized_api_base:
+        return False
+    try:
+        response = requests.get(
+            f"{normalized_api_base}/v3/paths/list",
+            timeout=2,
+        )
+        return bool(response.ok)
+    except Exception:
+        return False
+
+
+def ensure_local_mediamtx_running(cfg: dict) -> bool:
+    api_base = str(cfg.get("mediamtx_api_url") or "").strip().rstrip("/")
+    if not api_base:
+        return False
+    if can_reach_mediamtx_api(api_base):
+        return True
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    mediamtx_dir = os.path.join(repo_root, "tools", "mediamtx")
+    mediamtx_exe = os.path.join(mediamtx_dir, "mediamtx.exe")
+    mediamtx_config = os.path.join(mediamtx_dir, "mediamtx.yml")
+    if not os.path.exists(mediamtx_exe) or not os.path.exists(mediamtx_config):
+        return False
+
+    logger.warning("MediaMTX API indisponivel; tentando subir relay local automaticamente.")
+    creationflags = 0
+    creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    creationflags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+    creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        subprocess.Popen(
+            [mediamtx_exe, mediamtx_config],
+            cwd=mediamtx_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+    except Exception as exc:
+        logger.warning("Falha ao iniciar MediaMTX local automaticamente: %s", exc)
+        return False
+
+    deadline = time.time() + 8.0
+    while time.time() < deadline:
+        if can_reach_mediamtx_api(api_base):
+            logger.info("MediaMTX local iniciado automaticamente.")
+            return True
+        time.sleep(0.4)
+
+    logger.warning("MediaMTX local nao respondeu no prazo apos inicializacao automatica.")
+    return False
+
+
 def ensure_mediamtx_source_path(cfg: dict, path_name: str, source_url: str) -> bool:
     api_base = str(cfg.get("mediamtx_api_url") or "").strip().rstrip("/")
     if not api_base or not path_name or not source_url:
+        return False
+
+    if not can_reach_mediamtx_api(api_base) and not ensure_local_mediamtx_running(cfg):
         return False
 
     try:
@@ -2427,15 +2669,20 @@ def build_pipeline_config(cfg: dict, *, source_url: str | None = None, camera_id
     processed_path = str(processed_stream_path or f"processed/{normalized_camera_id}").strip()
     rtsp_base = str(cfg.get("mediamtx_rtsp_url") or "rtsp://localhost:8554").strip().rstrip("/")
 
-    capture_source_url = resolved_source.capture_url
-    if capture_source_url and ensure_mediamtx_source_path(cfg, raw_path, capture_source_url):
+    capture_direct_source_url = resolved_source.capture_url
+    capture_source_url = capture_direct_source_url
+    capture_fallback_source_url = ""
+    if capture_direct_source_url and ensure_mediamtx_source_path(cfg, raw_path, capture_direct_source_url):
         capture_source_url = f"{rtsp_base}/{raw_path}"
+        capture_fallback_source_url = capture_direct_source_url
 
     pipeline_cfg["camera_id"] = normalized_camera_id
     pipeline_cfg["raw_stream_path"] = raw_path
     pipeline_cfg["processed_stream_path"] = processed_path
     pipeline_cfg["stream_url"] = resolved_source.original_url
     pipeline_cfg["capture_source_url"] = capture_source_url
+    pipeline_cfg["capture_fallback_source_url"] = capture_fallback_source_url
+    pipeline_cfg["capture_direct_source_url"] = capture_direct_source_url
     pipeline_cfg["source_url_resolved"] = resolved_source.resolved
     pipeline_cfg["publisher_rtsp_url"] = f"{rtsp_base}/{processed_path}"
     pipeline_cfg.setdefault("publisher_fps", 10)
@@ -2577,6 +2824,111 @@ def point_inside_line_band(point: tuple[int, int], line: dict, band_px: int) -> 
     )
 
 
+def distance_point_to_segment(
+    point: tuple[float, float],
+    segment_start: tuple[float, float],
+    segment_end: tuple[float, float],
+) -> float:
+    px, py = point
+    x1, y1 = segment_start
+    x2, y2 = segment_end
+    dx = x2 - x1
+    dy = y2 - y1
+    segment_length_sq = (dx * dx) + (dy * dy)
+    if segment_length_sq <= 1e-9:
+        return math.hypot(px - x1, py - y1)
+    t = ((px - x1) * dx + (py - y1) * dy) / segment_length_sq
+    t = max(0.0, min(1.0, t))
+    closest_x = x1 + (t * dx)
+    closest_y = y1 + (t * dy)
+    return math.hypot(px - closest_x, py - closest_y)
+
+
+def segment_orientation(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+    return ((b[0] - a[0]) * (c[1] - a[1])) - ((b[1] - a[1]) * (c[0] - a[0]))
+
+
+def point_on_segment(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> bool:
+    return (
+        min(start[0], end[0]) - 1e-9 <= point[0] <= max(start[0], end[0]) + 1e-9
+        and min(start[1], end[1]) - 1e-9 <= point[1] <= max(start[1], end[1]) + 1e-9
+    )
+
+
+def segments_intersect(
+    a1: tuple[float, float],
+    a2: tuple[float, float],
+    b1: tuple[float, float],
+    b2: tuple[float, float],
+) -> bool:
+    o1 = segment_orientation(a1, a2, b1)
+    o2 = segment_orientation(a1, a2, b2)
+    o3 = segment_orientation(b1, b2, a1)
+    o4 = segment_orientation(b1, b2, a2)
+
+    if (o1 > 0 and o2 < 0 or o1 < 0 and o2 > 0) and (o3 > 0 and o4 < 0 or o3 < 0 and o4 > 0):
+        return True
+    if abs(o1) <= 1e-9 and point_on_segment(b1, a1, a2):
+        return True
+    if abs(o2) <= 1e-9 and point_on_segment(b2, a1, a2):
+        return True
+    if abs(o3) <= 1e-9 and point_on_segment(a1, b1, b2):
+        return True
+    if abs(o4) <= 1e-9 and point_on_segment(a2, b1, b2):
+        return True
+    return False
+
+
+def segment_distance(
+    a1: tuple[float, float],
+    a2: tuple[float, float],
+    b1: tuple[float, float],
+    b2: tuple[float, float],
+) -> float:
+    if segments_intersect(a1, a2, b1, b2):
+        return 0.0
+    return min(
+        distance_point_to_segment(a1, b1, b2),
+        distance_point_to_segment(a2, b1, b2),
+        distance_point_to_segment(b1, a1, a2),
+        distance_point_to_segment(b2, a1, a2),
+    )
+
+
+def bbox_distance_to_line_segment(bbox: tuple[int, int, int, int], line: dict) -> float:
+    x1, y1, x2, y2 = bbox
+    left = float(min(x1, x2))
+    right = float(max(x1, x2))
+    top = float(min(y1, y2))
+    bottom = float(max(y1, y2))
+    line_start = (float(line["x1"]), float(line["y1"]))
+    line_end = (float(line["x2"]), float(line["y2"]))
+
+    corners = [
+        (left, top),
+        (right, top),
+        (right, bottom),
+        (left, bottom),
+    ]
+    if any(point_inside_line_band((int(px), int(py)), line, 0) for px, py in corners):
+        return 0.0
+
+    rect_edges = [
+        ((left, top), (right, top)),
+        ((right, top), (right, bottom)),
+        ((right, bottom), (left, bottom)),
+        ((left, bottom), (left, top)),
+    ]
+    return min(segment_distance(line_start, line_end, edge_start, edge_end) for edge_start, edge_end in rect_edges)
+
+
+def bbox_touches_line_band(bbox: tuple[int, int, int, int] | None, line: dict, band_px: int) -> bool:
+    if bbox is None:
+        return False
+    band = float(normalize_secondary_verification_band_px(band_px))
+    return bbox_distance_to_line_segment(bbox, line) <= band
+
+
 def movement_delta_for_direction(
     prev_position: tuple[int, int],
     curr_position: tuple[int, int],
@@ -2605,6 +2957,7 @@ def movement_matches_direction(delta: int, direction: str) -> bool:
 def should_count_track_fallback(
     prev_position: tuple[int, int] | None,
     curr_position: tuple[int, int],
+    curr_bbox: tuple[int, int, int, int] | None,
     line: dict,
     direction: str,
     hits: int,
@@ -2620,19 +2973,23 @@ def should_count_track_fallback(
     band = normalize_secondary_verification_band_px(band_px)
     prev_in_band = point_inside_line_band(prev_position, line, band)
     curr_in_band = point_inside_line_band(curr_position, line, band)
+    curr_bbox_touches_band = bbox_touches_line_band(curr_bbox, line, band)
     delta = movement_delta_for_direction(prev_position, curr_position, line)
     progress_px = abs(delta)
 
-    if not curr_in_band:
+    if not curr_in_band and not curr_bbox_touches_band:
         return False
     if progress_px < SECONDARY_VERIFICATION_MIN_PROGRESS_PX:
         return False
     if not movement_matches_direction(delta, direction):
         return False
 
-    current_metrics = line_geometry_metrics(curr_position, line)
     best_distance = state.get("bestDistanceToLine")
-    current_distance = abs(float(current_metrics["signed_distance"]))
+    current_distance = (
+        bbox_distance_to_line_segment(curr_bbox, line)
+        if curr_bbox is not None
+        else abs(float(line_geometry_metrics(curr_position, line)["signed_distance"]))
+    )
     if best_distance is None:
         best_distance = current_distance
     else:
@@ -2644,7 +3001,7 @@ def should_count_track_fallback(
         return False
 
     if not bool(state.get("enteredFallbackBand")):
-        eligible_frames = 1 if prev_in_band or curr_in_band else 0
+        eligible_frames = 1 if prev_in_band or curr_in_band or curr_bbox_touches_band else 0
         state["fallbackProgressPx"] = float(progress_px)
     else:
         eligible_frames = int(state.get("fallbackEligibleFrames") or 0) + 1
@@ -2654,11 +3011,12 @@ def should_count_track_fallback(
     state["bestDistanceToLine"] = best_distance
     state["fallbackDirectionSign"] = current_direction_sign
     state["fallbackEligibleFrames"] = eligible_frames
+    state["bboxTouchedBand"] = bool(state.get("bboxTouchedBand")) or curr_bbox_touches_band
 
     return (
         eligible_frames >= SECONDARY_VERIFICATION_MIN_BAND_FRAMES
         and float(state.get("fallbackProgressPx") or 0.0) >= (SECONDARY_VERIFICATION_MIN_PROGRESS_PX * 2)
-        and best_distance <= (band * 0.55)
+        and best_distance <= (band if state.get("bboxTouchedBand") else (band * 0.55))
     )
 
 
@@ -3605,6 +3963,7 @@ class EditorControlPanel:
             return
 
         self._refresh_stream_profiles()
+        self._handle_profile_table_select()
         self.editor.message = f"Stream apagada da esteira: {format_stream_profile_label(deleted)}"
 
     def force_stream_switch(self):
@@ -4529,6 +4888,7 @@ class CompactEditorControlPanel:
             self.editor.message = str(exc)
             return
         self._refresh_stream_profiles()
+        self._handle_profile_table_select()
         self.editor.message = f"Stream apagada: {format_stream_profile_label(deleted)}"
 
     def force_stream_switch(self):
@@ -5149,6 +5509,7 @@ class CompactEditorControlPanel:
 # ---------------------------------------------------------------------------
 class StreamCapture:
     MAX_FAILURES = 30
+    SOURCE_OPEN_FAILOVER_THRESHOLD = 2
     LIVE_EDGE_DRAIN_SECONDS = 1.25
     LIVE_EDGE_MAX_FRAMES = 60
     LIVE_EDGE_SLOW_READ_MS = 120.0
@@ -5158,13 +5519,14 @@ class StreamCapture:
         url: str,
         stats: RuntimeStats | None = None,
         *,
+        fallback_url: str = "",
         ffmpeg_options=None,
         buffer_size: int = 1,
         open_timeout_ms: int = 5000,
         read_timeout_ms: int = 5000,
         target_fps: float = 0.0,
     ):
-        self.url = url
+        self.url = str(url or "").strip()
         self.stats = stats
         self.cap: cv2.VideoCapture | None = None
         self._fail_count = 0
@@ -5176,11 +5538,113 @@ class StreamCapture:
         self._effective_fps = 0.0
         self._reset_requested = False
         self._refresh_latest_requested = False
+        self._state_lock = threading.Lock()
+        self._last_frame_monotonic = 0.0
+        self._read_started_monotonic = 0.0
+        self._forced_interrupt_count = 0
+        self._source_urls = self._build_source_url_candidates(self.url, fallback_url)
+        self._source_index = 0
+        self._source_open_failures = [0 for _ in self._source_urls]
+        self.url = self._source_urls[self._source_index]
         self._connect()
+
+    @staticmethod
+    def _build_source_url_candidates(primary_url: str, fallback_url: str) -> list[str]:
+        candidates: list[str] = []
+        for candidate in (primary_url, fallback_url):
+            normalized = str(candidate or "").strip()
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+        if not candidates:
+            raise ValueError("Nenhuma URL de captura configurada.")
+        return candidates
+
+    def _advance_source(self, reason: str) -> bool:
+        if len(self._source_urls) <= 1:
+            return False
+        next_index = (self._source_index + 1) % len(self._source_urls)
+        if next_index == self._source_index:
+            return False
+        previous_url = self._source_urls[self._source_index]
+        self._source_index = next_index
+        self.url = self._source_urls[self._source_index]
+        logger.warning(
+            "Alternando fonte de captura: %s -> %s (%s)",
+            previous_url,
+            self.url,
+            reason,
+        )
+        return True
 
     def _connect(self):
         if self.cap is not None:
             self.cap.release()
+
+        attempts_remaining = len(self._source_urls)
+        while attempts_remaining > 0:
+            if self.ffmpeg_options:
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = self.ffmpeg_options
+
+            self.url = self._source_urls[self._source_index]
+            logger.info("Conectando ao stream: %s", self.url)
+            if self.ffmpeg_options:
+                logger.info("FFmpeg capture options: %s", self.ffmpeg_options)
+            self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+            try:
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
+            except Exception:
+                pass
+            try:
+                if self.open_timeout_ms > 0:
+                    self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.open_timeout_ms)
+            except Exception:
+                pass
+            try:
+                if self.read_timeout_ms > 0:
+                    self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.read_timeout_ms)
+            except Exception:
+                pass
+            self._fail_count = 0
+            opened = bool(self.cap.isOpened())
+            if self.stats is not None:
+                self.stats.set_stream_status(opened, self._fail_count)
+            reported_fps = 0.0
+            try:
+                reported_fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
+            except Exception:
+                reported_fps = 0.0
+
+            if self.target_fps > 0:
+                self._effective_fps = self.target_fps
+            elif 1.0 <= reported_fps <= 120.0:
+                self._effective_fps = reported_fps
+            else:
+                self._effective_fps = 15.0
+
+            logger.info(
+                "Pacing do stream: fps configurado=%.2f | fps detectado=%.2f | fps efetivo=%.2f",
+                self.target_fps,
+                reported_fps,
+                self._effective_fps,
+            )
+
+            if opened:
+                self._source_open_failures[self._source_index] = 0
+                return
+
+            self._source_open_failures[self._source_index] += 1
+            logger.warning("Falha ao abrir stream na conexao inicial.")
+            attempts_remaining -= 1
+            should_failover = (
+                len(self._source_urls) > 1
+                and self._source_open_failures[self._source_index] >= self.SOURCE_OPEN_FAILOVER_THRESHOLD
+            )
+            if not should_failover or not self._advance_source("falha de abertura consecutiva"):
+                return
+
+        if self.stats is not None:
+            self.stats.set_stream_status(False, self._fail_count)
+        return
 
         if self.ffmpeg_options:
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = self.ffmpeg_options
@@ -5240,7 +5704,11 @@ class StreamCapture:
             self._reset_requested = False
             self._connect()
 
+        with self._state_lock:
+            self._read_started_monotonic = time.perf_counter()
         ret, frame = self.cap.read()
+        with self._state_lock:
+            self._read_started_monotonic = 0.0
         if not ret:
             self._fail_count += 1
             if self.stats is not None:
@@ -5253,6 +5721,8 @@ class StreamCapture:
             return False, None
 
         self._fail_count = 0
+        with self._state_lock:
+            self._last_frame_monotonic = time.perf_counter()
         if self.stats is not None:
             self.stats.set_stream_status(True, self._fail_count)
         return True, frame
@@ -5302,6 +5772,55 @@ class StreamCapture:
     def request_refresh_latest(self):
         logger.info("Atualizacao manual para o frame mais atual solicitada.")
         self._refresh_latest_requested = True
+
+    def get_stall_diagnostics(self) -> dict:
+        with self._state_lock:
+            read_started_monotonic = self._read_started_monotonic
+            last_frame_monotonic = self._last_frame_monotonic
+            forced_interrupt_count = self._forced_interrupt_count
+
+        now_perf = time.perf_counter()
+        read_duration_seconds = (
+            max(0.0, now_perf - read_started_monotonic)
+            if read_started_monotonic > 0.0
+            else 0.0
+        )
+        last_frame_age_seconds = (
+            max(0.0, now_perf - last_frame_monotonic)
+            if last_frame_monotonic > 0.0
+            else None
+        )
+        return {
+            "url": self.url,
+            "readDurationSeconds": read_duration_seconds,
+            "lastFrameAgeSeconds": last_frame_age_seconds,
+            "forcedInterruptCount": forced_interrupt_count,
+            "failCount": self._fail_count,
+        }
+
+    def force_interrupt_stalled_read(self, reason: str) -> bool:
+        cap = self.cap
+        if cap is None:
+            return False
+
+        with self._state_lock:
+            self._forced_interrupt_count += 1
+            forced_interrupt_count = self._forced_interrupt_count
+
+        logger.warning(
+            "Captura travada; forçando reset do stream (%s) | fonte=%s | tentativas=%s",
+            reason,
+            self.url,
+            forced_interrupt_count,
+        )
+        self._reset_requested = True
+        if self.stats is not None:
+            self.stats.set_stream_status(False, max(self._fail_count, 1))
+        try:
+            cap.release()
+        except Exception:
+            pass
+        return True
 
     def release(self):
         if self.cap:
@@ -6150,8 +6669,10 @@ def main():
         return profile
 
     def delete_stream_profile(profile_id: str) -> dict:
-        schedule_store.assert_profile_not_referenced(profile_id)
+        schedule_store.detach_profile_references(profile_id)
         deleted = stream_store.delete_profile(profile_id)
+        stream_schedule.clear()
+        stream_schedule.update(cfg["stream_schedule"])
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
         if control_panel is not None:
@@ -6747,6 +7268,7 @@ def main():
                             "fallbackDirectionSign": 0,
                             "fallbackEligibleFrames": 0,
                             "fallbackProgressPx": 0.0,
+                            "bboxTouchedBand": False,
                             "countReason": "",
                         },
                     )
@@ -6758,6 +7280,7 @@ def main():
                         fallback_cross = should_count_track_fallback(
                             prev_position=prev,
                             curr_position=(cx, cy),
+                            curr_bbox=(x1, y1, x2, y2),
                             line=line,
                             direction=count_direction,
                             hits=track_hits.get(track_id, 0),
@@ -7038,6 +7561,12 @@ def main():
 
 
 if __name__ == "__main__":
+    if not acquire_single_instance_lock():
+        logger.error(
+            "Outra instancia do vision-worker ja esta em execucao. Encerrando esta abertura para evitar conflito de portas e publisher."
+        )
+        sys.exit(1)
+
     restart_attempt = 0
 
     while True:

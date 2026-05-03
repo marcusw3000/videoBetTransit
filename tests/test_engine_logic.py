@@ -1,6 +1,7 @@
 import unittest
 
 from app import (
+    bbox_touches_line_band,
     bbox_area,
     crossed_horizontal_segment,
     crossed_vertical_segment,
@@ -320,6 +321,7 @@ class SecondaryVerificationTests(unittest.TestCase):
         first = should_count_track_fallback(
             prev_position=(60, 88),
             curr_position=(60, 95),
+            curr_bbox=(45, 70, 75, 95),
             line=line,
             direction="down",
             hits=4,
@@ -331,6 +333,7 @@ class SecondaryVerificationTests(unittest.TestCase):
         second = should_count_track_fallback(
             prev_position=(60, 95),
             curr_position=(60, 102),
+            curr_bbox=(45, 78, 75, 102),
             line=line,
             direction="down",
             hits=5,
@@ -352,6 +355,7 @@ class SecondaryVerificationTests(unittest.TestCase):
         counted = should_count_track_fallback(
             prev_position=(60, 96),
             curr_position=(72, 97),
+            curr_bbox=(55, 82, 89, 97),
             line=line,
             direction="down",
             hits=4,
@@ -371,6 +375,7 @@ class SecondaryVerificationTests(unittest.TestCase):
         counted = should_count_track_fallback(
             prev_position=(60, 88),
             curr_position=(60, 98),
+            curr_bbox=(45, 78, 75, 98),
             line=line,
             direction="down",
             hits=4,
@@ -381,6 +386,44 @@ class SecondaryVerificationTests(unittest.TestCase):
         )
 
         self.assertFalse(counted)
+
+    def test_bbox_touching_band_counts_even_when_anchor_is_outside(self):
+        line = {"x1": 20, "y1": 100, "x2": 140, "y2": 100}
+        state = {}
+
+        first = should_count_track_fallback(
+            prev_position=(80, 122),
+            curr_position=(80, 129),
+            curr_bbox=(58, 86, 102, 129),
+            line=line,
+            direction="down",
+            hits=4,
+            min_hits_to_count=4,
+            already_counted=False,
+            band_px=18,
+            state=state,
+        )
+        second = should_count_track_fallback(
+            prev_position=(80, 129),
+            curr_position=(80, 136),
+            curr_bbox=(58, 89, 102, 136),
+            line=line,
+            direction="down",
+            hits=5,
+            min_hits_to_count=4,
+            already_counted=False,
+            band_px=18,
+            state=state,
+        )
+
+        self.assertFalse(first)
+        self.assertTrue(second)
+
+    def test_bbox_touches_line_band_when_box_intersects_band(self):
+        line = {"x1": 20, "y1": 100, "x2": 140, "y2": 100}
+
+        self.assertTrue(bbox_touches_line_band((58, 82, 102, 130), line, 18))
+        self.assertFalse(bbox_touches_line_band((58, 130, 102, 170), line, 18))
 
 
 class ResolveRoundSyncTests(unittest.TestCase):
