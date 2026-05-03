@@ -314,7 +314,9 @@ public class DynamicMarketLineService
 
     private static double ResolveDurationSeconds(Round round)
     {
-        var duration = (round.EndsAt - round.CreatedAt).TotalSeconds;
+        var duration = (round.EndsAt - round.BetCloseAt).TotalSeconds;
+        if (duration <= 0)
+            duration = (round.EndsAt - round.CreatedAt).TotalSeconds;
         return duration > 0 ? duration : 1d;
     }
 

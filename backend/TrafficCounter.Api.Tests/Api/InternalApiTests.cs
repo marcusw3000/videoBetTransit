@@ -316,8 +316,9 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.NotNull(round);
         Assert.Equal("normal", round!.RoundMode);
         Assert.Equal("Rodada Normal", round.DisplayName);
-        Assert.Equal(60, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
         Assert.Equal(15, (int)Math.Round((round.BetCloseAt - round.CreatedAt).TotalSeconds));
+        Assert.Equal(60, (int)Math.Round((round.EndsAt - round.BetCloseAt).TotalSeconds));
+        Assert.Equal(75, (int)Math.Round((round.EndsAt - round.CreatedAt).TotalSeconds));
     }
 
     [Fact]
@@ -1168,9 +1169,9 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var recentRounds = await _client.GetFromJsonAsync<List<RoundResponse>>("/rounds/recent?cameraId=cam_recent_rounds&limit=10");
 
         Assert.NotNull(recentRounds);
-        Assert.True(recentRounds!.Count >= 2);
+        Assert.True(recentRounds!.Count >= 1);
         Assert.Contains(recentRounds, item => item.Status == "settled");
-        Assert.Contains(recentRounds, item => item.Status == "open");
+        Assert.DoesNotContain(recentRounds, item => item.Status == "open");
     }
 
     [Fact]
@@ -1231,6 +1232,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
 
         await roundService.TickAsync();
         await roundService.TickAsync();
+        await roundService.TickAsync();
 
         var settlingRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_settling");
         Assert.NotNull(settlingRound);
@@ -1247,6 +1249,71 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var settledRound = await db3.Rounds.FirstAsync(r => r.RoundId == persistedRound.RoundId);
         Assert.Equal(Domain.Enums.RoundStatus.Settled, settledRound.Status);
         Assert.NotNull(settledRound.SettledAt);
+    }
+
+    [Fact]
+    public async Task Next_round_waits_for_cooldown_after_settlement()
+    {
+        var dto = new RoundCountEventDto
+        {
+            CameraId = "cam_round_cooldown",
+            TrackId = "89",
+            VehicleType = "car",
+            CrossedAt = DateTime.UtcNow,
+            TotalCount = 1,
+        };
+
+        (await _client.PostAsJsonAsync("/internal/round-count-event", dto)).EnsureSuccessStatusCode();
+
+        using var scope = _factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        var roundService = scope.ServiceProvider.GetRequiredService<RoundService>();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var round = await db.Rounds.FirstAsync(r => r.CameraId == "cam_round_cooldown" && r.Status == Domain.Enums.RoundStatus.Open);
+            round.BetCloseAt = DateTime.UtcNow.AddSeconds(-5);
+            round.EndsAt = DateTime.UtcNow.AddSeconds(-3);
+            await db.SaveChangesAsync();
+        }
+
+        await roundService.TickAsync();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var round = await db.Rounds.FirstAsync(r => r.CameraId == "cam_round_cooldown");
+            round.EndsAt = DateTime.UtcNow.AddSeconds(-10);
+            await db.SaveChangesAsync();
+        }
+
+        await roundService.TickAsync();
+        await roundService.TickAsync();
+
+        var cooldownRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_cooldown");
+        Assert.NotNull(cooldownRound);
+        Assert.Equal("settled", cooldownRound!.Status);
+        Assert.True(cooldownRound.IsCooldown);
+        Assert.NotNull(cooldownRound.NextRoundStartsAt);
+        Assert.Equal("O proximo round ja vai comecar", cooldownRound.CooldownMessage);
+
+        var createdDuringCooldown = await roundService.EnsureActiveRoundAsync("cam_round_cooldown");
+        Assert.False(createdDuringCooldown);
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var settledRound = await db.Rounds
+                .Where(r => r.CameraId == "cam_round_cooldown" && r.Status == RoundStatus.Settled)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstAsync();
+            settledRound.SettledAt = DateTime.UtcNow.AddSeconds(-11);
+            await db.SaveChangesAsync();
+        }
+
+        var createdAfterCooldown = await roundService.EnsureActiveRoundAsync("cam_round_cooldown");
+        Assert.True(createdAfterCooldown);
+
+        var nextRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_cooldown");
+        Assert.NotNull(nextRound);
+        Assert.Equal("open", nextRound!.Status);
+        Assert.False(nextRound.IsCooldown);
     }
 
     [Fact]
@@ -1832,7 +1899,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             var createdAt = start.AddMinutes((index + 1) * 5);
             var durationSeconds = 180;
             var betWindowSeconds = 70;
-            var endsAt = createdAt.AddSeconds(durationSeconds);
+            var betCloseAt = createdAt.AddSeconds(betWindowSeconds);
+            var endsAt = betCloseAt.AddSeconds(durationSeconds);
 
             db.Rounds.Add(new Round
             {
@@ -1842,7 +1910,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
                 Status = RoundStatus.Settled,
                 DisplayName = "Rodada Normal",
                 CreatedAt = createdAt,
-                BetCloseAt = createdAt.AddSeconds(betWindowSeconds),
+                BetCloseAt = betCloseAt,
                 EndsAt = endsAt,
                 SettledAt = endsAt.AddSeconds(2),
                 CurrentCount = seededRound.FinalCount,
@@ -1862,7 +1930,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         await using var db = await dbFactory.CreateDbContextAsync();
         var now = DateTime.UtcNow;
         var createdAt = now.AddMinutes(-3);
-        var endsAt = createdAt.AddSeconds(180);
+        var betCloseAt = createdAt.AddSeconds(70);
+        var endsAt = betCloseAt.AddSeconds(180);
 
         db.Rounds.Add(new Round
         {
@@ -1872,7 +1941,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             Status = status,
             DisplayName = "Rodada Normal",
             CreatedAt = createdAt,
-            BetCloseAt = createdAt.AddSeconds(70),
+            BetCloseAt = betCloseAt,
             EndsAt = endsAt,
             SettledAt = status == RoundStatus.Settled ? endsAt.AddSeconds(2) : null,
             CurrentCount = finalCount,

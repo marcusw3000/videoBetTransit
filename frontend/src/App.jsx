@@ -71,11 +71,11 @@ function getDisplayName(round) {
 }
 
 function getRoundDurationLabel(round) {
-  if (!round?.createdAt || !round?.endsAt) return null
-  const created = parseTimestampMs(round.createdAt)
+  if (!round?.betCloseAt || !round?.endsAt) return null
+  const betClose = parseTimestampMs(round.betCloseAt)
   const ends = parseTimestampMs(round.endsAt)
-  if (Number.isNaN(created) || Number.isNaN(ends) || ends <= created) return null
-  const minutes = Math.round((ends - created) / 60000)
+  if (Number.isNaN(betClose) || Number.isNaN(ends) || ends <= betClose) return null
+  const minutes = Math.round((ends - betClose) / 60000)
   if (minutes <= 0) return null
   return `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`
 }
@@ -121,6 +121,9 @@ function LiveBadge({ phase, workerOnline = false }) {
   }
   if (phase === 'settled') {
     return <span className="live-badge live-badge-settled">ENCERRADO</span>
+  }
+  if (phase === 'cooldown') {
+    return <span className="live-badge live-badge-settled">PRÓXIMO ROUND</span>
   }
   if (phase === 'void') {
     return <span className="live-badge live-badge-void">ANULADO</span>
@@ -246,6 +249,7 @@ function MarketPage() {
   const selectedStreamProfileId = String(workerHealth?.selectedStreamProfileId || '').trim()
   const waitingFrontendAck = isAwaitingFrontendAck(workerHealth)
   const awaitingFrontendRound = !round && waitingFrontendAck
+  const isRoundCooldown = roundPhase === 'cooldown'
   const playbackSourceSignature = useMemo(
     () => JSON.stringify({
       cameraId: String(activeCameraId || '').trim(),
@@ -608,7 +612,16 @@ function MarketPage() {
 
   useEffect(() => {
     const syncTimeLeft = () => {
-      if (round?.endsAt) {
+      if (!round) {
+        setTimeLeftSeconds(0)
+        return
+      }
+
+      if (roundPhase === 'cooldown' && round?.nextRoundStartsAt) {
+        setTimeLeftSeconds(getTimeLeftInSeconds(round.nextRoundStartsAt))
+      } else if (roundPhase === 'open' && round?.betCloseAt) {
+        setTimeLeftSeconds(getTimeLeftInSeconds(round.betCloseAt))
+      } else if (round?.endsAt) {
         setTimeLeftSeconds(getTimeLeftInSeconds(round.endsAt))
       } else {
         setTimeLeftSeconds(0)
@@ -618,7 +631,7 @@ function MarketPage() {
     syncTimeLeft()
     const intervalId = setInterval(syncTimeLeft, 1000)
     return () => clearInterval(intervalId)
-  }, [round])
+  }, [round, roundPhase])
 
   useEffect(() => {
     if (!round) return
@@ -686,7 +699,15 @@ function MarketPage() {
           <div className="left-panel">
             <div className="count-bar">
               <div className="count-bar-right">
-                <span className="count-bar-label">{awaitingFrontendRound ? 'STATUS DO ROUND' : 'TEMPO DO ROUND'}</span>
+                <span className="count-bar-label">
+                  {awaitingFrontendRound
+                    ? 'STATUS DO ROUND'
+                    : isRoundCooldown
+                      ? 'PRÓXIMO ROUND'
+                    : roundPhase === 'open'
+                      ? 'TEMPO DE APOSTA'
+                      : 'TEMPO DO ROUND'}
+                </span>
                 <span className="count-bar-timer">
                   {awaitingFrontendRound ? 'AGUARDANDO CAMERA' : `${padTime(timeLeftSeconds / 60)}:${padTime(timeLeftSeconds % 60)}`}
                 </span>
@@ -730,6 +751,18 @@ function MarketPage() {
                   A câmera está ficando 100% online no frontend público. O round só será aberto após o primeiro frame confirmado.
                 </div>
               </div>
+            ) : isRoundCooldown ? (
+              <div className="betting-panel">
+                <div className="betting-panel-header">
+                  <div className="betting-panel-timer">
+                    <span className="betting-panel-timer-label">Próximo round</span>
+                    <strong className="betting-panel-timer-value">{`${padTime(timeLeftSeconds / 60)}:${padTime(timeLeftSeconds % 60)}`}</strong>
+                  </div>
+                </div>
+                <div className="positions-empty">
+                  {round?.cooldownMessage || 'O próximo round já vai começar'}
+                </div>
+              </div>
             ) : (
               <BettingPanel
                 markets={markets}
@@ -754,7 +787,7 @@ function MarketPage() {
         </div>
 
         {/* Bottom market bar */}
-        {!awaitingFrontendRound && markets.length > 0 && (
+        {!awaitingFrontendRound && !isRoundCooldown && markets.length > 0 && (
           <div className="bottom-market-bar">
             {markets.map((m) => {
               const mId = m.marketId || m.id

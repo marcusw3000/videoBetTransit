@@ -85,7 +85,10 @@ public class RoundService
             .ToListAsync();
 
         if (rounds.Count == 0)
+        {
+            await EnsurePendingRoundsAsync();
             return repairedRounds.Count > 0;
+        }
 
         var changed = false;
         var updatedRounds = new List<Round>();
@@ -141,12 +144,12 @@ public class RoundService
                 await _betService.SettleAcceptedBetsForRoundAsync(round.RoundId, round.FinalCount.Value, round.SettledAt.Value);
 
             await BroadcastAsync("round_settled", round);
-            await using var db2 = await _dbFactory.CreateDbContextAsync();
-            await CreateNewRoundAsync(db2, round.CameraId);
         }
 
         foreach (var repairedRound in repairedRounds)
             await BroadcastAsync("round_voided", repairedRound);
+
+        await EnsurePendingRoundsAsync();
 
         return changed || repairedRounds.Count > 0;
     }
@@ -255,6 +258,7 @@ public class RoundService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var normalizedCameraId = NormalizeCameraId(cameraId);
+        var now = DateTime.UtcNow;
 
         var round = await db.Rounds
             .Include(r => r.Markets)
@@ -269,7 +273,10 @@ public class RoundService
             .OrderByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
 
-        if (round is null)
+        if (round is not null && IsFinishedRound(round) && GetNextRoundStartsAtUtc(round, now).HasValue)
+            return round;
+
+        if (round is null || IsFinishedRound(round))
         {
             await CreateNewRoundAsync(db, normalizedCameraId);
             round = await db.Rounds
@@ -280,7 +287,27 @@ public class RoundService
                 .FirstOrDefaultAsync();
         }
 
-        return round;
+        return round ?? await db.Rounds
+            .Include(r => r.Markets)
+            .Where(r => r.CameraId == normalizedCameraId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<DateTime?> GetNextRoundStartsAtAsync(string cameraId = "default")
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var normalizedCameraId = NormalizeCameraId(cameraId);
+        var latestFinishedRound = await db.Rounds
+            .AsNoTracking()
+            .Where(r => r.CameraId == normalizedCameraId)
+            .Where(r => r.Status == RoundStatus.Settled)
+            .OrderByDescending(r => r.SettledAt ?? r.EndsAt)
+            .FirstOrDefaultAsync();
+
+        return latestFinishedRound is null
+            ? null
+            : GetNextRoundStartsAtUtc(latestFinishedRound, DateTime.UtcNow);
     }
 
     public async Task<bool> VoidRoundAsync(Guid roundId, string reason)
@@ -659,6 +686,16 @@ public class RoundService
                 return null;
             }
 
+            var nextRoundStartsAt = await GetNextRoundStartsAtUtcAsync(db, normalizedCameraId, now);
+            if (nextRoundStartsAt.HasValue)
+            {
+                _logger.LogInformation(
+                    "[Round] Criacao adiada para camera {CameraId} ate {NextRoundStartsAt:O} por cooldown entre rounds.",
+                    normalizedCameraId,
+                    nextRoundStartsAt.Value);
+                return null;
+            }
+
             var roundMode = RoundMode.Normal;
             var timing = GetTiming();
             var marketLine = await _dynamicMarketLineService.BuildTemplatesAsync(
@@ -677,7 +714,7 @@ public class RoundService
                 DisplayName = GetDisplayName(),
                 CreatedAt = now,
                 BetCloseAt = now.AddSeconds(timing.BetWindowSeconds),
-                EndsAt = now.AddSeconds(timing.DurationSeconds),
+                EndsAt = now.AddSeconds(timing.BetWindowSeconds + timing.DurationSeconds),
                 CurrentCount = 0,
             };
 
@@ -966,6 +1003,50 @@ public class RoundService
     }
 
     private static bool CanCreateRounds(CameraRoundState state) => state.ReadyForRounds;
+
+    private async Task EnsurePendingRoundsAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var readyCameraIds = await db.CameraRoundStates
+            .AsNoTracking()
+            .Where(state => state.ReadyForRounds)
+            .Select(state => state.CameraId)
+            .Distinct()
+            .ToListAsync();
+
+        foreach (var cameraId in readyCameraIds)
+            await EnsureActiveRoundAsync(cameraId);
+    }
+
+    private async Task<DateTime?> GetNextRoundStartsAtUtcAsync(AppDbContext db, string cameraId, DateTime now)
+    {
+        var latestFinishedRound = await db.Rounds
+            .AsNoTracking()
+            .Where(r => r.CameraId == cameraId)
+            .Where(r => r.Status == RoundStatus.Settled)
+            .OrderByDescending(r => r.SettledAt ?? r.EndsAt)
+            .FirstOrDefaultAsync();
+
+        return latestFinishedRound is null
+            ? null
+            : GetNextRoundStartsAtUtc(latestFinishedRound, now);
+    }
+
+    private DateTime? GetNextRoundStartsAtUtc(Round round, DateTime now)
+    {
+        if (round.Status != RoundStatus.Settled)
+            return null;
+
+        var completedAt = round.SettledAt;
+        if (!completedAt.HasValue)
+            return null;
+
+        var nextRoundStartsAt = completedAt.Value.AddSeconds(Math.Max(0, _options.NextRoundDelaySeconds));
+        return nextRoundStartsAt > now ? nextRoundStartsAt : null;
+    }
+
+    private static bool IsFinishedRound(Round round) =>
+        round.Status == RoundStatus.Settled || round.Status == RoundStatus.Void;
 
     private static string NormalizeActivationPhase(string? phase)
     {

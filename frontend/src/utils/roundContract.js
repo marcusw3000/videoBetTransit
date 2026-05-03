@@ -17,7 +17,8 @@ function normalizeMarket(market) {
 export function normalizeRoundContract(round) {
   if (!round) return null
 
-  const status = (round.status || '').toLowerCase()
+  const isCooldown = Boolean(round.isCooldown)
+  const status = isCooldown ? 'cooldown' : (round.status || '').toLowerCase()
   const marketsSource = round.markets || round.ranges || []
   const markets = marketsSource
     .map(normalizeMarket)
@@ -35,10 +36,13 @@ export function normalizeRoundContract(round) {
     endsAt: round.endsAt || null,
     settledAt: round.settledAt || null,
     voidedAt: round.voidedAt || null,
+    nextRoundStartsAt: round.nextRoundStartsAt || null,
+    cooldownMessage: round.cooldownMessage || null,
     voidReason: round.voidReason || null,
     currentCount: round.currentCount ?? 0,
     finalCount: round.finalCount ?? null,
     isSuspended: round.isSuspended ?? status !== 'open',
+    isCooldown,
     cameraIds: Array.isArray(round.cameraIds) ? round.cameraIds : [],
     eventsCount: round.eventsCount ?? 0,
     markets,

@@ -30,9 +30,10 @@ export function getTimeLeftInSeconds(endsAt) {
 
 export function getRoundPhase(round) {
   if (!round) return 'loading'
+  if (round.isCooldown) return 'cooldown'
 
   const status = (round.status || '').toLowerCase()
-  if (['open', 'closing', 'settling', 'settled', 'void'].includes(status)) return status
+  if (['open', 'closing', 'settling', 'settled', 'void', 'cooldown'].includes(status)) return status
 
   const now = Date.now()
   const end = round.endsAt ? parseTimestampMs(round.endsAt) : 0

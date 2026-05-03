@@ -5,6 +5,7 @@ public class RoundOptions
     public int DurationSeconds { get; set; } = 60;
     public int BetWindowSeconds { get; set; } = 15;
     public int SettleDelaySeconds { get; set; } = 2;
+    public int NextRoundDelaySeconds { get; set; } = 10;
     public RoundTimingOptions Timing { get; set; } = new();
     public DynamicMarketOptions DynamicMarkets { get; set; } = new();
     public RoundMarketSets MarketSets { get; set; } = new();

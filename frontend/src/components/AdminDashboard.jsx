@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CounterCard from './CounterCard'
 import CrossingEventsCard from './CrossingEventsCard'
 import CreateSessionPanel from './CreateSessionPanel'
@@ -17,6 +17,7 @@ import { voidRound } from '../services/adminApi'
 import { startMetricsConnection, stopMetricsConnection } from '../services/metricsSignalr'
 import { getOperationsHealth } from '../services/operationsApi'
 import {
+  acknowledgeFrontendReady,
   getCurrentRound,
   getRecentRounds,
   getRoundById,
@@ -100,6 +101,28 @@ function isAwaitingFrontendAck(operations) {
   return phase === 'requested' || phase === 'frontend_pending'
 }
 
+function getActivationSessionId(operations) {
+  return String(
+    operations?.cameraActivation?.activationSessionId
+    || operations?.activationSessionId
+    || operations?.health?.cameraActivation?.activationSessionId
+    || operations?.health?.activationSessionId
+    || '',
+  ).trim()
+}
+
+function hasRenderableActivationProof(operations, activationSessionId) {
+  const currentActivationSessionId = String(activationSessionId || '').trim()
+  if (!currentActivationSessionId) return false
+
+  const activation = operations?.cameraActivation || operations?.health?.cameraActivation || {}
+  const renderableSessionId = String(activation?.lastRenderableActivationSessionId || '').trim()
+  const firstRenderableFrameAt = activation?.firstRenderableFrameAt
+  const firstPublishedAt = activation?.firstPublishedAt
+
+  return renderableSessionId === currentActivationSessionId && Boolean(firstRenderableFrameAt || firstPublishedAt)
+}
+
 function isRoundForPipeline(round, cameraIds) {
   const allowed = Array.isArray(cameraIds)
     ? cameraIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
@@ -121,6 +144,8 @@ function getRoundStatusLabel(round) {
   const status = String(round?.status || 'desconhecido').toLowerCase()
 
   switch (status) {
+    case 'cooldown':
+      return 'Proximo round'
     case 'open':
       return 'Aberto'
     case 'closing':
@@ -169,16 +194,26 @@ export default function AdminDashboard() {
   const [isVoiding, setIsVoiding] = useState(false)
   const [isLoadingRoundDetail, setIsLoadingRoundDetail] = useState(false)
   const [frontendTransportState, setFrontendTransportState] = useState('connecting')
+  const lastFrontendAckKeyRef = useRef('')
 
   const activeSession = getActiveSession(sessions, selectedSessionId)
   const roundPhase = getRoundPhase(currentRound)
   const streamState = frontendTransportState
-  const roundTimerLabel = roundPhase === 'open' ? 'Fechamento das Apostas' : 'Tempo Restante da Rodada'
+  const roundTimerLabel = roundPhase === 'cooldown'
+    ? 'Proximo Round'
+    : roundPhase === 'open'
+      ? 'Fechamento das Apostas'
+      : 'Tempo Restante da Rodada'
   const cameraActivation = operations?.cameraActivation || operations?.health?.cameraActivation || null
   const isCameraTransitioning = Boolean(cameraActivation && cameraActivation.phase !== 'ready')
   const activeStreamPath = cameraActivation?.readyProcessedStreamPath || operations?.processedStreamPath || operations?.health?.processedStreamPath || ''
   const activeCameraId = cameraActivation?.readyCameraId || operations?.cameraId || operations?.health?.cameraId || embedConfig.cameraId
   const transitionCameraLabel = cameraActivation?.requestedProfileLabel || cameraActivation?.requestedCameraId || activeCameraId
+  const frontendAckPhase = String(operations?.frontendAckPhase || operations?.health?.frontendAckPhase || '').trim().toLowerCase()
+  const frontendAckNonce = String(operations?.frontendAckNonce || operations?.health?.frontendAckNonce || '').trim()
+  const activationSessionId = getActivationSessionId(operations)
+  const selectedStreamProfileId = String(operations?.selectedStreamProfileId || operations?.health?.selectedStreamProfileId || '').trim()
+  const waitingFrontendAck = isAwaitingFrontendAck(operations)
   const pipelineCameraIds = useMemo(
     () => getRuntimeHistoryCameraIds(operations, activeCameraId),
     [operations, activeCameraId],
@@ -196,6 +231,15 @@ export default function AdminDashboard() {
     [activeCameraId, activeStreamPath],
   )
   const mjpegSrc = useMemo(() => buildMjpegUrl(), [])
+  const playbackSourceSignature = useMemo(
+    () => JSON.stringify({
+      cameraId: String(activeCameraId || '').trim(),
+      path: String(activeStreamPath || '').trim(),
+      nonce: frontendAckNonce,
+      activationSessionId,
+    }),
+    [activeCameraId, activeStreamPath, activationSessionId, frontendAckNonce],
+  )
 
   const evidenceEvents = useMemo(
     () => roundEvents.filter((item) => Boolean(item?.snapshotUrl)).slice(0, 6),
@@ -304,6 +348,58 @@ export default function AdminDashboard() {
     await loadRoundDetail(targetRoundId, fallbackRound)
   }, [activeCameraId, loadRoundDetail, selectedRoundId])
 
+  const handleFirstPlayableFrame = useCallback(async ({ sourceSignature, mode, activationSessionId: provedActivationSessionId }) => {
+    if (!waitingFrontendAck) return
+    if (frontendAckPhase !== 'frontend_pending') return
+    if (mode !== 'activation-probe') return
+    if (!frontendAckNonce || !activeCameraId || !embedConfig.gameSessionId || !activationSessionId) return
+    if (sourceSignature !== playbackSourceSignature) return
+    if (String(provedActivationSessionId || '').trim() !== activationSessionId) return
+    if (!hasRenderableActivationProof(operations, activationSessionId)) return
+
+    const ackKey = [activeCameraId, selectedStreamProfileId, frontendAckNonce, activationSessionId, sourceSignature].join('|')
+    if (lastFrontendAckKeyRef.current === ackKey) return
+
+    lastFrontendAckKeyRef.current = ackKey
+    try {
+      const ackResult = await acknowledgeFrontendReady({
+        cameraId: activeCameraId,
+        streamProfileId: selectedStreamProfileId,
+        gameSessionId: embedConfig.gameSessionId,
+        activationNonce: frontendAckNonce,
+        activationSessionId,
+      })
+
+      if (ackResult?.accepted) {
+        setOperations((current) => current ? {
+          ...current,
+          frontendAckPhase: ackResult.activationPhase || 'ready',
+          cameraActivation: current.cameraActivation ? {
+            ...current.cameraActivation,
+            frontendAckPhase: ackResult.activationPhase || 'ready',
+          } : current.cameraActivation,
+        } : current)
+      }
+
+      await loadRounds(selectedRoundId)
+    } catch (err) {
+      lastFrontendAckKeyRef.current = ''
+      console.error(err)
+    }
+  }, [
+    activationSessionId,
+    activeCameraId,
+    embedConfig.gameSessionId,
+    frontendAckNonce,
+    frontendAckPhase,
+    loadRounds,
+    operations,
+    playbackSourceSignature,
+    selectedRoundId,
+    selectedStreamProfileId,
+    waitingFrontendAck,
+  ])
+
   useEffect(() => {
     let active = true
 
@@ -386,6 +482,10 @@ export default function AdminDashboard() {
   }, [selectedSessionId])
 
   useEffect(() => {
+    lastFrontendAckKeyRef.current = ''
+  }, [activeCameraId, activeStreamPath, activationSessionId, frontendAckNonce, selectedStreamProfileId])
+
+  useEffect(() => {
     let active = true
 
     startRoundConnection({
@@ -444,6 +544,8 @@ export default function AdminDashboard() {
 
       const nextSeconds = roundPhase === 'open'
         ? getTimeLeftInSeconds(currentRound.betCloseAt)
+        : roundPhase === 'cooldown'
+          ? getTimeLeftInSeconds(currentRound.nextRoundStartsAt)
         : getTimeLeftInSeconds(currentRound.endsAt)
 
       setTimerSeconds(nextSeconds)
@@ -568,11 +670,16 @@ export default function AdminDashboard() {
                 webrtcSrc={webrtcSrc}
                 src={hlsSrc}
                 fallbackSrc={mjpegSrc}
+                sourceSignature={playbackSourceSignature}
+                activationSessionId={activationSessionId}
+                activationProbeEnabled={waitingFrontendAck}
                 title={activeSession?.cameraName || embedConfig.cameraLabel || 'Camera ativa'}
                 transitionLabel={transitionCameraLabel}
                 transitioning={isCameraTransitioning}
                 countValue={currentRound?.currentCount ?? operations?.totalCount ?? operations?.health?.totalCount ?? 0}
+                onFirstPlayableFrame={handleFirstPlayableFrame}
                 onStreamStatusChange={setFrontendTransportState}
+                playableFrameToken={frontendAckNonce}
               />
             </div>
           </div>

@@ -30,7 +30,8 @@ public class RoundsController : ControllerBase
         if (round is null)
             return NotFound(new { error = $"Nenhum round disponivel ainda para camera '{effectiveCameraId}'." });
 
-        return Ok(ToResponse(round));
+        var nextRoundStartsAt = await _roundService.GetNextRoundStartsAtAsync(effectiveCameraId);
+        return Ok(ToResponse(round, nextRoundStartsAt));
     }
 
     [HttpGet("recent")]
@@ -51,7 +52,7 @@ public class RoundsController : ControllerBase
             .Take(Math.Clamp(limit, 1, 100))
             .ToListAsync();
 
-        return Ok(rounds.Select(ToResponse));
+        return Ok(rounds.Select(round => ToResponse(round)));
     }
 
     [HttpGet("history")]
@@ -76,7 +77,7 @@ public class RoundsController : ControllerBase
             .Take(Math.Clamp(limit, 1, 100))
             .ToListAsync();
 
-        return Ok(rounds.Select(ToResponse));
+        return Ok(rounds.Select(round => ToResponse(round)));
     }
 
     [HttpGet("{roundId:guid}")]
@@ -213,7 +214,7 @@ public class RoundsController : ControllerBase
         }
     }
 
-    private static RoundResponse ToResponse(Domain.Entities.Round r) => new()
+    private static RoundResponse ToResponse(Domain.Entities.Round r, DateTime? nextRoundStartsAtUtc = null) => new()
     {
         RoundId = r.RoundId.ToString(),
         CameraId = r.CameraId,
@@ -227,6 +228,9 @@ public class RoundsController : ControllerBase
         EndsAt = SaoPauloTime.FromUtc(r.EndsAt),
         SettledAt = SaoPauloTime.FromUtc(r.SettledAt),
         VoidedAt = SaoPauloTime.FromUtc(r.VoidedAt),
+        NextRoundStartsAt = SaoPauloTime.FromUtc(nextRoundStartsAtUtc),
+        CooldownMessage = nextRoundStartsAtUtc.HasValue ? "O proximo round ja vai comecar" : null,
+        IsCooldown = nextRoundStartsAtUtc.HasValue,
         VoidReason = r.VoidReason,
         CurrentCount = r.CurrentCount,
         FinalCount = r.FinalCount,

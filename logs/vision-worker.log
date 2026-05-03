@@ -13282,3 +13282,1191 @@ UnboundLocalError: cannot access local variable 'fallback_state' where it is not
 05:36:10 [INFO] FPS inst: 78.9 | inferencia media: 9.4 ms | JPEG medio: 0.4 ms | pipeline media: 15.1 ms | MJPEG clientes: 6 | live descartados: 0
 05:36:13 [INFO] FPS médio: 30.0 | Total contado: 32
 05:36:13 [INFO] FPS inst: 46.8 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.1 ms | MJPEG clientes: 6 | live descartados: 0
+05:36:31 [INFO] Sincronizacao Supabase ativa | table=stream_profiles | scope=videoBetTransit
+05:36:31 [WARNING] Falha ao carregar stream profiles do Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?select=id%2Cname%2Cstream_url%2Ccamera_id%2Croi%2Cline%2Ccount_direction%2Csecondary_verification_enabled%2Csecondary_verification_band_px%2Cis_selected%2Cupdated_at&scope=eq.videoBetTransit&order=updated_at.desc.nullslast%2Cid.asc (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:36:31 [WARNING] Falha ao carregar agenda por hora do Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_schedule_rules?select=id%2Cname%2Cenabled%2Cstart_time%2Cend_time%2Callowed_profile_ids%2Ctimezone%2Cupdated_at&scope=eq.videoBetTransit&order=updated_at.desc.nullslast%2Cid.asc (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:36:31 [WARNING] Falha ao publicar stream profiles iniciais no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:36:31 [WARNING] Falha ao publicar agenda por hora inicial no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_schedule_rules?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:36:31 [INFO] MJPEG server iniciado em http://0.0.0.0:8090/video_feed
+05:36:31 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_004
+05:36:31 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:36:33 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=90000.00 | fps efetivo=15.00
+05:36:33 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:36:33 [INFO] Iniciando contagem... | tracker: botsort_traffic.yaml | conf: 0.2 | imgsz: 256 | stride: 2 | jpeg: 65 | browserMaxWidth: 854 | operatorMaxWidth: 960 | operatorFps: 10.0
+05:36:33 [INFO] Resolução do stream: 352x288
+05:36:33 [INFO] ROI: {'x': 159, 'y': 102, 'w': 176, 'h': 179} | Linha: {'x1': 173, 'y1': 176, 'x2': 349, 'y2': 177} | Direção: any
+05:36:34 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_004
+05:36:34 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:36:37 [INFO] FPS médio: 24.5 | Total contado: 0
+05:36:37 [INFO] FPS inst: 78.1 | inferencia media: 9.9 ms | JPEG medio: 0.3 ms | pipeline media: 19.9 ms | MJPEG clientes: 2 | live descartados: 0
+05:36:39 [INFO] Count: 1 (car #4) via primary
+05:36:42 [INFO] FPS médio: 22.4 | Total contado: 1
+05:36:42 [INFO] FPS inst: 40.8 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 17.7 ms | MJPEG clientes: 2 | live descartados: 0
+05:36:45 [INFO] FPS médio: 29.7 | Total contado: 1
+05:36:45 [INFO] FPS inst: 51.7 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 17.1 ms | MJPEG clientes: 2 | live descartados: 0
+05:36:48 [INFO] Count: 2 (car #11) via primary
+05:36:50 [INFO] FPS médio: 20.4 | Total contado: 2
+05:36:50 [INFO] FPS inst: 72.7 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 16.5 ms | MJPEG clientes: 2 | live descartados: 0
+05:36:53 [INFO] FPS médio: 30.0 | Total contado: 2
+05:36:53 [INFO] FPS inst: 73.1 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 2 | live descartados: 0
+05:36:57 [INFO] FPS médio: 30.1 | Total contado: 2
+05:36:57 [INFO] FPS inst: 51.3 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 2 | live descartados: 0
+05:36:59 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_008
+05:36:59 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:37:04 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=29.97 | fps efetivo=29.97
+05:37:04 [INFO] Perfil de stream aplicado: teste3 | cam_008 | url=http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8
+05:37:04 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:37:04 [WARNING] Nenhum frame recebido ainda do stream...
+05:37:05 [WARNING] Nenhum frame recebido ainda do stream...
+05:37:05 [WARNING] Nenhum frame recebido ainda do stream...
+05:37:06 [INFO] Resolução do stream: 640x360
+05:37:06 [INFO] ROI: {'x': 168, 'y': 191, 'w': 251, 'h': 168} | Linha: {'x1': 149, 'y1': 257, 'x2': 412, 'y2': 256} | Direção: any
+05:37:06 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_008
+05:37:06 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:37:09 [INFO] FPS médio: 19.2 | Total contado: 0
+05:37:09 [INFO] FPS inst: 54.7 | inferencia media: 9.4 ms | JPEG medio: 0.4 ms | pipeline media: 15.5 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:12 [INFO] FPS médio: 30.0 | Total contado: 0
+05:37:12 [INFO] FPS inst: 68.7 | inferencia media: 9.3 ms | JPEG medio: 0.4 ms | pipeline media: 15.2 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:16 [INFO] FPS médio: 30.0 | Total contado: 0
+05:37:16 [INFO] FPS inst: 55.1 | inferencia media: 9.2 ms | JPEG medio: 0.4 ms | pipeline media: 15.0 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:19 [INFO] FPS médio: 30.0 | Total contado: 0
+05:37:19 [INFO] FPS inst: 51.3 | inferencia media: 9.1 ms | JPEG medio: 0.5 ms | pipeline media: 14.8 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:22 [INFO] FPS médio: 30.0 | Total contado: 0
+05:37:22 [INFO] FPS inst: 51.2 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.7 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:26 [INFO] FPS médio: 30.0 | Total contado: 0
+05:37:26 [INFO] FPS inst: 56.0 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.6 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:30 [INFO] FPS médio: 26.5 | Total contado: 0
+05:37:30 [INFO] FPS inst: 34.6 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:33 [INFO] FPS médio: 28.0 | Total contado: 0
+05:37:33 [INFO] FPS inst: 74.6 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 15.2 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:36 [INFO] FPS médio: 30.0 | Total contado: 0
+05:37:36 [INFO] FPS inst: 75.8 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 15.1 ms | MJPEG clientes: 2 | live descartados: 0
+05:37:40 [INFO] FPS médio: 30.0 | Total contado: 0
+05:37:40 [INFO] FPS inst: 54.7 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 3 | live descartados: 0
+05:37:42 [INFO] Count: 1 (car #244) via primary
+05:37:43 [INFO] FPS médio: 30.0 | Total contado: 1
+05:37:43 [INFO] FPS inst: 48.6 | inferencia media: 8.8 ms | JPEG medio: 0.6 ms | pipeline media: 14.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:37:46 [INFO] FPS médio: 30.0 | Total contado: 1
+05:37:46 [INFO] FPS inst: 45.9 | inferencia media: 8.8 ms | JPEG medio: 0.6 ms | pipeline media: 14.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:37:50 [INFO] FPS médio: 30.0 | Total contado: 1
+05:37:50 [INFO] FPS inst: 65.6 | inferencia media: 8.8 ms | JPEG medio: 0.6 ms | pipeline media: 14.7 ms | MJPEG clientes: 3 | live descartados: 0
+05:37:53 [INFO] FPS médio: 30.0 | Total contado: 1
+05:37:53 [INFO] FPS inst: 47.2 | inferencia media: 8.8 ms | JPEG medio: 0.6 ms | pipeline media: 14.6 ms | MJPEG clientes: 3 | live descartados: 0
+05:37:56 [INFO] FPS médio: 30.0 | Total contado: 1
+05:37:56 [INFO] FPS inst: 62.6 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:37:58 [WARNING] Falha ao sincronizar esteira no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:38:00 [INFO] FPS médio: 29.4 | Total contado: 1
+05:38:00 [INFO] FPS inst: 67.0 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:03 [INFO] FPS médio: 30.0 | Total contado: 1
+05:38:03 [INFO] FPS inst: 70.4 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:07 [INFO] FPS médio: 30.0 | Total contado: 1
+05:38:07 [INFO] FPS inst: 52.5 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:10 [INFO] FPS médio: 30.0 | Total contado: 1
+05:38:10 [INFO] FPS inst: 56.7 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:13 [INFO] FPS médio: 30.0 | Total contado: 1
+05:38:13 [INFO] FPS inst: 63.2 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:17 [INFO] FPS médio: 30.0 | Total contado: 1
+05:38:17 [INFO] FPS inst: 74.4 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:20 [INFO] FPS médio: 29.9 | Total contado: 1
+05:38:20 [INFO] FPS inst: 39.8 | inferencia media: 8.7 ms | JPEG medio: 0.6 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:20 [INFO] Count: 2 (car #394) via fallback
+05:38:23 [INFO] FPS médio: 30.1 | Total contado: 2
+05:38:23 [INFO] FPS inst: 52.4 | inferencia media: 8.6 ms | JPEG medio: 0.6 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:24 [INFO] Count: 3 (car #387) via primary
+05:38:27 [INFO] FPS médio: 30.0 | Total contado: 3
+05:38:27 [INFO] FPS inst: 56.1 | inferencia media: 8.6 ms | JPEG medio: 0.6 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:30 [INFO] FPS médio: 29.9 | Total contado: 3
+05:38:30 [INFO] FPS inst: 51.2 | inferencia media: 8.6 ms | JPEG medio: 0.6 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:33 [INFO] FPS médio: 30.0 | Total contado: 3
+05:38:33 [INFO] FPS inst: 64.3 | inferencia media: 8.6 ms | JPEG medio: 0.6 ms | pipeline media: 14.0 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:37 [INFO] FPS médio: 29.7 | Total contado: 3
+05:38:37 [INFO] FPS inst: 56.5 | inferencia media: 8.6 ms | JPEG medio: 0.6 ms | pipeline media: 14.0 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:38 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_007
+05:38:38 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:38:41 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=25.00 | fps efetivo=25.00
+05:38:41 [INFO] Perfil de stream aplicado: teste2 | cam_007 | url=https://streaming1.highwaytraffic.go.th/Phase8/PER_8_038.stream/playlist.m3u8
+05:38:41 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:38:41 [INFO] Resolução do stream: 512x288
+05:38:41 [INFO] ROI: {'x': 94, 'y': 127, 'w': 264, 'h': 157} | Linha: {'x1': 97, 'y1': 215, 'x2': 301, 'y2': 178} | Direção: any
+05:38:41 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_007
+05:38:41 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:38:45 [INFO] FPS médio: 25.2 | Total contado: 0
+05:38:45 [INFO] FPS inst: 50.1 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:49 [INFO] FPS médio: 25.0 | Total contado: 0
+05:38:49 [INFO] FPS inst: 42.4 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:52 [INFO] Count: 1 (car #514) via primary
+05:38:53 [INFO] FPS médio: 25.0 | Total contado: 1
+05:38:53 [INFO] FPS inst: 41.5 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:38:55 [INFO] Count: 2 (car #523) via primary
+05:38:57 [INFO] FPS médio: 25.0 | Total contado: 2
+05:38:57 [INFO] FPS inst: 42.9 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:01 [INFO] FPS médio: 25.0 | Total contado: 2
+05:39:01 [INFO] FPS inst: 42.5 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.7 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:05 [INFO] FPS médio: 25.0 | Total contado: 2
+05:39:05 [INFO] FPS inst: 40.8 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.7 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:09 [INFO] FPS médio: 25.0 | Total contado: 2
+05:39:09 [INFO] FPS inst: 38.9 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.7 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:13 [INFO] FPS médio: 25.0 | Total contado: 2
+05:39:13 [INFO] FPS inst: 40.9 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.7 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:17 [INFO] FPS médio: 25.0 | Total contado: 2
+05:39:17 [INFO] FPS inst: 31.3 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.6 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:21 [INFO] FPS médio: 25.0 | Total contado: 2
+05:39:21 [INFO] FPS inst: 48.7 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.6 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:25 [INFO] Count: 3 (car #622) via primary
+05:39:25 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:25 [INFO] FPS inst: 36.7 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.6 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:29 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:29 [INFO] FPS inst: 43.7 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.6 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:33 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:33 [INFO] FPS inst: 39.9 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:37 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:37 [INFO] FPS inst: 34.9 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:41 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:41 [INFO] FPS inst: 55.5 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:45 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:45 [INFO] FPS inst: 44.4 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:49 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:49 [INFO] FPS inst: 37.5 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:53 [INFO] FPS médio: 25.0 | Total contado: 3
+05:39:53 [INFO] FPS inst: 45.6 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:39:57 [INFO] FPS médio: 24.1 | Total contado: 3
+05:39:57 [INFO] FPS inst: 45.0 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:01 [INFO] FPS médio: 25.0 | Total contado: 3
+05:40:01 [INFO] FPS inst: 43.3 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:05 [INFO] FPS médio: 25.0 | Total contado: 3
+05:40:05 [INFO] FPS inst: 36.8 | inferencia media: 8.5 ms | JPEG medio: 0.6 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:09 [INFO] FPS médio: 25.0 | Total contado: 3
+05:40:09 [INFO] FPS inst: 47.8 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:12 [INFO] Count: 4 (car #822) via primary
+05:40:13 [INFO] FPS médio: 25.0 | Total contado: 4
+05:40:13 [INFO] FPS inst: 40.9 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:13 [INFO] Count: 5 (car #839) via primary
+05:40:15 [INFO] Count: 6 (car #864) via primary
+05:40:16 [INFO] Count: 7 (car #866) via primary
+05:40:17 [INFO] FPS médio: 25.0 | Total contado: 7
+05:40:17 [INFO] FPS inst: 35.3 | inferencia media: 8.4 ms | JPEG medio: 0.6 ms | pipeline media: 13.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:18 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_004
+05:40:18 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:40:19 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=90000.00 | fps efetivo=15.00
+05:40:19 [INFO] Perfil de stream aplicado: teste | cam_004 | url=https://streaming1.dsatmacau.com/traffic/m1082.m3u8
+05:40:19 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:40:19 [INFO] Resolução do stream: 352x288
+05:40:19 [INFO] ROI: {'x': 159, 'y': 102, 'w': 176, 'h': 179} | Linha: {'x1': 173, 'y1': 176, 'x2': 349, 'y2': 177} | Direção: any
+05:40:19 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_004
+05:40:19 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:40:23 [INFO] FPS médio: 28.9 | Total contado: 0
+05:40:23 [INFO] FPS inst: 49.3 | inferencia media: 8.5 ms | JPEG medio: 0.5 ms | pipeline media: 13.5 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:26 [INFO] FPS médio: 28.4 | Total contado: 0
+05:40:26 [INFO] FPS inst: 73.1 | inferencia media: 8.5 ms | JPEG medio: 0.5 ms | pipeline media: 13.6 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:28 [INFO] Count: 1 (car #899) via primary
+05:40:29 [INFO] FPS médio: 30.1 | Total contado: 1
+05:40:29 [INFO] FPS inst: 60.7 | inferencia media: 8.6 ms | JPEG medio: 0.5 ms | pipeline media: 13.7 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:30 [INFO] Count: 2 (car #900) via primary
+05:40:33 [INFO] FPS médio: 29.7 | Total contado: 2
+05:40:33 [INFO] FPS inst: 51.0 | inferencia media: 8.6 ms | JPEG medio: 0.5 ms | pipeline media: 13.7 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:36 [INFO] FPS médio: 30.1 | Total contado: 2
+05:40:36 [INFO] FPS inst: 77.4 | inferencia media: 8.6 ms | JPEG medio: 0.5 ms | pipeline media: 13.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:39 [INFO] FPS médio: 29.9 | Total contado: 2
+05:40:39 [INFO] FPS inst: 53.2 | inferencia media: 8.6 ms | JPEG medio: 0.5 ms | pipeline media: 13.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:43 [INFO] FPS médio: 30.0 | Total contado: 2
+05:40:43 [INFO] FPS inst: 51.8 | inferencia media: 8.6 ms | JPEG medio: 0.5 ms | pipeline media: 13.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:44 [INFO] Count: 3 (car #903) via primary
+05:40:46 [INFO] FPS médio: 30.0 | Total contado: 3
+05:40:46 [INFO] FPS inst: 80.1 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:49 [INFO] FPS médio: 30.0 | Total contado: 3
+05:40:49 [INFO] FPS inst: 84.1 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.8 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:53 [INFO] FPS médio: 30.0 | Total contado: 3
+05:40:53 [INFO] FPS inst: 77.6 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:56 [INFO] FPS médio: 29.9 | Total contado: 3
+05:40:56 [INFO] FPS inst: 85.2 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:40:57 [INFO] Count: 4 (car #909) via primary
+05:40:59 [INFO] FPS médio: 30.2 | Total contado: 4
+05:40:59 [INFO] FPS inst: 39.5 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:03 [INFO] FPS médio: 30.1 | Total contado: 4
+05:41:03 [INFO] FPS inst: 58.8 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:06 [INFO] FPS médio: 30.1 | Total contado: 4
+05:41:06 [INFO] FPS inst: 56.2 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:09 [INFO] FPS médio: 29.8 | Total contado: 4
+05:41:09 [INFO] FPS inst: 69.9 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:13 [INFO] FPS médio: 30.1 | Total contado: 4
+05:41:13 [INFO] FPS inst: 76.8 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:16 [INFO] FPS médio: 30.0 | Total contado: 4
+05:41:16 [INFO] FPS inst: 41.1 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:18 [INFO] Count: 5 (car #935) via primary
+05:41:19 [INFO] FPS médio: 30.0 | Total contado: 5
+05:41:19 [INFO] FPS inst: 51.0 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:23 [INFO] FPS médio: 29.4 | Total contado: 5
+05:41:23 [INFO] FPS inst: 57.9 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:26 [INFO] FPS médio: 29.4 | Total contado: 5
+05:41:26 [INFO] FPS inst: 85.7 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:30 [INFO] FPS médio: 29.9 | Total contado: 5
+05:41:30 [INFO] FPS inst: 43.6 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:31 [INFO] Count: 6 (car #949) via primary
+05:41:33 [INFO] FPS médio: 30.1 | Total contado: 6
+05:41:33 [INFO] FPS inst: 51.1 | inferencia media: 8.7 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:36 [INFO] Count: 7 (car #953) via primary
+05:41:36 [INFO] FPS médio: 30.0 | Total contado: 7
+05:41:36 [INFO] FPS inst: 60.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:40 [INFO] FPS médio: 29.4 | Total contado: 7
+05:41:40 [INFO] FPS inst: 60.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:40 [INFO] Count: 8 (car #963) via primary
+05:41:41 [INFO] Count: 9 (car #961) via primary
+05:41:43 [INFO] FPS médio: 30.0 | Total contado: 9
+05:41:43 [INFO] FPS inst: 62.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:44 [INFO] Count: 10 (car #976) via primary
+05:41:46 [INFO] FPS médio: 28.9 | Total contado: 10
+05:41:46 [INFO] FPS inst: 48.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:50 [INFO] FPS médio: 30.0 | Total contado: 10
+05:41:50 [INFO] FPS inst: 50.3 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:53 [INFO] FPS médio: 29.7 | Total contado: 10
+05:41:53 [INFO] FPS inst: 49.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:41:56 [INFO] FPS médio: 29.7 | Total contado: 10
+05:41:56 [INFO] FPS inst: 70.8 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:00 [INFO] FPS médio: 30.1 | Total contado: 10
+05:42:00 [INFO] FPS inst: 74.7 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:03 [INFO] FPS médio: 30.0 | Total contado: 10
+05:42:03 [INFO] FPS inst: 52.8 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:06 [INFO] FPS médio: 30.0 | Total contado: 10
+05:42:06 [INFO] FPS inst: 51.6 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:10 [INFO] FPS médio: 30.0 | Total contado: 10
+05:42:10 [INFO] FPS inst: 72.3 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:13 [INFO] FPS médio: 30.0 | Total contado: 10
+05:42:13 [INFO] FPS inst: 90.0 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:13 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_008
+05:42:13 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:42:16 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=29.97 | fps efetivo=29.97
+05:42:16 [INFO] Perfil de stream aplicado: teste3 | cam_008 | url=http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8
+05:42:16 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:42:16 [INFO] Resolução do stream: 640x360
+05:42:16 [INFO] ROI: {'x': 168, 'y': 191, 'w': 251, 'h': 168} | Linha: {'x1': 162, 'y1': 240, 'x2': 403, 'y2': 237} | Direção: any
+05:42:16 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_008
+05:42:16 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:42:19 [INFO] Count: 1 (car #1017) via fallback
+05:42:20 [INFO] FPS médio: 30.2 | Total contado: 1
+05:42:20 [INFO] FPS inst: 61.3 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:23 [INFO] FPS médio: 30.0 | Total contado: 1
+05:42:23 [INFO] FPS inst: 63.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:24 [INFO] Count: 2 (car #1061) via fallback
+05:42:26 [INFO] FPS médio: 30.0 | Total contado: 2
+05:42:26 [INFO] FPS inst: 42.3 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:30 [INFO] FPS médio: 30.0 | Total contado: 2
+05:42:30 [INFO] FPS inst: 47.6 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:33 [INFO] FPS médio: 30.0 | Total contado: 2
+05:42:33 [INFO] FPS inst: 55.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:35 [INFO] Count: 3 (car #1084) via fallback
+05:42:36 [INFO] FPS médio: 30.0 | Total contado: 3
+05:42:36 [INFO] FPS inst: 57.4 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:36 [INFO] Count: 4 (car #1138) via fallback
+05:42:38 [INFO] Count: 5 (car #1178) via fallback
+05:42:40 [INFO] FPS médio: 30.0 | Total contado: 5
+05:42:40 [INFO] FPS inst: 69.9 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:40 [INFO] Count: 6 (car #1222) via fallback
+05:42:41 [INFO] Count: 7 (car #1101) via fallback
+05:42:41 [INFO] Count: 8 (car #1155) via fallback
+05:42:43 [INFO] FPS médio: 30.0 | Total contado: 8
+05:42:43 [INFO] FPS inst: 65.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:46 [INFO] Count: 9 (car #1310) via fallback
+05:42:46 [INFO] FPS médio: 30.0 | Total contado: 9
+05:42:46 [INFO] FPS inst: 64.5 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:46 [INFO] Count: 10 (car #1317) via fallback
+05:42:47 [INFO] Count: 11 (car #1329) via fallback
+05:42:50 [INFO] FPS médio: 30.0 | Total contado: 11
+05:42:50 [INFO] FPS inst: 80.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:52 [INFO] Count: 12 (car #1368) via fallback
+05:42:53 [INFO] FPS médio: 30.0 | Total contado: 12
+05:42:53 [INFO] FPS inst: 67.4 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:42:54 [INFO] Count: 13 (car #1407) via fallback
+05:42:55 [INFO] Count: 14 (car #1393) via fallback
+05:42:56 [INFO] FPS médio: 30.0 | Total contado: 14
+05:42:56 [INFO] FPS inst: 52.6 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:00 [INFO] FPS médio: 29.5 | Total contado: 14
+05:43:00 [INFO] FPS inst: 40.7 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:03 [INFO] FPS médio: 28.7 | Total contado: 14
+05:43:03 [INFO] FPS inst: 74.7 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:05 [INFO] Count: 15 (car #1463) via fallback
+05:43:06 [INFO] Count: 16 (car #1465) via fallback
+05:43:06 [INFO] FPS médio: 30.0 | Total contado: 16
+05:43:06 [INFO] FPS inst: 59.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:10 [INFO] FPS médio: 29.1 | Total contado: 16
+05:43:10 [INFO] FPS inst: 57.9 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:13 [INFO] FPS médio: 29.7 | Total contado: 16
+05:43:13 [INFO] FPS inst: 52.3 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:17 [INFO] FPS médio: 30.0 | Total contado: 16
+05:43:17 [INFO] FPS inst: 61.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:20 [INFO] FPS médio: 30.0 | Total contado: 16
+05:43:20 [INFO] FPS inst: 55.7 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:22 [INFO] Count: 17 (car #1549) via fallback
+05:43:23 [INFO] FPS médio: 30.0 | Total contado: 17
+05:43:23 [INFO] FPS inst: 52.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:27 [INFO] FPS médio: 30.0 | Total contado: 17
+05:43:27 [INFO] FPS inst: 74.9 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:30 [INFO] FPS médio: 30.0 | Total contado: 17
+05:43:30 [INFO] FPS inst: 50.6 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:31 [INFO] Count: 18 (car #1607) via primary
+05:43:32 [INFO] Count: 19 (car #1609) via fallback
+05:43:33 [INFO] Count: 20 (car #1629) via fallback
+05:43:33 [INFO] FPS médio: 30.0 | Total contado: 20
+05:43:33 [INFO] FPS inst: 64.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:37 [INFO] FPS médio: 30.0 | Total contado: 20
+05:43:37 [INFO] FPS inst: 75.9 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:40 [INFO] FPS médio: 30.0 | Total contado: 20
+05:43:40 [INFO] FPS inst: 56.6 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:42 [INFO] Count: 21 (car #1651) via fallback
+05:43:43 [INFO] FPS médio: 30.0 | Total contado: 21
+05:43:43 [INFO] FPS inst: 49.4 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:46 [INFO] Count: 22 (car #1672) via primary
+05:43:47 [INFO] FPS médio: 30.0 | Total contado: 22
+05:43:47 [INFO] FPS inst: 68.8 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:50 [INFO] FPS médio: 30.0 | Total contado: 22
+05:43:50 [INFO] FPS inst: 63.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 3 | live descartados: 0
+05:43:50 [INFO] Count: 23 (car #1686) via primary
+05:43:52 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_007
+05:43:52 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:43:55 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=25.00 | fps efetivo=25.00
+05:43:55 [INFO] Perfil de stream aplicado: teste2 | cam_007 | url=https://streaming1.highwaytraffic.go.th/Phase8/PER_8_038.stream/playlist.m3u8
+05:43:55 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:43:55 [INFO] Resolução do stream: 512x288
+05:43:55 [INFO] ROI: {'x': 94, 'y': 127, 'w': 264, 'h': 157} | Linha: {'x1': 97, 'y1': 215, 'x2': 301, 'y2': 178} | Direção: any
+05:43:55 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_007
+05:43:55 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:43:56 [INFO] Count: 1 (car #1706) via primary
+05:43:59 [INFO] FPS médio: 25.2 | Total contado: 1
+05:43:59 [INFO] FPS inst: 41.5 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:03 [INFO] FPS médio: 25.0 | Total contado: 1
+05:44:03 [INFO] FPS inst: 48.8 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:03 [INFO] Count: 2 (car #1716) via primary
+05:44:05 [INFO] Count: 3 (car #1837) via primary
+05:44:07 [INFO] Count: 4 (car #1735) via primary
+05:44:07 [INFO] FPS médio: 25.0 | Total contado: 4
+05:44:07 [INFO] FPS inst: 49.6 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:11 [INFO] Count: 5 (car #1870) via primary
+05:44:11 [INFO] FPS médio: 25.0 | Total contado: 5
+05:44:11 [INFO] FPS inst: 43.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:15 [INFO] FPS médio: 25.0 | Total contado: 5
+05:44:15 [INFO] FPS inst: 43.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:18 [INFO] Count: 6 (car #1921) via primary
+05:44:19 [INFO] Count: 7 (car #1924) via primary
+05:44:19 [INFO] FPS médio: 25.0 | Total contado: 7
+05:44:19 [INFO] FPS inst: 36.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:21 [INFO] Count: 8 (car #1956) via primary
+05:44:23 [INFO] FPS médio: 24.7 | Total contado: 8
+05:44:23 [INFO] FPS inst: 42.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:25 [INFO] Count: 9 (car #2017) via primary
+05:44:27 [INFO] FPS médio: 25.0 | Total contado: 9
+05:44:27 [INFO] FPS inst: 52.4 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:31 [INFO] Count: 10 (car #2045) via primary
+05:44:31 [INFO] FPS médio: 25.0 | Total contado: 10
+05:44:31 [INFO] FPS inst: 41.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:35 [INFO] FPS médio: 25.0 | Total contado: 10
+05:44:35 [INFO] FPS inst: 46.9 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:38 [INFO] Count: 11 (car #2086) via primary
+05:44:39 [INFO] FPS médio: 25.0 | Total contado: 11
+05:44:39 [INFO] FPS inst: 48.4 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:43 [INFO] FPS médio: 25.0 | Total contado: 11
+05:44:43 [INFO] FPS inst: 39.5 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:47 [INFO] FPS médio: 25.0 | Total contado: 11
+05:44:47 [INFO] FPS inst: 38.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:51 [INFO] Count: 12 (car #2134) via primary
+05:44:51 [INFO] Count: 13 (car #2200) via primary
+05:44:51 [INFO] FPS médio: 25.1 | Total contado: 13
+05:44:51 [INFO] FPS inst: 40.2 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:55 [INFO] FPS médio: 25.0 | Total contado: 13
+05:44:55 [INFO] FPS inst: 62.4 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:44:58 [INFO] Count: 14 (car #2252) via primary
+05:44:59 [INFO] FPS médio: 25.0 | Total contado: 14
+05:44:59 [INFO] FPS inst: 47.3 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:03 [INFO] FPS médio: 24.8 | Total contado: 14
+05:45:03 [INFO] FPS inst: 35.3 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:07 [INFO] FPS médio: 25.0 | Total contado: 14
+05:45:07 [INFO] FPS inst: 43.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:09 [INFO] Count: 15 (car #2305) via primary
+05:45:11 [INFO] Count: 16 (car #2333) via primary
+05:45:11 [INFO] Count: 17 (car #2313) via primary
+05:45:11 [INFO] FPS médio: 25.0 | Total contado: 17
+05:45:11 [INFO] FPS inst: 49.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:13 [INFO] Count: 18 (car #2366) via primary
+05:45:15 [INFO] FPS médio: 25.0 | Total contado: 18
+05:45:15 [INFO] FPS inst: 43.1 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:18 [INFO] Count: 19 (car #2419) via primary
+05:45:19 [INFO] FPS médio: 25.0 | Total contado: 19
+05:45:19 [INFO] FPS inst: 40.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:23 [INFO] FPS médio: 25.1 | Total contado: 19
+05:45:23 [INFO] FPS inst: 42.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:31 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_004
+05:45:31 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:45:33 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=90000.00 | fps efetivo=15.00
+05:45:33 [INFO] Perfil de stream aplicado: teste | cam_004 | url=https://streaming1.dsatmacau.com/traffic/m1082.m3u8
+05:45:33 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:45:33 [INFO] Resolução do stream: 352x288
+05:45:33 [INFO] ROI: {'x': 159, 'y': 102, 'w': 176, 'h': 179} | Linha: {'x1': 173, 'y1': 176, 'x2': 349, 'y2': 177} | Direção: any
+05:45:33 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_004
+05:45:33 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:45:36 [INFO] FPS médio: 30.1 | Total contado: 0
+05:45:36 [INFO] FPS inst: 77.9 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:40 [INFO] FPS médio: 30.1 | Total contado: 0
+05:45:40 [INFO] FPS inst: 57.5 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:45:43 [INFO] FPS médio: 29.9 | Total contado: 0
+05:45:43 [INFO] FPS inst: 43.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 3 | live descartados: 0
+05:46:01 [INFO] Sincronizacao Supabase ativa | table=stream_profiles | scope=videoBetTransit
+05:46:01 [WARNING] Falha ao carregar stream profiles do Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?select=id%2Cname%2Cstream_url%2Ccamera_id%2Croi%2Cline%2Ccount_direction%2Csecondary_verification_enabled%2Csecondary_verification_band_px%2Cis_selected%2Cupdated_at&scope=eq.videoBetTransit&order=updated_at.desc.nullslast%2Cid.asc (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:46:01 [WARNING] Falha ao carregar agenda por hora do Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_schedule_rules?select=id%2Cname%2Cenabled%2Cstart_time%2Cend_time%2Callowed_profile_ids%2Ctimezone%2Cupdated_at&scope=eq.videoBetTransit&order=updated_at.desc.nullslast%2Cid.asc (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:46:01 [WARNING] Falha ao publicar stream profiles iniciais no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:46:01 [WARNING] Falha ao publicar agenda por hora inicial no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_schedule_rules?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:46:01 [INFO] MJPEG server iniciado em http://0.0.0.0:8090/video_feed
+05:46:01 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_004
+05:46:01 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:46:03 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=90000.00 | fps efetivo=15.00
+05:46:03 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:46:03 [INFO] Iniciando contagem... | tracker: botsort_traffic.yaml | conf: 0.2 | imgsz: 256 | stride: 2 | jpeg: 65 | browserMaxWidth: 854 | operatorMaxWidth: 960 | operatorFps: 10.0
+05:46:03 [INFO] Resolução do stream: 352x288
+05:46:03 [INFO] ROI: {'x': 159, 'y': 102, 'w': 176, 'h': 179} | Linha: {'x1': 173, 'y1': 176, 'x2': 349, 'y2': 177} | Direção: any
+05:46:04 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_004
+05:46:04 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:46:07 [INFO] Count: 1 (car #5) via primary
+05:46:07 [INFO] Count: 2 (car #9) via primary
+05:46:07 [INFO] FPS médio: 26.5 | Total contado: 2
+05:46:07 [INFO] FPS inst: 54.6 | inferencia media: 10.3 ms | JPEG medio: 0.3 ms | pipeline media: 19.4 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:09 [INFO] Count: 3 (car #12) via primary
+05:46:10 [INFO] FPS médio: 30.1 | Total contado: 3
+05:46:10 [INFO] FPS inst: 50.8 | inferencia media: 10.2 ms | JPEG medio: 0.3 ms | pipeline media: 18.2 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:15 [INFO] FPS médio: 22.9 | Total contado: 3
+05:46:15 [INFO] FPS inst: 49.4 | inferencia media: 10.1 ms | JPEG medio: 0.3 ms | pipeline media: 17.2 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:18 [INFO] FPS médio: 29.5 | Total contado: 3
+05:46:18 [INFO] FPS inst: 53.2 | inferencia media: 10.2 ms | JPEG medio: 0.3 ms | pipeline media: 17.1 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:22 [INFO] FPS médio: 30.1 | Total contado: 3
+05:46:22 [INFO] FPS inst: 40.1 | inferencia media: 10.2 ms | JPEG medio: 0.3 ms | pipeline media: 16.9 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:24 [INFO] Count: 4 (car #33) via primary
+05:46:25 [INFO] FPS médio: 30.2 | Total contado: 4
+05:46:25 [INFO] FPS inst: 41.5 | inferencia media: 10.1 ms | JPEG medio: 0.3 ms | pipeline media: 16.8 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:28 [INFO] FPS médio: 30.0 | Total contado: 4
+05:46:28 [INFO] FPS inst: 76.2 | inferencia media: 10.0 ms | JPEG medio: 0.3 ms | pipeline media: 16.4 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:32 [INFO] FPS médio: 30.0 | Total contado: 4
+05:46:32 [INFO] FPS inst: 73.8 | inferencia media: 9.9 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:33 [INFO] Count: 5 (car #57) via primary
+05:46:35 [INFO] FPS médio: 30.0 | Total contado: 5
+05:46:35 [INFO] FPS inst: 80.3 | inferencia media: 9.9 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 0 | live descartados: 0
+05:46:38 [INFO] FPS médio: 30.0 | Total contado: 5
+05:46:38 [INFO] FPS inst: 52.1 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 2 | live descartados: 0
+05:46:42 [INFO] FPS médio: 29.9 | Total contado: 5
+05:46:42 [INFO] FPS inst: 40.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 2 | live descartados: 0
+05:46:45 [INFO] FPS médio: 26.7 | Total contado: 5
+05:46:45 [INFO] FPS inst: 52.3 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 2 | live descartados: 0
+05:46:49 [INFO] FPS médio: 29.7 | Total contado: 5
+05:46:49 [INFO] FPS inst: 77.7 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 2 | live descartados: 0
+05:46:52 [INFO] FPS médio: 30.0 | Total contado: 5
+05:46:52 [INFO] FPS inst: 77.2 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 2 | live descartados: 0
+05:46:54 [WARNING] Falha ao sincronizar esteira no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:46:55 [INFO] FPS médio: 29.5 | Total contado: 5
+05:46:55 [INFO] FPS inst: 57.5 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.6 ms | MJPEG clientes: 2 | live descartados: 0
+05:46:59 [INFO] FPS médio: 29.7 | Total contado: 5
+05:46:59 [INFO] FPS inst: 69.0 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:02 [INFO] FPS médio: 30.0 | Total contado: 5
+05:47:02 [INFO] FPS inst: 37.9 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:02 [INFO] Count: 6 (car #107) via primary
+05:47:02 [WARNING] Falha ao sincronizar esteira no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+05:47:05 [INFO] FPS médio: 29.5 | Total contado: 6
+05:47:05 [INFO] FPS inst: 50.1 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:07 [INFO] Count: 7 (car #115) via primary
+05:47:09 [INFO] FPS médio: 30.0 | Total contado: 7
+05:47:09 [INFO] FPS inst: 41.4 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:09 [INFO] Count: 8 (car #124) via primary
+05:47:12 [INFO] FPS médio: 30.0 | Total contado: 8
+05:47:12 [INFO] FPS inst: 80.2 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.2 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:15 [INFO] FPS médio: 30.0 | Total contado: 8
+05:47:15 [INFO] FPS inst: 58.2 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.1 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:16 [INFO] Count: 9 (car #134) via primary
+05:47:18 [INFO] Count: 10 (car #136) via primary
+05:47:19 [INFO] FPS médio: 30.1 | Total contado: 10
+05:47:19 [INFO] FPS inst: 88.7 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.0 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:22 [INFO] FPS médio: 29.4 | Total contado: 10
+05:47:22 [INFO] FPS inst: 47.9 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.1 ms | MJPEG clientes: 2 | live descartados: 0
+05:47:24 [INFO] Client disconnected while serving /video_feed
+05:47:24 [INFO] Client disconnected while serving /video_feed
+05:47:25 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_008
+05:47:25 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:47:31 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=29.97 | fps efetivo=29.97
+05:47:31 [INFO] Perfil de stream aplicado: teste3 | cam_008 | url=http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8
+05:47:31 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:47:31 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:32 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:32 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:33 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:33 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:34 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:34 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:35 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:35 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:36 [WARNING] Nenhum frame recebido ainda do stream...
+05:47:36 [INFO] Resolução do stream: 640x360
+05:47:36 [INFO] ROI: {'x': 168, 'y': 191, 'w': 251, 'h': 168} | Linha: {'x1': 162, 'y1': 240, 'x2': 403, 'y2': 237} | Direção: any
+05:47:36 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_008
+05:47:36 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:47:39 [INFO] FPS médio: 11.5 | Total contado: 0
+05:47:39 [INFO] FPS inst: 54.8 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.1 ms | MJPEG clientes: 4 | live descartados: 0
+05:47:43 [INFO] FPS médio: 30.0 | Total contado: 0
+05:47:43 [INFO] FPS inst: 68.7 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.0 ms | MJPEG clientes: 4 | live descartados: 0
+05:47:46 [INFO] FPS médio: 30.0 | Total contado: 0
+05:47:46 [INFO] FPS inst: 65.9 | inferencia media: 9.3 ms | JPEG medio: 0.3 ms | pipeline media: 14.9 ms | MJPEG clientes: 4 | live descartados: 0
+05:47:47 [INFO] Count: 1 (car #173) via fallback
+05:47:49 [INFO] FPS médio: 30.0 | Total contado: 1
+05:47:49 [INFO] FPS inst: 76.5 | inferencia media: 9.3 ms | JPEG medio: 0.4 ms | pipeline media: 14.8 ms | MJPEG clientes: 4 | live descartados: 0
+05:47:52 [INFO] Count: 2 (car #193) via primary
+05:47:53 [INFO] FPS médio: 29.9 | Total contado: 2
+05:47:53 [INFO] FPS inst: 54.5 | inferencia media: 9.2 ms | JPEG medio: 0.4 ms | pipeline media: 14.8 ms | MJPEG clientes: 4 | live descartados: 0
+05:47:56 [INFO] FPS médio: 30.0 | Total contado: 2
+05:47:56 [INFO] FPS inst: 49.3 | inferencia media: 9.2 ms | JPEG medio: 0.4 ms | pipeline media: 14.7 ms | MJPEG clientes: 4 | live descartados: 0
+05:47:59 [INFO] FPS médio: 30.0 | Total contado: 2
+05:47:59 [INFO] FPS inst: 78.8 | inferencia media: 9.2 ms | JPEG medio: 0.4 ms | pipeline media: 14.7 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:00 [INFO] Count: 3 (car #257) via fallback
+05:48:03 [INFO] FPS médio: 30.0 | Total contado: 3
+05:48:03 [INFO] FPS inst: 74.8 | inferencia media: 9.2 ms | JPEG medio: 0.4 ms | pipeline media: 14.6 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:04 [INFO] Count: 4 (car #203) via fallback
+05:48:06 [INFO] FPS médio: 30.0 | Total contado: 4
+05:48:06 [INFO] FPS inst: 57.0 | inferencia media: 9.1 ms | JPEG medio: 0.4 ms | pipeline media: 14.6 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:09 [INFO] FPS médio: 30.0 | Total contado: 4
+05:48:09 [INFO] FPS inst: 61.7 | inferencia media: 9.1 ms | JPEG medio: 0.4 ms | pipeline media: 14.6 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:13 [INFO] FPS médio: 30.0 | Total contado: 4
+05:48:13 [INFO] FPS inst: 69.7 | inferencia media: 9.1 ms | JPEG medio: 0.4 ms | pipeline media: 14.5 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:16 [INFO] FPS médio: 30.0 | Total contado: 4
+05:48:16 [INFO] FPS inst: 53.8 | inferencia media: 9.1 ms | JPEG medio: 0.4 ms | pipeline media: 14.5 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:19 [INFO] FPS médio: 30.0 | Total contado: 4
+05:48:19 [INFO] FPS inst: 58.4 | inferencia media: 9.1 ms | JPEG medio: 0.4 ms | pipeline media: 14.5 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:23 [INFO] FPS médio: 30.1 | Total contado: 4
+05:48:23 [INFO] FPS inst: 55.2 | inferencia media: 9.1 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:24 [INFO] Count: 5 (car #462) via primary
+05:48:26 [INFO] FPS médio: 30.0 | Total contado: 5
+05:48:26 [INFO] FPS inst: 76.5 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:29 [INFO] FPS médio: 29.9 | Total contado: 5
+05:48:29 [INFO] FPS inst: 63.5 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:33 [INFO] FPS médio: 30.1 | Total contado: 5
+05:48:33 [INFO] FPS inst: 76.7 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:34 [INFO] Count: 6 (car #561) via fallback
+05:48:36 [INFO] FPS médio: 30.0 | Total contado: 6
+05:48:36 [INFO] FPS inst: 69.9 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:39 [INFO] FPS médio: 30.0 | Total contado: 6
+05:48:39 [INFO] FPS inst: 56.3 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:43 [INFO] FPS médio: 29.1 | Total contado: 6
+05:48:43 [INFO] FPS inst: 53.3 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:46 [INFO] FPS médio: 30.0 | Total contado: 6
+05:48:46 [INFO] FPS inst: 77.7 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:50 [INFO] FPS médio: 29.7 | Total contado: 6
+05:48:50 [INFO] FPS inst: 72.9 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:50 [INFO] Count: 7 (car #667) via primary
+05:48:53 [INFO] FPS médio: 30.0 | Total contado: 7
+05:48:53 [INFO] FPS inst: 76.7 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:48:56 [INFO] FPS médio: 30.0 | Total contado: 7
+05:48:56 [INFO] FPS inst: 52.6 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:49:00 [INFO] FPS médio: 30.0 | Total contado: 7
+05:49:00 [INFO] FPS inst: 75.6 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 4 | live descartados: 0
+05:49:03 [INFO] FPS médio: 29.9 | Total contado: 7
+05:49:03 [INFO] FPS inst: 75.5 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 4 | live descartados: 0
+05:49:06 [INFO] FPS médio: 30.0 | Total contado: 7
+05:49:06 [INFO] FPS inst: 84.9 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 4 | live descartados: 0
+05:49:06 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_007
+05:49:06 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:49:10 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=25.00 | fps efetivo=25.00
+05:49:10 [INFO] Perfil de stream aplicado: teste2 | cam_007 | url=https://streaming1.highwaytraffic.go.th/Phase8/PER_8_038.stream/playlist.m3u8
+05:49:10 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:49:10 [INFO] Resolução do stream: 512x288
+05:49:10 [INFO] ROI: {'x': 94, 'y': 127, 'w': 264, 'h': 157} | Linha: {'x1': 97, 'y1': 215, 'x2': 301, 'y2': 178} | Direção: any
+05:49:10 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_007
+05:49:10 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:49:10 [INFO] Count: 1 (car #832) via primary
+05:49:11 [INFO] Count: 2 (car #851) via primary
+05:49:14 [INFO] FPS médio: 25.1 | Total contado: 2
+05:49:14 [INFO] FPS inst: 44.5 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 4 | live descartados: 0
+05:49:18 [INFO] FPS médio: 25.0 | Total contado: 2
+05:49:18 [INFO] FPS inst: 42.9 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 4 | live descartados: 0
+05:49:22 [INFO] FPS médio: 25.0 | Total contado: 2
+05:49:22 [INFO] FPS inst: 50.5 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:25 [INFO] Count: 3 (car #943) via primary
+05:49:26 [INFO] FPS médio: 25.0 | Total contado: 3
+05:49:26 [INFO] FPS inst: 48.2 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:30 [INFO] FPS médio: 25.0 | Total contado: 3
+05:49:30 [INFO] FPS inst: 43.0 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:30 [INFO] Count: 4 (car #966) via primary
+05:49:34 [INFO] FPS médio: 25.0 | Total contado: 4
+05:49:34 [INFO] FPS inst: 36.9 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:38 [INFO] FPS médio: 25.0 | Total contado: 4
+05:49:38 [INFO] FPS inst: 35.4 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:42 [INFO] FPS médio: 25.0 | Total contado: 4
+05:49:42 [INFO] FPS inst: 40.9 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:46 [INFO] FPS médio: 25.0 | Total contado: 4
+05:49:46 [INFO] FPS inst: 59.8 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:50 [INFO] FPS médio: 25.0 | Total contado: 4
+05:49:50 [INFO] FPS inst: 47.8 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:50 [INFO] Count: 5 (car #1128) via primary
+05:49:54 [INFO] FPS médio: 25.0 | Total contado: 5
+05:49:54 [INFO] FPS inst: 53.9 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:55 [INFO] Count: 6 (car #1140) via primary
+05:49:56 [INFO] Count: 7 (car #1172) via primary
+05:49:57 [INFO] Count: 8 (car #1085) via primary
+05:49:58 [INFO] FPS médio: 25.0 | Total contado: 8
+05:49:58 [INFO] FPS inst: 57.3 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:49:59 [INFO] Count: 9 (car #1271) via primary
+05:50:00 [INFO] Count: 10 (car #1276) via primary
+05:50:02 [INFO] FPS médio: 25.0 | Total contado: 10
+05:50:02 [INFO] FPS inst: 53.6 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:06 [INFO] FPS médio: 25.0 | Total contado: 10
+05:50:06 [INFO] FPS inst: 38.2 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:10 [INFO] FPS médio: 25.0 | Total contado: 10
+05:50:10 [INFO] FPS inst: 48.0 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:14 [INFO] FPS médio: 25.0 | Total contado: 10
+05:50:14 [INFO] FPS inst: 47.9 | inferencia media: 8.8 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:15 [INFO] Count: 11 (car #1332) via primary
+05:50:17 [INFO] Count: 12 (car #1346) via primary
+05:50:18 [INFO] FPS médio: 25.0 | Total contado: 12
+05:50:18 [INFO] FPS inst: 48.1 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:19 [INFO] Count: 13 (car #1351) via primary
+05:50:22 [INFO] FPS médio: 25.0 | Total contado: 13
+05:50:22 [INFO] FPS inst: 49.0 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:25 [INFO] Count: 14 (car #1394) via primary
+05:50:26 [INFO] FPS médio: 25.0 | Total contado: 14
+05:50:26 [INFO] FPS inst: 46.7 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:30 [INFO] FPS médio: 25.0 | Total contado: 14
+05:50:30 [INFO] FPS inst: 40.7 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:34 [INFO] FPS médio: 25.1 | Total contado: 14
+05:50:34 [INFO] FPS inst: 40.3 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:38 [INFO] FPS médio: 25.0 | Total contado: 14
+05:50:38 [INFO] FPS inst: 47.2 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:42 [INFO] FPS médio: 25.0 | Total contado: 14
+05:50:42 [INFO] FPS inst: 42.4 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 13.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:44 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_004
+05:50:44 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:50:47 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=90000.00 | fps efetivo=15.00
+05:50:47 [INFO] Perfil de stream aplicado: teste | cam_004 | url=https://streaming1.dsatmacau.com/traffic/m1082.m3u8
+05:50:47 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:50:47 [INFO] Resolução do stream: 352x288
+05:50:47 [INFO] ROI: {'x': 159, 'y': 102, 'w': 191, 'h': 184} | Linha: {'x1': 174, 'y1': 197, 'x2': 344, 'y2': 197} | Direção: any
+05:50:47 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_004
+05:50:47 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:50:50 [INFO] FPS médio: 30.2 | Total contado: 0
+05:50:50 [INFO] FPS inst: 63.3 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:54 [INFO] FPS médio: 29.9 | Total contado: 0
+05:50:54 [INFO] FPS inst: 36.6 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 6 | live descartados: 0
+05:50:57 [INFO] FPS médio: 30.0 | Total contado: 0
+05:50:57 [INFO] FPS inst: 54.9 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.1 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:00 [INFO] FPS médio: 30.0 | Total contado: 0
+05:51:00 [INFO] FPS inst: 68.1 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:04 [INFO] FPS médio: 30.0 | Total contado: 0
+05:51:04 [INFO] FPS inst: 85.0 | inferencia media: 8.9 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:05 [INFO] Count: 1 (car #1457) via primary
+05:51:07 [INFO] FPS médio: 30.0 | Total contado: 1
+05:51:07 [INFO] FPS inst: 42.8 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:10 [INFO] FPS médio: 30.0 | Total contado: 1
+05:51:10 [INFO] FPS inst: 75.2 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.2 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:11 [INFO] Count: 2 (car #1461) via primary
+05:51:14 [INFO] FPS médio: 30.0 | Total contado: 2
+05:51:14 [INFO] FPS inst: 68.6 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:14 [INFO] Count: 3 (car #1472) via primary
+05:51:17 [INFO] FPS médio: 29.5 | Total contado: 3
+05:51:17 [INFO] FPS inst: 55.0 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:20 [INFO] FPS médio: 29.9 | Total contado: 3
+05:51:20 [INFO] FPS inst: 61.0 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.3 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:24 [INFO] FPS médio: 30.1 | Total contado: 3
+05:51:24 [INFO] FPS inst: 84.0 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:25 [INFO] Count: 4 (car #1487) via primary
+05:51:27 [INFO] FPS médio: 30.1 | Total contado: 4
+05:51:27 [INFO] FPS inst: 70.4 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:28 [INFO] Count: 5 (car #1491) via primary
+05:51:30 [INFO] FPS médio: 29.9 | Total contado: 5
+05:51:30 [INFO] FPS inst: 51.6 | inferencia media: 9.0 ms | JPEG medio: 0.5 ms | pipeline media: 14.4 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:31 [INFO] Count: 6 (car #1500) via primary
+05:51:34 [INFO] FPS médio: 28.4 | Total contado: 6
+05:51:34 [INFO] FPS inst: 77.2 | inferencia media: 9.1 ms | JPEG medio: 0.5 ms | pipeline media: 14.5 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:37 [INFO] FPS médio: 29.5 | Total contado: 6
+05:51:37 [INFO] FPS inst: 43.6 | inferencia media: 9.1 ms | JPEG medio: 0.5 ms | pipeline media: 14.5 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:41 [INFO] FPS médio: 30.0 | Total contado: 6
+05:51:41 [INFO] FPS inst: 68.5 | inferencia media: 9.1 ms | JPEG medio: 0.5 ms | pipeline media: 14.6 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:44 [INFO] FPS médio: 30.1 | Total contado: 6
+05:51:44 [INFO] FPS inst: 74.6 | inferencia media: 9.1 ms | JPEG medio: 0.5 ms | pipeline media: 14.6 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:47 [INFO] FPS médio: 30.1 | Total contado: 6
+05:51:47 [INFO] FPS inst: 61.3 | inferencia media: 9.1 ms | JPEG medio: 0.5 ms | pipeline media: 14.6 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:51 [INFO] FPS médio: 30.0 | Total contado: 6
+05:51:51 [INFO] FPS inst: 74.0 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.6 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:54 [INFO] FPS médio: 29.7 | Total contado: 6
+05:51:54 [INFO] FPS inst: 68.9 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.7 ms | MJPEG clientes: 6 | live descartados: 0
+05:51:55 [INFO] Count: 7 (car #1509) via primary
+05:51:57 [INFO] FPS médio: 30.0 | Total contado: 7
+05:51:57 [INFO] FPS inst: 82.0 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.7 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:01 [INFO] FPS médio: 29.9 | Total contado: 7
+05:52:01 [INFO] FPS inst: 55.6 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.7 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:04 [INFO] FPS médio: 30.2 | Total contado: 7
+05:52:04 [INFO] FPS inst: 76.4 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.7 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:07 [INFO] FPS médio: 30.0 | Total contado: 7
+05:52:07 [INFO] FPS inst: 71.2 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.7 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:11 [INFO] FPS médio: 30.0 | Total contado: 7
+05:52:11 [INFO] FPS inst: 72.5 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.8 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:13 [INFO] Count: 8 (car #1521) via primary
+05:52:14 [INFO] FPS médio: 30.1 | Total contado: 8
+05:52:14 [INFO] FPS inst: 82.5 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.8 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:14 [INFO] Count: 9 (car #1523) via primary
+05:52:17 [INFO] FPS médio: 29.9 | Total contado: 9
+05:52:17 [INFO] FPS inst: 42.4 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.8 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:21 [INFO] FPS médio: 30.1 | Total contado: 9
+05:52:21 [INFO] FPS inst: 53.7 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.8 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:21 [INFO] Count: 10 (car #1524) via primary
+05:52:24 [INFO] FPS médio: 30.0 | Total contado: 10
+05:52:24 [INFO] FPS inst: 72.1 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.8 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:24 [INFO] Count: 11 (car #1528) via primary
+05:52:25 [INFO] Count: 12 (car #1530) via primary
+05:52:25 [INFO] Count: 13 (car #1535) via primary
+05:52:27 [INFO] FPS médio: 29.7 | Total contado: 13
+05:52:27 [INFO] FPS inst: 56.0 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:29 [INFO] Count: 14 (car #1547) via primary
+05:52:31 [INFO] FPS médio: 30.0 | Total contado: 14
+05:52:31 [INFO] FPS inst: 46.2 | inferencia media: 9.3 ms | JPEG medio: 0.4 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:34 [INFO] FPS médio: 30.1 | Total contado: 14
+05:52:34 [INFO] FPS inst: 74.5 | inferencia media: 9.3 ms | JPEG medio: 0.4 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:35 [INFO] Count: 15 (car #1555) via primary
+05:52:37 [INFO] FPS médio: 29.9 | Total contado: 15
+05:52:37 [INFO] FPS inst: 70.9 | inferencia media: 9.3 ms | JPEG medio: 0.4 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:39 [INFO] Count: 16 (car #1571) via primary
+05:52:39 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_008
+05:52:39 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:52:44 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=29.97 | fps efetivo=29.97
+05:52:44 [INFO] Perfil de stream aplicado: teste3 | cam_008 | url=http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8
+05:52:44 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:52:45 [WARNING] Nenhum frame recebido ainda do stream...
+05:52:45 [INFO] Resolução do stream: 640x360
+05:52:45 [INFO] ROI: {'x': 168, 'y': 191, 'w': 251, 'h': 168} | Linha: {'x1': 162, 'y1': 240, 'x2': 403, 'y2': 237} | Direção: any
+05:52:45 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_008
+05:52:45 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:52:48 [INFO] FPS médio: 25.1 | Total contado: 0
+05:52:48 [INFO] FPS inst: 67.2 | inferencia media: 9.3 ms | JPEG medio: 0.4 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:51 [INFO] FPS médio: 29.9 | Total contado: 0
+05:52:51 [INFO] FPS inst: 50.2 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:55 [INFO] FPS médio: 29.7 | Total contado: 0
+05:52:55 [INFO] FPS inst: 66.4 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:52:58 [INFO] FPS médio: 29.7 | Total contado: 0
+05:52:58 [INFO] FPS inst: 70.3 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:02 [INFO] FPS médio: 30.0 | Total contado: 0
+05:53:02 [INFO] FPS inst: 48.1 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:05 [INFO] FPS médio: 29.9 | Total contado: 0
+05:53:05 [INFO] FPS inst: 53.2 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:08 [INFO] FPS médio: 30.0 | Total contado: 0
+05:53:08 [INFO] FPS inst: 74.0 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:12 [INFO] FPS médio: 30.0 | Total contado: 0
+05:53:12 [INFO] FPS inst: 59.0 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:15 [INFO] FPS médio: 30.0 | Total contado: 0
+05:53:15 [INFO] FPS inst: 53.2 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:18 [INFO] FPS médio: 30.0 | Total contado: 0
+05:53:18 [INFO] FPS inst: 60.2 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:22 [INFO] FPS médio: 30.0 | Total contado: 0
+05:53:22 [INFO] FPS inst: 46.3 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 14.9 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:25 [INFO] FPS médio: 29.7 | Total contado: 0
+05:53:25 [INFO] FPS inst: 62.9 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:28 [INFO] FPS médio: 30.0 | Total contado: 0
+05:53:28 [INFO] FPS inst: 70.1 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:32 [INFO] FPS médio: 29.7 | Total contado: 0
+05:53:32 [INFO] FPS inst: 56.3 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:33 [INFO] Count: 1 (car #1727) via fallback
+05:53:35 [INFO] FPS médio: 29.1 | Total contado: 1
+05:53:35 [INFO] FPS inst: 45.9 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:38 [INFO] FPS médio: 30.0 | Total contado: 1
+05:53:38 [INFO] FPS inst: 74.6 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:40 [INFO] Count: 2 (car #1780) via fallback
+05:53:42 [INFO] FPS médio: 29.6 | Total contado: 2
+05:53:42 [INFO] FPS inst: 42.2 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:45 [INFO] FPS médio: 30.1 | Total contado: 2
+05:53:45 [INFO] FPS inst: 69.2 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:48 [INFO] FPS médio: 30.0 | Total contado: 2
+05:53:48 [INFO] FPS inst: 70.5 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:52 [INFO] FPS médio: 29.9 | Total contado: 2
+05:53:52 [INFO] FPS inst: 54.9 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:55 [INFO] FPS médio: 30.0 | Total contado: 2
+05:53:55 [INFO] FPS inst: 70.8 | inferencia media: 9.2 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:53:59 [INFO] FPS médio: 29.7 | Total contado: 2
+05:53:59 [INFO] FPS inst: 70.7 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:02 [INFO] FPS médio: 29.9 | Total contado: 2
+05:54:02 [INFO] FPS inst: 70.7 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:05 [INFO] FPS médio: 29.7 | Total contado: 2
+05:54:05 [INFO] FPS inst: 65.5 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:08 [INFO] Count: 3 (car #2033) via primary
+05:54:08 [INFO] Count: 4 (car #1972) via fallback
+05:54:09 [INFO] FPS médio: 30.0 | Total contado: 4
+05:54:09 [INFO] FPS inst: 68.2 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:11 [INFO] Count: 5 (car #2075) via fallback
+05:54:12 [INFO] FPS médio: 30.0 | Total contado: 5
+05:54:12 [INFO] FPS inst: 66.6 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:15 [INFO] FPS médio: 30.0 | Total contado: 5
+05:54:15 [INFO] FPS inst: 63.5 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:19 [INFO] FPS médio: 29.7 | Total contado: 5
+05:54:19 [INFO] FPS inst: 71.0 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:21 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_004
+05:54:21 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+05:54:23 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=90000.00 | fps efetivo=15.00
+05:54:23 [INFO] Perfil de stream aplicado: teste | cam_004 | url=https://streaming1.dsatmacau.com/traffic/m1082.m3u8
+05:54:23 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:54:23 [INFO] Resolução do stream: 352x288
+05:54:23 [INFO] ROI: {'x': 159, 'y': 102, 'w': 191, 'h': 184} | Linha: {'x1': 174, 'y1': 197, 'x2': 344, 'y2': 197} | Direção: any
+05:54:23 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_004
+05:54:23 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+05:54:26 [INFO] FPS médio: 30.2 | Total contado: 0
+05:54:26 [INFO] FPS inst: 54.9 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:30 [INFO] FPS médio: 30.0 | Total contado: 0
+05:54:30 [INFO] FPS inst: 78.3 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:31 [INFO] Count: 1 (car #2156) via primary
+05:54:33 [INFO] FPS médio: 30.0 | Total contado: 1
+05:54:33 [INFO] FPS inst: 70.7 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:36 [INFO] FPS médio: 29.8 | Total contado: 1
+05:54:36 [INFO] FPS inst: 54.5 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:40 [INFO] FPS médio: 30.0 | Total contado: 1
+05:54:40 [INFO] FPS inst: 77.0 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+05:54:43 [INFO] FPS médio: 30.0 | Total contado: 1
+05:54:43 [INFO] FPS inst: 62.9 | inferencia media: 9.3 ms | JPEG medio: 0.5 ms | pipeline media: 15.0 ms | MJPEG clientes: 6 | live descartados: 0
+06:06:18 [INFO] Sincronizacao Supabase ativa | table=stream_profiles | scope=videoBetTransit
+06:06:18 [WARNING] Falha ao carregar stream profiles do Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?select=id%2Cname%2Cstream_url%2Ccamera_id%2Croi%2Cline%2Ccount_direction%2Csecondary_verification_enabled%2Csecondary_verification_band_px%2Cis_selected%2Cupdated_at&scope=eq.videoBetTransit&order=updated_at.desc.nullslast%2Cid.asc (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+06:06:18 [WARNING] Falha ao carregar agenda por hora do Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_schedule_rules?select=id%2Cname%2Cenabled%2Cstart_time%2Cend_time%2Callowed_profile_ids%2Ctimezone%2Cupdated_at&scope=eq.videoBetTransit&order=updated_at.desc.nullslast%2Cid.asc (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+06:06:18 [WARNING] Falha ao publicar stream profiles iniciais no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+06:06:18 [WARNING] Falha ao publicar agenda por hora inicial no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_schedule_rules?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+06:06:18 [INFO] MJPEG server iniciado em http://0.0.0.0:8090/video_feed
+06:06:18 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_004
+06:06:18 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+06:06:19 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=90000.00 | fps efetivo=15.00
+06:06:19 [INFO] Iniciando contagem... | tracker: botsort_traffic.yaml | conf: 0.2 | imgsz: 256 | stride: 2 | jpeg: 65 | browserMaxWidth: 854 | operatorMaxWidth: 960 | operatorFps: 10.0
+06:06:19 [INFO] Resolução do stream: 352x288
+06:06:19 [INFO] ROI: {'x': 159, 'y': 102, 'w': 191, 'h': 184} | Linha: {'x1': 174, 'y1': 197, 'x2': 344, 'y2': 197} | Direção: any
+06:06:20 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_004
+06:06:23 [INFO] FPS médio: 25.8 | Total contado: 0
+06:06:23 [INFO] FPS inst: 62.4 | inferencia media: 9.7 ms | JPEG medio: 0.4 ms | pipeline media: 20.4 ms | MJPEG clientes: 0 | live descartados: 0
+06:06:23 [INFO] Count: 1 (car #2) via primary
+06:06:26 [INFO] Count: 2 (car #8) via primary
+06:06:27 [INFO] FPS médio: 24.8 | Total contado: 2
+06:06:27 [INFO] FPS inst: 39.5 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 18.3 ms | MJPEG clientes: 0 | live descartados: 0
+06:06:29 [INFO] Count: 3 (car #17) via primary
+06:06:30 [INFO] Count: 4 (car #18) via primary
+06:06:31 [INFO] FPS médio: 29.9 | Total contado: 4
+06:06:31 [INFO] FPS inst: 41.5 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 17.6 ms | MJPEG clientes: 0 | live descartados: 0
+06:06:34 [INFO] FPS médio: 29.3 | Total contado: 4
+06:06:34 [INFO] FPS inst: 52.5 | inferencia media: 9.9 ms | JPEG medio: 0.3 ms | pipeline media: 17.7 ms | MJPEG clientes: 2 | live descartados: 0
+06:06:34 [INFO] Client disconnected while serving /video_feed
+06:06:34 [INFO] Client disconnected while serving /video_feed
+06:06:35 [INFO] Count: 5 (car #28) via primary
+06:06:37 [INFO] FPS médio: 29.9 | Total contado: 5
+06:06:37 [INFO] FPS inst: 81.3 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 17.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:06:38 [INFO] Count: 6 (car #46) via primary
+06:06:41 [INFO] FPS médio: 29.9 | Total contado: 6
+06:06:41 [INFO] FPS inst: 80.3 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:06:44 [INFO] FPS médio: 30.2 | Total contado: 6
+06:06:44 [INFO] FPS inst: 55.7 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 16.8 ms | MJPEG clientes: 3 | live descartados: 0
+06:06:47 [INFO] FPS médio: 29.9 | Total contado: 6
+06:06:47 [INFO] FPS inst: 51.4 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 16.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:06:48 [INFO] Count: 7 (car #68) via primary
+06:06:51 [INFO] FPS médio: 29.8 | Total contado: 7
+06:06:51 [INFO] FPS inst: 49.8 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:06:54 [INFO] FPS médio: 26.5 | Total contado: 7
+06:06:54 [INFO] FPS inst: 33.1 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:06:57 [WARNING] Falha ao sincronizar esteira no Supabase: HTTPSConnectionPool(host='your_project_ref.supabase.co', port=443): Max retries exceeded with url: /rest/v1/stream_profiles?on_conflict=scope%2Cid (Caused by NameResolutionError("HTTPSConnection(host='your_project_ref.supabase.co', port=443): Failed to resolve 'your_project_ref.supabase.co' ([Errno 11001] getaddrinfo failed)"))
+06:06:58 [INFO] FPS médio: 29.4 | Total contado: 7
+06:06:58 [INFO] FPS inst: 43.3 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:01 [INFO] FPS médio: 30.0 | Total contado: 7
+06:07:01 [INFO] FPS inst: 81.2 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:05 [INFO] FPS médio: 30.1 | Total contado: 7
+06:07:05 [INFO] FPS inst: 42.4 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:08 [INFO] FPS médio: 30.0 | Total contado: 7
+06:07:08 [INFO] FPS inst: 42.0 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.5 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:11 [INFO] FPS médio: 30.1 | Total contado: 7
+06:07:11 [INFO] FPS inst: 84.9 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.5 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:15 [INFO] FPS médio: 30.0 | Total contado: 7
+06:07:15 [INFO] FPS inst: 59.0 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:16 [INFO] Count: 8 (car #104) via primary
+06:07:18 [INFO] FPS médio: 30.0 | Total contado: 8
+06:07:18 [INFO] FPS inst: 39.7 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:19 [INFO] Count: 9 (car #112) via primary
+06:07:21 [INFO] FPS médio: 30.0 | Total contado: 9
+06:07:21 [INFO] FPS inst: 83.8 | inferencia media: 9.3 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:25 [INFO] FPS médio: 30.0 | Total contado: 9
+06:07:25 [INFO] FPS inst: 34.5 | inferencia media: 9.3 ms | JPEG medio: 0.3 ms | pipeline media: 15.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:28 [INFO] FPS médio: 29.9 | Total contado: 9
+06:07:28 [INFO] FPS inst: 49.8 | inferencia media: 9.3 ms | JPEG medio: 0.3 ms | pipeline media: 15.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:31 [INFO] FPS médio: 28.7 | Total contado: 9
+06:07:31 [INFO] FPS inst: 83.4 | inferencia media: 9.3 ms | JPEG medio: 0.3 ms | pipeline media: 15.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:35 [INFO] FPS médio: 30.0 | Total contado: 9
+06:07:35 [INFO] FPS inst: 41.6 | inferencia media: 9.3 ms | JPEG medio: 0.3 ms | pipeline media: 15.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:38 [INFO] FPS médio: 29.1 | Total contado: 9
+06:07:38 [INFO] FPS inst: 41.6 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:39 [INFO] Client disconnected while serving /video_feed
+06:07:39 [INFO] Client disconnected while serving /video_feed
+06:07:39 [INFO] Client disconnected while serving /video_feed
+06:07:42 [INFO] FPS médio: 29.8 | Total contado: 9
+06:07:42 [INFO] FPS inst: 50.3 | inferencia media: 9.4 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:45 [INFO] FPS médio: 29.7 | Total contado: 9
+06:07:45 [INFO] FPS inst: 76.5 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.5 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:48 [INFO] Count: 10 (car #141) via primary
+06:07:48 [INFO] FPS médio: 30.0 | Total contado: 10
+06:07:48 [INFO] FPS inst: 52.5 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.5 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:51 [INFO] Count: 11 (car #146) via primary
+06:07:52 [INFO] FPS médio: 30.0 | Total contado: 11
+06:07:52 [INFO] FPS inst: 45.8 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.5 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:55 [INFO] FPS médio: 30.1 | Total contado: 11
+06:07:55 [INFO] FPS inst: 88.1 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.5 ms | MJPEG clientes: 3 | live descartados: 0
+06:07:58 [INFO] FPS médio: 29.9 | Total contado: 11
+06:07:58 [INFO] FPS inst: 53.0 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:00 [INFO] Count: 12 (car #149) via primary
+06:08:02 [INFO] FPS médio: 30.1 | Total contado: 12
+06:08:02 [INFO] FPS inst: 50.1 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:05 [INFO] FPS médio: 30.0 | Total contado: 12
+06:08:05 [INFO] FPS inst: 51.7 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:08 [INFO] FPS médio: 29.7 | Total contado: 12
+06:08:08 [INFO] FPS inst: 77.3 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:12 [INFO] FPS médio: 30.1 | Total contado: 12
+06:08:12 [INFO] FPS inst: 53.6 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:15 [INFO] FPS médio: 30.0 | Total contado: 12
+06:08:15 [INFO] FPS inst: 41.1 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:16 [INFO] Count: 13 (car #154) via primary
+06:08:18 [INFO] FPS médio: 30.1 | Total contado: 13
+06:08:18 [INFO] FPS inst: 41.0 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:22 [INFO] FPS médio: 29.9 | Total contado: 13
+06:08:22 [INFO] FPS inst: 68.5 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:23 [INFO] Count: 14 (car #164) via primary
+06:08:25 [INFO] FPS médio: 30.1 | Total contado: 14
+06:08:25 [INFO] FPS inst: 54.3 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:25 [INFO] Count: 15 (car #162) via primary
+06:08:28 [INFO] FPS médio: 29.7 | Total contado: 15
+06:08:28 [INFO] FPS inst: 78.0 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:29 [INFO] Count: 16 (car #179) via primary
+06:08:32 [INFO] FPS médio: 30.0 | Total contado: 16
+06:08:32 [INFO] FPS inst: 80.7 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:35 [INFO] FPS médio: 29.9 | Total contado: 16
+06:08:35 [INFO] FPS inst: 85.5 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:38 [INFO] FPS médio: 29.8 | Total contado: 16
+06:08:38 [INFO] FPS inst: 50.7 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:42 [INFO] FPS médio: 30.1 | Total contado: 16
+06:08:42 [INFO] FPS inst: 72.1 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:42 [INFO] Count: 17 (car #186) via primary
+06:08:45 [INFO] FPS médio: 29.8 | Total contado: 17
+06:08:45 [INFO] FPS inst: 58.0 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:48 [INFO] FPS médio: 30.0 | Total contado: 17
+06:08:48 [INFO] FPS inst: 50.6 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:52 [INFO] FPS médio: 30.1 | Total contado: 17
+06:08:52 [INFO] FPS inst: 41.5 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:55 [INFO] FPS médio: 29.9 | Total contado: 17
+06:08:55 [INFO] FPS inst: 50.8 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.3 ms | MJPEG clientes: 3 | live descartados: 0
+06:08:58 [INFO] FPS médio: 29.8 | Total contado: 17
+06:08:58 [INFO] FPS inst: 47.3 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:02 [INFO] FPS médio: 29.9 | Total contado: 17
+06:09:02 [INFO] FPS inst: 65.2 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:05 [INFO] FPS médio: 30.2 | Total contado: 17
+06:09:05 [INFO] FPS inst: 73.5 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:08 [INFO] FPS médio: 29.9 | Total contado: 17
+06:09:08 [INFO] FPS inst: 85.1 | inferencia media: 9.5 ms | JPEG medio: 0.3 ms | pipeline media: 15.4 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:12 [INFO] FPS médio: 30.1 | Total contado: 17
+06:09:12 [INFO] FPS inst: 55.2 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.5 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:13 [INFO] Count: 18 (car #209) via primary
+06:09:14 [INFO] Count: 19 (car #210) via primary
+06:09:15 [INFO] FPS médio: 29.9 | Total contado: 19
+06:09:15 [INFO] FPS inst: 60.4 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.6 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:16 [INFO] Count: 20 (car #219) via primary
+06:09:18 [INFO] Count: 21 (car #224) via primary
+06:09:18 [INFO] FPS médio: 30.2 | Total contado: 21
+06:09:18 [INFO] FPS inst: 73.2 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.6 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:21 [INFO] Count: 22 (car #231) via primary
+06:09:22 [INFO] FPS médio: 29.9 | Total contado: 22
+06:09:22 [INFO] FPS inst: 71.1 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:25 [INFO] FPS médio: 30.0 | Total contado: 22
+06:09:25 [INFO] FPS inst: 75.6 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:28 [INFO] FPS médio: 30.0 | Total contado: 22
+06:09:28 [INFO] FPS inst: 66.8 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:32 [INFO] FPS médio: 30.0 | Total contado: 22
+06:09:32 [INFO] FPS inst: 59.5 | inferencia media: 9.6 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:35 [INFO] FPS médio: 29.9 | Total contado: 22
+06:09:35 [INFO] FPS inst: 33.3 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:36 [INFO] Count: 23 (car #245) via primary
+06:09:38 [INFO] FPS médio: 30.0 | Total contado: 23
+06:09:38 [INFO] FPS inst: 72.3 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:42 [INFO] FPS médio: 30.0 | Total contado: 23
+06:09:42 [INFO] FPS inst: 63.7 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:45 [INFO] FPS médio: 30.1 | Total contado: 23
+06:09:45 [INFO] FPS inst: 75.2 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:48 [INFO] FPS médio: 30.0 | Total contado: 23
+06:09:48 [INFO] FPS inst: 47.0 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:52 [INFO] FPS médio: 29.1 | Total contado: 23
+06:09:52 [INFO] FPS inst: 55.5 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:55 [INFO] FPS médio: 29.9 | Total contado: 23
+06:09:55 [INFO] FPS inst: 72.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:09:56 [INFO] Count: 24 (car #251) via primary
+06:09:58 [INFO] FPS médio: 30.1 | Total contado: 24
+06:09:58 [INFO] FPS inst: 39.9 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:02 [INFO] FPS médio: 29.7 | Total contado: 24
+06:10:02 [INFO] FPS inst: 47.4 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:05 [INFO] FPS médio: 29.1 | Total contado: 24
+06:10:05 [INFO] FPS inst: 59.4 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:09 [INFO] FPS médio: 30.0 | Total contado: 24
+06:10:09 [INFO] FPS inst: 82.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:12 [INFO] FPS médio: 29.4 | Total contado: 24
+06:10:12 [INFO] FPS inst: 47.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:15 [INFO] FPS médio: 29.9 | Total contado: 24
+06:10:15 [INFO] FPS inst: 78.0 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:19 [INFO] FPS médio: 29.8 | Total contado: 24
+06:10:19 [INFO] FPS inst: 71.9 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:22 [INFO] FPS médio: 30.1 | Total contado: 24
+06:10:22 [INFO] FPS inst: 74.9 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:25 [INFO] FPS médio: 30.1 | Total contado: 24
+06:10:25 [INFO] FPS inst: 59.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:28 [INFO] Count: 25 (car #270) via primary
+06:10:29 [INFO] FPS médio: 29.8 | Total contado: 25
+06:10:29 [INFO] FPS inst: 70.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:32 [INFO] FPS médio: 30.0 | Total contado: 25
+06:10:32 [INFO] FPS inst: 50.7 | inferencia media: 9.9 ms | JPEG medio: 0.3 ms | pipeline media: 16.2 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:35 [INFO] FPS médio: 30.0 | Total contado: 25
+06:10:35 [INFO] FPS inst: 53.4 | inferencia media: 9.9 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:39 [INFO] FPS médio: 30.1 | Total contado: 25
+06:10:39 [INFO] FPS inst: 55.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:42 [INFO] FPS médio: 30.0 | Total contado: 25
+06:10:42 [INFO] FPS inst: 41.8 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:45 [INFO] FPS médio: 30.0 | Total contado: 25
+06:10:45 [INFO] FPS inst: 33.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:49 [INFO] FPS médio: 30.1 | Total contado: 25
+06:10:49 [INFO] FPS inst: 74.9 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:52 [INFO] FPS médio: 29.9 | Total contado: 25
+06:10:52 [INFO] FPS inst: 76.8 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.1 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:55 [INFO] FPS médio: 30.0 | Total contado: 25
+06:10:55 [INFO] FPS inst: 50.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:10:56 [INFO] Count: 26 (car #289) via primary
+06:10:59 [INFO] FPS médio: 30.0 | Total contado: 26
+06:10:59 [INFO] FPS inst: 72.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:02 [INFO] FPS médio: 30.0 | Total contado: 26
+06:11:02 [INFO] FPS inst: 67.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:05 [INFO] FPS médio: 30.0 | Total contado: 26
+06:11:05 [INFO] FPS inst: 65.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:09 [INFO] FPS médio: 30.0 | Total contado: 26
+06:11:09 [INFO] FPS inst: 75.0 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:12 [INFO] FPS médio: 30.0 | Total contado: 26
+06:11:12 [INFO] FPS inst: 53.4 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:14 [INFO] Count: 27 (car #292) via primary
+06:11:15 [INFO] FPS médio: 30.1 | Total contado: 27
+06:11:15 [INFO] FPS inst: 76.3 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:17 [INFO] Count: 28 (car #294) via primary
+06:11:19 [INFO] FPS médio: 30.0 | Total contado: 28
+06:11:19 [INFO] FPS inst: 42.1 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:22 [INFO] FPS médio: 30.0 | Total contado: 28
+06:11:22 [INFO] FPS inst: 40.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:25 [INFO] FPS médio: 30.0 | Total contado: 28
+06:11:25 [INFO] FPS inst: 50.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:29 [INFO] FPS médio: 30.1 | Total contado: 28
+06:11:29 [INFO] FPS inst: 69.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:32 [INFO] FPS médio: 29.3 | Total contado: 28
+06:11:32 [INFO] FPS inst: 77.1 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:34 [INFO] Client disconnected while serving /video_feed
+06:11:34 [INFO] Client disconnected while serving /video_feed
+06:11:34 [INFO] Client disconnected while serving /video_feed
+06:11:35 [INFO] FPS médio: 30.0 | Total contado: 28
+06:11:35 [INFO] FPS inst: 40.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:37 [INFO] Count: 29 (car #314) via primary
+06:11:37 [INFO] Count: 30 (car #316) via primary
+06:11:39 [INFO] FPS médio: 30.1 | Total contado: 30
+06:11:39 [INFO] FPS inst: 70.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:42 [INFO] FPS médio: 30.0 | Total contado: 30
+06:11:42 [INFO] FPS inst: 49.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:45 [INFO] FPS médio: 30.1 | Total contado: 30
+06:11:45 [INFO] FPS inst: 35.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:49 [INFO] FPS médio: 30.0 | Total contado: 30
+06:11:49 [INFO] FPS inst: 62.0 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:52 [INFO] FPS médio: 29.9 | Total contado: 30
+06:11:52 [INFO] FPS inst: 73.4 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:55 [INFO] FPS médio: 30.0 | Total contado: 30
+06:11:55 [INFO] FPS inst: 74.8 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:11:58 [INFO] Count: 31 (car #329) via primary
+06:11:59 [INFO] FPS médio: 30.0 | Total contado: 31
+06:11:59 [INFO] FPS inst: 56.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:02 [INFO] FPS médio: 30.1 | Total contado: 31
+06:12:02 [INFO] FPS inst: 41.9 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:03 [INFO] Count: 32 (car #351) via primary
+06:12:03 [INFO] Count: 33 (car #350) via primary
+06:12:06 [INFO] FPS médio: 29.1 | Total contado: 33
+06:12:06 [INFO] FPS inst: 75.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:09 [INFO] FPS médio: 30.0 | Total contado: 33
+06:12:09 [INFO] FPS inst: 69.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:12 [INFO] FPS médio: 29.8 | Total contado: 33
+06:12:12 [INFO] FPS inst: 59.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:16 [INFO] FPS médio: 30.0 | Total contado: 33
+06:12:16 [INFO] FPS inst: 79.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:19 [INFO] FPS médio: 30.0 | Total contado: 33
+06:12:19 [INFO] FPS inst: 41.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:20 [INFO] Count: 34 (car #364) via primary
+06:12:22 [INFO] FPS médio: 30.0 | Total contado: 34
+06:12:22 [INFO] FPS inst: 71.3 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:22 [INFO] Count: 35 (car #368) via primary
+06:12:26 [INFO] FPS médio: 30.1 | Total contado: 35
+06:12:26 [INFO] FPS inst: 78.4 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:28 [INFO] Count: 36 (car #380) via primary
+06:12:29 [INFO] FPS médio: 30.0 | Total contado: 36
+06:12:29 [INFO] FPS inst: 65.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 16.0 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:32 [INFO] Count: 37 (car #382) via primary
+06:12:32 [INFO] FPS médio: 29.9 | Total contado: 37
+06:12:32 [INFO] FPS inst: 53.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:33 [INFO] Count: 38 (car #386) via primary
+06:12:36 [INFO] FPS médio: 30.0 | Total contado: 38
+06:12:36 [INFO] FPS inst: 56.5 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:39 [INFO] FPS médio: 30.2 | Total contado: 38
+06:12:39 [INFO] FPS inst: 57.1 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:42 [INFO] FPS médio: 29.6 | Total contado: 38
+06:12:42 [INFO] FPS inst: 57.0 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:45 [INFO] Count: 39 (car #393) via primary
+06:12:46 [INFO] FPS médio: 30.1 | Total contado: 39
+06:12:46 [INFO] FPS inst: 53.8 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:49 [INFO] FPS médio: 30.0 | Total contado: 39
+06:12:49 [INFO] FPS inst: 80.8 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:52 [INFO] Count: 40 (car #397) via primary
+06:12:52 [INFO] FPS médio: 30.0 | Total contado: 40
+06:12:52 [INFO] FPS inst: 68.0 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:56 [INFO] FPS médio: 30.1 | Total contado: 40
+06:12:56 [INFO] FPS inst: 79.4 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:12:59 [INFO] FPS médio: 29.1 | Total contado: 40
+06:12:59 [INFO] FPS inst: 44.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:13:01 [INFO] Count: 41 (car #417) via primary
+06:13:02 [INFO] FPS médio: 29.7 | Total contado: 41
+06:13:02 [INFO] FPS inst: 76.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:13:05 [INFO] Count: 42 (car #425) via primary
+06:13:06 [INFO] FPS médio: 30.1 | Total contado: 42
+06:13:06 [INFO] FPS inst: 73.0 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:13:07 [INFO] Count: 43 (car #426) via primary
+06:13:09 [INFO] FPS médio: 30.0 | Total contado: 43
+06:13:09 [INFO] FPS inst: 35.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:13:09 [INFO] Count: 44 (car #435) via primary
+06:13:12 [INFO] FPS médio: 29.6 | Total contado: 44
+06:13:12 [INFO] FPS inst: 43.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:13:15 [INFO] Count: 45 (car #441) via primary
+06:13:16 [INFO] FPS médio: 30.0 | Total contado: 45
+06:13:16 [INFO] FPS inst: 70.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:13:19 [INFO] FPS médio: 30.0 | Total contado: 45
+06:13:19 [INFO] FPS inst: 72.7 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 3 | live descartados: 0
+06:13:21 [INFO] Count: 46 (car #444) via primary
+06:13:22 [INFO] Conectando ao stream: rtsp://127.0.0.1:8554/raw/cam_008
+06:13:22 [INFO] FFmpeg capture options: fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct
+06:13:27 [INFO] Pacing do stream: fps configurado=0.00 | fps detectado=29.97 | fps efetivo=29.97
+06:13:27 [INFO] Perfil de stream aplicado: teste3 | cam_008 | url=http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8
+06:13:27 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+06:13:27 [WARNING] Nenhum frame recebido ainda do stream...
+06:13:28 [WARNING] Nenhum frame recebido ainda do stream...
+06:13:28 [WARNING] Nenhum frame recebido ainda do stream...
+06:13:29 [WARNING] Nenhum frame recebido ainda do stream...
+06:13:29 [WARNING] Nenhum frame recebido ainda do stream...
+06:13:29 [INFO] Resolução do stream: 640x360
+06:13:29 [INFO] ROI: {'x': 168, 'y': 191, 'w': 251, 'h': 168} | Linha: {'x1': 162, 'y1': 240, 'x2': 403, 'y2': 237} | Direção: any
+06:13:30 [INFO] Iniciando publisher RTSP: rtsp://127.0.0.1:8554/processed/cam_008
+06:13:30 [WARNING] [BACKEND] Falha ao notificar stream profile (409): {"error":"Camera locked while round is active; try again after settlement."}
+06:13:33 [INFO] FPS médio: 16.3 | Total contado: 0
+06:13:33 [INFO] FPS inst: 49.6 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 4 | live descartados: 0
+06:13:36 [INFO] FPS médio: 29.9 | Total contado: 0
+06:13:36 [INFO] FPS inst: 69.1 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.9 ms | MJPEG clientes: 4 | live descartados: 0
+06:13:39 [INFO] FPS médio: 30.0 | Total contado: 0
+06:13:39 [INFO] FPS inst: 48.2 | inferencia media: 9.8 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 4 | live descartados: 0
+06:13:43 [INFO] FPS médio: 30.0 | Total contado: 0
+06:13:43 [INFO] FPS inst: 66.8 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 4 | live descartados: 0
+06:13:46 [INFO] FPS médio: 30.0 | Total contado: 0
+06:13:46 [INFO] FPS inst: 49.6 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 4 | live descartados: 0
+06:13:47 [INFO] Count: 1 (car #502) via fallback
+06:13:50 [INFO] FPS médio: 30.0 | Total contado: 1
+06:13:50 [INFO] FPS inst: 68.1 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.8 ms | MJPEG clientes: 4 | live descartados: 0
+06:13:53 [INFO] FPS médio: 30.0 | Total contado: 1
+06:13:53 [INFO] FPS inst: 63.5 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 4 | live descartados: 0
+06:13:56 [INFO] FPS médio: 30.0 | Total contado: 1
+06:13:56 [INFO] FPS inst: 65.6 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 4 | live descartados: 0
+06:14:00 [INFO] FPS médio: 30.0 | Total contado: 1
+06:14:00 [INFO] FPS inst: 56.4 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 4 | live descartados: 0
+06:14:03 [INFO] FPS médio: 30.0 | Total contado: 1
+06:14:03 [INFO] FPS inst: 50.9 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 4 | live descartados: 0
+06:14:06 [INFO] FPS médio: 30.0 | Total contado: 1
+06:14:06 [INFO] FPS inst: 59.9 | inferencia media: 9.7 ms | JPEG medio: 0.3 ms | pipeline media: 15.7 ms | MJPEG clientes: 4 | live descartados: 0

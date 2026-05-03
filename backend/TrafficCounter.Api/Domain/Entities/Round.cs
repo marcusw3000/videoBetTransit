@@ -11,8 +11,8 @@ public class Round
     public string DisplayName { get; set; } = "Rodada Normal";
 
     public DateTime CreatedAt { get; set; }
-    public DateTime BetCloseAt { get; set; }   // CreatedAt + 70s
-    public DateTime EndsAt { get; set; }       // CreatedAt + 180s
+    public DateTime BetCloseAt { get; set; }   // CreatedAt + betWindowSeconds
+    public DateTime EndsAt { get; set; }       // BetCloseAt + roundDurationSeconds
     public DateTime? SettledAt { get; set; }
 
     public int CurrentCount { get; set; }

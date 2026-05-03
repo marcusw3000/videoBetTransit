@@ -27,7 +27,10 @@ public class RoundResponse
     public DateTimeOffset EndsAt { get; set; }
     public DateTimeOffset? SettledAt { get; set; }
     public DateTimeOffset? VoidedAt { get; set; }
+    public DateTimeOffset? NextRoundStartsAt { get; set; }
     public string? VoidReason { get; set; }
+    public string? CooldownMessage { get; set; }
+    public bool IsCooldown { get; set; }
 
     public int CurrentCount { get; set; }
     public int? FinalCount { get; set; }
