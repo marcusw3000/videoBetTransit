@@ -11,6 +11,17 @@ public class UrlValidationResult
 
 public class UrlValidationService
 {
+    private static readonly string[] YouTubeHosts =
+    {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtu.be",
+        "www.youtu.be",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+    };
+
     private static readonly HashSet<string> ValidSchemes = new(StringComparer.OrdinalIgnoreCase)
     {
         "rtsp", "rtmp", "srt", "http", "https"
@@ -22,6 +33,29 @@ public class UrlValidationService
     };
 
     private static readonly string[] StreamPathHints = { "/stream", "/live", "/hls", "/rtsp", "/video" };
+
+    public static bool IsYouTubeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+
+        var host = uri.Host.Trim().ToLowerInvariant();
+        if (!YouTubeHosts.Contains(host))
+            return false;
+
+        if (host.EndsWith("youtu.be", StringComparison.OrdinalIgnoreCase))
+            return uri.AbsolutePath.Trim('/').Length > 0;
+
+        var path = uri.AbsolutePath.Trim();
+        if (path.Equals("/watch", StringComparison.OrdinalIgnoreCase))
+            return !string.IsNullOrWhiteSpace(uri.Query) && uri.Query.Contains("v=", StringComparison.OrdinalIgnoreCase);
+
+        return path.StartsWith("/live/", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/live", StringComparison.OrdinalIgnoreCase);
+    }
 
     public Task<UrlValidationResult> ValidateAsync(string url, string protocol)
     {
@@ -43,6 +77,9 @@ public class UrlValidationService
         // For HTTP/HTTPS: must look like a media URL, not a web page
         var path = uri.AbsolutePath;
         var ext = Path.GetExtension(path);
+
+        if (IsYouTubeUrl(url))
+            return Task.FromResult(UrlValidationResult.Ok());
 
         if (ValidExtensions.Contains(ext))
             return Task.FromResult(UrlValidationResult.Ok());

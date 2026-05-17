@@ -1,5 +1,5 @@
 {
-  "stream_url": "http://safe.yongin.go.kr:1935/live/ch134_s.stream/playlist.m3u8",
+  "stream_url": "https://www.youtube.com/watch?v=1EiC9bvVGnk",
   "ffmpeg_capture_options": "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;16384|reorder_queue_size;0|avioflags;direct",
   "stream_buffer_size": 1,
   "stream_open_timeout_ms": 5000,
@@ -18,7 +18,7 @@
   "backend_url": "http://127.0.0.1:8080/rounds/current?cameraId=cam_001",
   "api_key": "CHANGE_ME",
   "mjpeg_token": "CHANGE_ME",
-  "camera_id": "cam_008",
+  "camera_id": "cam_087",
   "session_id": "",
   "line_id": "main-line",
   "allowed_classes": {
@@ -30,16 +30,16 @@
   "operator_preview_max_width": 960,
   "operator_preview_fps_limit": 10,
   "line": {
-    "x1": 162,
-    "y1": 240,
-    "x2": 403,
-    "y2": 237
+    "x1": 97,
+    "y1": 215,
+    "x2": 301,
+    "y2": 178
   },
   "roi": {
-    "x": 168,
-    "y": 191,
-    "w": 251,
-    "h": 168
+    "x": 94,
+    "y": 127,
+    "w": 264,
+    "h": 157
   },
   "count_direction": "any",
   "show_window": true,
@@ -62,10 +62,10 @@
     "strategy": "uniform_excluding_current",
     "min_rounds_per_stream": 2,
     "max_rounds_per_stream": 2,
-    "current_stream_profile_id": "stream_1777109591220",
+    "current_stream_profile_id": "stream_1778998509739",
     "rounds_on_current_stream": 1,
     "target_rounds_for_current_stream": 2,
-    "last_counted_round_id": "6003ddfa-07b2-477c-997c-e6d309600d79"
+    "last_counted_round_id": "298a8700-2693-4fb5-aa4d-8316fd620606"
   },
   "stream_profiles": [
     {
@@ -172,13 +172,44 @@
       "count_direction": "any",
       "secondary_verification_enabled": true,
       "secondary_verification_band_px": 20
+    },
+    {
+      "id": "stream_1778998509739",
+      "name": "testeYT",
+      "stream_url": "https://www.youtube.com/watch?v=1EiC9bvVGnk",
+      "camera_id": "cam_087",
+      "roi": {
+        "x": 94,
+        "y": 127,
+        "w": 264,
+        "h": 157
+      },
+      "line": {
+        "x1": 97,
+        "y1": 215,
+        "x2": 301,
+        "y2": 178
+      },
+      "count_direction": "any",
+      "secondary_verification_enabled": false,
+      "secondary_verification_band_px": 18
     }
   ],
-  "selected_stream_profile_id": "stream_1777109591220",
+  "selected_stream_profile_id": "stream_1778998509739",
   "stream_schedule": {
     "timezone": "America/Sao_Paulo",
     "outside_window_behavior": "allow_all",
     "rules": [
+      {
+        "id": "schedule_1778998811595",
+        "name": "Horario cam_087 00:01-19:00",
+        "enabled": true,
+        "start_time": "00:01",
+        "end_time": "19:00",
+        "allowed_profile_ids": [
+          "stream_1778998509739"
+        ]
+      },
       {
         "id": "schedule_1777108359194",
         "name": "Horario cam_001 09:00-19:00",
@@ -231,6 +262,6 @@
       }
     ]
   },
-  "secondary_verification_enabled": true,
-  "secondary_verification_band_px": 20
+  "secondary_verification_enabled": false,
+  "secondary_verification_band_px": 18
 }

@@ -1,0 +1,459 @@
+Compilando...
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*) FROM "sqlite_master" WHERE "name" = '__EFMigrationsHistory' AND "type" = 'table';
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*) FROM "sqlite_master" WHERE "name" = '__EFMigrationsHistory' AND "type" = 'table';
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "MigrationId", "ProductVersion"
+      FROM "__EFMigrationsHistory"
+      ORDER BY "MigrationId";
+info: Microsoft.EntityFrameworkCore.Migrations[20405]
+      No migrations were applied. The database is already up to date.
+TrafficCounter backend running on http://0.0.0.0:8080
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (6ms) [Parameters=[@__p_0='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      SELECT "s"."Id", "s"."CameraSourceId", "s"."CountDirection", "s"."CountLineX1", "s"."CountLineX2", "s"."CountLineY1", "s"."CountLineY2", "s"."CreatedAt", "s"."FailureReason", "s"."ProcessedStreamPath", "s"."RawStreamPath", "s"."StartedAt", "s"."Status", "s"."StoppedAt", "s"."TotalCount"
+      FROM "StreamSessions" AS "s"
+      WHERE "s"."Status" = 'Starting' AND "s"."CreatedAt" < @__p_0
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__p_0='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      SELECT "s"."Id", "s"."CameraSourceId", "s"."CountDirection", "s"."CountLineX1", "s"."CountLineX2", "s"."CountLineY1", "s"."CountLineY2", "s"."CreatedAt", "s"."FailureReason", "s"."ProcessedStreamPath", "s"."RawStreamPath", "s"."StartedAt", "s"."Status", "s"."StoppedAt", "s"."TotalCount"
+      FROM "StreamSessions" AS "s"
+      WHERE "s"."Status" = 'ValidatingSource' AND "s"."CreatedAt" < @__p_0
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "s"."Id", "s"."CameraSourceId", "s"."CountDirection", "s"."CountLineX1", "s"."CountLineX2", "s"."CountLineY1", "s"."CountLineY2", "s"."CreatedAt", "s"."FailureReason", "s"."ProcessedStreamPath", "s"."RawStreamPath", "s"."StartedAt", "s"."Status", "s"."StoppedAt", "s"."TotalCount"
+      FROM "StreamSessions" AS "s"
+      WHERE "s"."Status" IN ('Running', 'Degraded')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "s"."Id", "s"."CameraSourceId", "s"."CountDirection", "s"."CountLineX1", "s"."CountLineX2", "s"."CountLineY1", "s"."CountLineY2", "s"."CreatedAt", "s"."FailureReason", "s"."ProcessedStreamPath", "s"."RawStreamPath", "s"."StartedAt", "s"."Status", "s"."StoppedAt", "s"."TotalCount"
+      FROM "StreamSessions" AS "s"
+      WHERE "s"."Status" = 'Running'
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]
+      Start processing HTTP request GET http://localhost:8090/health
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]
+      Sending HTTP request GET http://localhost:8090/health
+info: TrafficCounter.Api.Workers.RoundManagerWorker[0]
+      [RoundManager] Iniciando...
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://127.0.0.1:8080
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: C:\Users\Marcus\Desktop\projetos\videoBetTransit\backend\TrafficCounter.Api
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+      FROM "Rounds" AS "r"
+      WHERE "r"."Status" IN ('Open', 'Closing', 'Settling')
+      ORDER BY "r"."CameraId", "r"."CurrentCount" DESC, "r"."CreatedAt" DESC
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (6ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt", "r0"."MarketId", "r0"."IsWinner", "r0"."Label", "r0"."MarketType", "r0"."Max", "r0"."Min", "r0"."Odds", "r0"."RoundId", "r0"."SortOrder", "r0"."TargetValue", "r0"."Threshold"
+      FROM "Rounds" AS "r"
+      LEFT JOIN "RoundMarkets" AS "r0" ON "r"."RoundId" = "r0"."RoundId"
+      WHERE "r"."Status" NOT IN ('Settled', 'Void')
+      ORDER BY "r"."CameraId", "r"."CreatedAt" DESC, "r"."RoundId"
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round 480bea33-5438-4927-bf4c-438defe864d0] Entrou em apuracao.
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round e7d36ef3-74d4-4b28-a6a3-0fb7f9df49d4] Entrou em apuracao.
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round a63cb02a-3dae-417b-a0d6-04a00daf8efd] Entrou em apuracao.
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round a02a8b0a-61f7-4677-9d3c-91c929be53de] Entrou em apuracao.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (6ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 16), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 8), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 16), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 8), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 16), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 8), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 16), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 8), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (Size = 8)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "Status" = @p0
+      WHERE "RoundId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (Size = 8)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "Status" = @p0
+      WHERE "RoundId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (Size = 8)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "Status" = @p0
+      WHERE "RoundId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (Size = 8)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "Status" = @p0
+      WHERE "RoundId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT DISTINCT "c"."CameraId"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."ReadyForRounds"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+      FROM "Rounds" AS "r"
+      WHERE "r"."Status" IN ('Open', 'Closing', 'Settling')
+      ORDER BY "r"."CameraId", "r"."CurrentCount" DESC, "r"."CreatedAt" DESC
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt", "r0"."MarketId", "r0"."IsWinner", "r0"."Label", "r0"."MarketType", "r0"."Max", "r0"."Min", "r0"."Odds", "r0"."RoundId", "r0"."SortOrder", "r0"."TargetValue", "r0"."Threshold"
+      FROM "Rounds" AS "r"
+      LEFT JOIN "RoundMarkets" AS "r0" ON "r"."RoundId" = "r0"."RoundId"
+      WHERE "r"."Status" NOT IN ('Settled', 'Void')
+      ORDER BY "r"."CameraId", "r"."CreatedAt" DESC, "r"."RoundId"
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round 480bea33-5438-4927-bf4c-438defe864d0] Encerrado. Total: 0
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round e7d36ef3-74d4-4b28-a6a3-0fb7f9df49d4] Encerrado. Total: 0
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round a63cb02a-3dae-417b-a0d6-04a00daf8efd] Encerrado. Total: 0
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round a02a8b0a-61f7-4677-9d3c-91c929be53de] Encerrado. Total: 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 7), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 7), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 7), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 7), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 7), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 7), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (Size = 7), @p3='?', @p4='?' (DbType = Guid), @p5='?' (Size = 7), @p6='?' (Size = 13), @p7='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "RoundEvents" ("Id", "CountValue", "EventType", "Reason", "RoundId", "RoundStatus", "Source", "TimestampUtc")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = Boolean)], CommandType='Text', CommandTimeout='30']
+      UPDATE "RoundMarkets" SET "IsWinner" = @p0
+      WHERE "MarketId" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p3='?' (DbType = Guid), @p0='?' (DbType = Int32), @p1='?' (DbType = DateTime), @p2='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "FinalCount" = @p0, "SettledAt" = @p1, "Status" = @p2
+      WHERE "RoundId" = @p3
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p3='?' (DbType = Guid), @p0='?' (DbType = Int32), @p1='?' (DbType = DateTime), @p2='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "FinalCount" = @p0, "SettledAt" = @p1, "Status" = @p2
+      WHERE "RoundId" = @p3
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p3='?' (DbType = Guid), @p0='?' (DbType = Int32), @p1='?' (DbType = DateTime), @p2='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "FinalCount" = @p0, "SettledAt" = @p1, "Status" = @p2
+      WHERE "RoundId" = @p3
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p3='?' (DbType = Guid), @p0='?' (DbType = Int32), @p1='?' (DbType = DateTime), @p2='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      UPDATE "Rounds" SET "FinalCount" = @p0, "SettledAt" = @p1, "Status" = @p2
+      WHERE "RoundId" = @p3
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__roundId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT "b"."Id", "b"."AcceptedAt", "b"."CameraId", "b"."Currency", "b"."GameSessionId", "b"."MarketId", "b"."MarketLabel", "b"."MarketType", "b"."Max", "b"."MetadataJson", "b"."Min", "b"."Odds", "b"."OperatorRef", "b"."PlacedAt", "b"."PlayerRef", "b"."PotentialPayout", "b"."ProviderBetId", "b"."RollbackOfTransactionId", "b"."RoundId", "b"."RoundMode", "b"."SettledAt", "b"."StakeAmount", "b"."Status", "b"."TargetValue", "b"."Threshold", "b"."TransactionId", "b"."VoidedAt"
+      FROM "Bets" AS "b"
+      WHERE "b"."RoundId" = @__roundId_0 AND "b"."Status" = 'Accepted'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__roundId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT "b"."Id", "b"."AcceptedAt", "b"."CameraId", "b"."Currency", "b"."GameSessionId", "b"."MarketId", "b"."MarketLabel", "b"."MarketType", "b"."Max", "b"."MetadataJson", "b"."Min", "b"."Odds", "b"."OperatorRef", "b"."PlacedAt", "b"."PlayerRef", "b"."PotentialPayout", "b"."ProviderBetId", "b"."RollbackOfTransactionId", "b"."RoundId", "b"."RoundMode", "b"."SettledAt", "b"."StakeAmount", "b"."Status", "b"."TargetValue", "b"."Threshold", "b"."TransactionId", "b"."VoidedAt"
+      FROM "Bets" AS "b"
+      WHERE "b"."RoundId" = @__roundId_0 AND "b"."Status" = 'Accepted'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__roundId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT "b"."Id", "b"."AcceptedAt", "b"."CameraId", "b"."Currency", "b"."GameSessionId", "b"."MarketId", "b"."MarketLabel", "b"."MarketType", "b"."Max", "b"."MetadataJson", "b"."Min", "b"."Odds", "b"."OperatorRef", "b"."PlacedAt", "b"."PlayerRef", "b"."PotentialPayout", "b"."ProviderBetId", "b"."RollbackOfTransactionId", "b"."RoundId", "b"."RoundMode", "b"."SettledAt", "b"."StakeAmount", "b"."Status", "b"."TargetValue", "b"."Threshold", "b"."TransactionId", "b"."VoidedAt"
+      FROM "Bets" AS "b"
+      WHERE "b"."RoundId" = @__roundId_0 AND "b"."Status" = 'Accepted'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__roundId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT "b"."Id", "b"."AcceptedAt", "b"."CameraId", "b"."Currency", "b"."GameSessionId", "b"."MarketId", "b"."MarketLabel", "b"."MarketType", "b"."Max", "b"."MetadataJson", "b"."Min", "b"."Odds", "b"."OperatorRef", "b"."PlacedAt", "b"."PlayerRef", "b"."PotentialPayout", "b"."ProviderBetId", "b"."RollbackOfTransactionId", "b"."RoundId", "b"."RoundMode", "b"."SettledAt", "b"."StakeAmount", "b"."Status", "b"."TargetValue", "b"."Threshold", "b"."TransactionId", "b"."VoidedAt"
+      FROM "Bets" AS "b"
+      WHERE "b"."RoundId" = @__roundId_0 AND "b"."Status" = 'Accepted'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT DISTINCT "c"."CameraId"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."ReadyForRounds"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "t"."RoundId", "t"."BetCloseAt", "t"."CameraId", "t"."CreatedAt", "t"."CurrentCount", "t"."DisplayName", "t"."EndsAt", "t"."FinalCount", "t"."RoundMode", "t"."SettledAt", "t"."Status", "t"."VoidReason", "t"."VoidedAt", "r0"."MarketId", "r0"."IsWinner", "r0"."Label", "r0"."MarketType", "r0"."Max", "r0"."Min", "r0"."Odds", "r0"."RoundId", "r0"."SortOrder", "r0"."TargetValue", "r0"."Threshold"
+      FROM (
+          SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" IN ('Open', 'Closing', 'Settling')
+          ORDER BY "r"."CurrentCount" DESC, "r"."CreatedAt" DESC
+          LIMIT 1
+      ) AS "t"
+      LEFT JOIN "RoundMarkets" AS "r0" ON "t"."RoundId" = "r0"."RoundId"
+      ORDER BY "t"."CurrentCount" DESC, "t"."CreatedAt" DESC, "t"."RoundId"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (88ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+      FROM "Rounds" AS "r"
+      WHERE "r"."CameraId" = @__cameraId_0 AND "r"."Status" = 'Settled'
+      ORDER BY COALESCE("r"."SettledAt", "r"."EndsAt") DESC
+      LIMIT 1
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round] Criacao adiada para camera cam_001 ate 2026-05-17T06:01:44.9246144 por cooldown entre rounds.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "t"."RoundId", "t"."BetCloseAt", "t"."CameraId", "t"."CreatedAt", "t"."CurrentCount", "t"."DisplayName", "t"."EndsAt", "t"."FinalCount", "t"."RoundMode", "t"."SettledAt", "t"."Status", "t"."VoidReason", "t"."VoidedAt", "r0"."MarketId", "r0"."IsWinner", "r0"."Label", "r0"."MarketType", "r0"."Max", "r0"."Min", "r0"."Odds", "r0"."RoundId", "r0"."SortOrder", "r0"."TargetValue", "r0"."Threshold"
+      FROM (
+          SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" IN ('Open', 'Closing', 'Settling')
+          ORDER BY "r"."CurrentCount" DESC, "r"."CreatedAt" DESC
+          LIMIT 1
+      ) AS "t"
+      LEFT JOIN "RoundMarkets" AS "r0" ON "t"."RoundId" = "r0"."RoundId"
+      ORDER BY "t"."CurrentCount" DESC, "t"."CreatedAt" DESC, "t"."RoundId"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+      FROM "Rounds" AS "r"
+      WHERE "r"."CameraId" = @__cameraId_0 AND "r"."Status" = 'Settled'
+      ORDER BY COALESCE("r"."SettledAt", "r"."EndsAt") DESC
+      LIMIT 1
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round] Criacao adiada para camera cam_004 ate 2026-05-17T06:01:44.9246144 por cooldown entre rounds.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "t"."RoundId", "t"."BetCloseAt", "t"."CameraId", "t"."CreatedAt", "t"."CurrentCount", "t"."DisplayName", "t"."EndsAt", "t"."FinalCount", "t"."RoundMode", "t"."SettledAt", "t"."Status", "t"."VoidReason", "t"."VoidedAt", "r0"."MarketId", "r0"."IsWinner", "r0"."Label", "r0"."MarketType", "r0"."Max", "r0"."Min", "r0"."Odds", "r0"."RoundId", "r0"."SortOrder", "r0"."TargetValue", "r0"."Threshold"
+      FROM (
+          SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" IN ('Open', 'Closing', 'Settling')
+          ORDER BY "r"."CurrentCount" DESC, "r"."CreatedAt" DESC
+          LIMIT 1
+      ) AS "t"
+      LEFT JOIN "RoundMarkets" AS "r0" ON "t"."RoundId" = "r0"."RoundId"
+      ORDER BY "t"."CurrentCount" DESC, "t"."CreatedAt" DESC, "t"."RoundId"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+      FROM "Rounds" AS "r"
+      WHERE "r"."CameraId" = @__cameraId_0 AND "r"."Status" = 'Settled'
+      ORDER BY COALESCE("r"."SettledAt", "r"."EndsAt") DESC
+      LIMIT 1
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round] Criacao adiada para camera cam_007 ate 2026-05-17T06:01:44.9246144 por cooldown entre rounds.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."CameraId", "c"."ActivationPhase", "c"."ActivationRequestedAt", "c"."ActivationSessionId", "c"."ActiveStreamProfileId", "c"."CreatedAt", "c"."ExpectedFrontendAckNonce", "c"."FrontendAckReceived", "c"."FrontendAckedAt", "c"."LastFrontendAckSessionId", "c"."LastProfileChangedAt", "c"."LastReadyActivationSessionId", "c"."LastSourceChangedAt", "c"."LastSourceFingerprint", "c"."LastSourceUrl", "c"."ReadyForRounds", "c"."RoundsSinceProfileSwitch", "c"."UpdatedAt"
+      FROM "CameraRoundStates" AS "c"
+      WHERE "c"."CameraId" = @__cameraId_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" <> 'Settled' AND "r"."Status" <> 'Void')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__normalizedCameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "t"."RoundId", "t"."BetCloseAt", "t"."CameraId", "t"."CreatedAt", "t"."CurrentCount", "t"."DisplayName", "t"."EndsAt", "t"."FinalCount", "t"."RoundMode", "t"."SettledAt", "t"."Status", "t"."VoidReason", "t"."VoidedAt", "r0"."MarketId", "r0"."IsWinner", "r0"."Label", "r0"."MarketType", "r0"."Max", "r0"."Min", "r0"."Odds", "r0"."RoundId", "r0"."SortOrder", "r0"."TargetValue", "r0"."Threshold"
+      FROM (
+          SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+          FROM "Rounds" AS "r"
+          WHERE "r"."CameraId" = @__normalizedCameraId_0 AND "r"."Status" IN ('Open', 'Closing', 'Settling')
+          ORDER BY "r"."CurrentCount" DESC, "r"."CreatedAt" DESC
+          LIMIT 1
+      ) AS "t"
+      LEFT JOIN "RoundMarkets" AS "r0" ON "t"."RoundId" = "r0"."RoundId"
+      ORDER BY "t"."CurrentCount" DESC, "t"."CreatedAt" DESC, "t"."RoundId"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@__cameraId_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "r"."RoundId", "r"."BetCloseAt", "r"."CameraId", "r"."CreatedAt", "r"."CurrentCount", "r"."DisplayName", "r"."EndsAt", "r"."FinalCount", "r"."RoundMode", "r"."SettledAt", "r"."Status", "r"."VoidReason", "r"."VoidedAt"
+      FROM "Rounds" AS "r"
+      WHERE "r"."CameraId" = @__cameraId_0 AND "r"."Status" = 'Settled'
+      ORDER BY COALESCE("r"."SettledAt", "r"."EndsAt") DESC
+      LIMIT 1
+info: TrafficCounter.Api.Services.RoundService[0]
+      [Round] Criacao adiada para camera cam_008 ate 2026-05-17T06:01:44.9246144 por cooldown entre rounds.

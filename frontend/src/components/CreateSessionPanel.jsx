@@ -4,6 +4,16 @@ import LiveBadge from './LiveBadge'
 
 const DEFAULT_LINE = { x1: 300, y1: 346, x2: 601, y2: 288 }
 
+function isYoutubeUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim())
+    const host = url.hostname.toLowerCase()
+    return host.endsWith('youtube.com') || host.endsWith('youtu.be') || host.endsWith('youtube-nocookie.com')
+  } catch {
+    return false
+  }
+}
+
 function normalizeCameraId(value) {
   const normalized = String(value || '')
     .trim()
@@ -44,6 +54,14 @@ export default function CreateSessionPanel({ onSessionCreated, recentSessions = 
   const [error, setError] = useState(null)
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const setSourceUrl = (e) => {
+    const nextSourceUrl = e.target.value
+    setForm((f) => ({
+      ...f,
+      sourceUrl: nextSourceUrl,
+      protocol: isYoutubeUrl(nextSourceUrl) ? 'Hls' : f.protocol,
+    }))
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -139,7 +157,13 @@ export default function CreateSessionPanel({ onSessionCreated, recentSessions = 
 
         <div className="form-group">
           <label className="form-label">URL do stream</label>
-          <input className="form-input" value={form.sourceUrl} onChange={set('sourceUrl')} required placeholder="rtsp://..." />
+          <input
+            className="form-input"
+            value={form.sourceUrl}
+            onChange={setSourceUrl}
+            required
+            placeholder="rtsp://... ou https://www.youtube.com/watch?v=..."
+          />
         </div>
 
         <div className="form-row">

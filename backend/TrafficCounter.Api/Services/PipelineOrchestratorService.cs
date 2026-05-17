@@ -65,13 +65,24 @@ public class PipelineOrchestratorService
             var rawPath = StreamPathNaming.BuildRawPath(cameraId);
             var processedPath = StreamPathNaming.BuildProcessedPath(cameraId);
 
-            // Tell MediaMTX to pull the raw stream
-            var added = await _mediaMtx.AddPathAsync(rawPath, session.SourceUrl, ct);
-            if (!added)
+            var registerRawPathInBackend = ShouldRegisterRawPathInBackend(session.SourceUrl);
+            var added = false;
+            if (registerRawPathInBackend)
             {
-                await sessionService.TransitionStatusAsync(sessionId, SessionStatus.Failed,
-                    "Failed to register raw stream path in MediaMTX.");
-                return OrchestratorResult.Fail("MediaMTX path creation failed.");
+                // Tell MediaMTX to pull the raw stream when the source URL is already a media URL.
+                added = await _mediaMtx.AddPathAsync(rawPath, session.SourceUrl, ct);
+                if (!added)
+                {
+                    await sessionService.TransitionStatusAsync(sessionId, SessionStatus.Failed,
+                        "Failed to register raw stream path in MediaMTX.");
+                    return OrchestratorResult.Fail("MediaMTX path creation failed.");
+                }
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Skipping backend MediaMTX raw path registration for camera {CameraId}; vision-worker will resolve the source URL at runtime.",
+                    cameraId);
             }
 
             await sessionService.UpdatePathsAsync(sessionId, rawPath, processedPath);
@@ -80,7 +91,8 @@ public class PipelineOrchestratorService
             var workerOk = await StartVisionWorkerAsync(sessionId, session, rawPath, processedPath, ct);
             if (!workerOk)
             {
-                await _mediaMtx.RemovePathAsync(rawPath, ct);
+                if (added)
+                    await _mediaMtx.RemovePathAsync(rawPath, ct);
                 await sessionService.TransitionStatusAsync(sessionId, SessionStatus.Failed,
                     "Vision worker failed to start.");
                 return OrchestratorResult.Fail("Vision worker start failed.");
@@ -187,4 +199,7 @@ public class PipelineOrchestratorService
             return sem;
         }
     }
+
+    private static bool ShouldRegisterRawPathInBackend(string sourceUrl)
+        => !UrlValidationService.IsYouTubeUrl(sourceUrl);
 }

@@ -13,6 +13,8 @@ public class UrlValidationServiceTests
     [InlineData("srt://192.168.1.1:9000", "srt")]
     [InlineData("https://cdn.example.com/hls/stream.m3u8", "hls")]
     [InlineData("http://192.168.1.1:8080/stream", "hls")]
+    [InlineData("https://www.youtube.com/watch?v=DSgn-lTHJzM", "hls")]
+    [InlineData("https://youtu.be/DSgn-lTHJzM", "hls")]
     public async Task Valid_media_urls_pass(string url, string protocol)
     {
         var result = await _svc.ValidateAsync(url, protocol);
@@ -20,8 +22,8 @@ public class UrlValidationServiceTests
     }
 
     [Theory]
-    [InlineData("https://www.youtube.com/watch?v=abc", "hls")]
     [InlineData("https://example.com/index.html", "hls")]
+    [InlineData("https://www.youtube.com/@openai", "hls")]
     public async Task Web_page_urls_are_rejected(string url, string protocol)
     {
         var result = await _svc.ValidateAsync(url, protocol);

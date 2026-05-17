@@ -783,6 +783,11 @@ class WorkerApiContractTests(unittest.TestCase):
         self.assertIn("streamProfileCameraIds", payload)
         self.assertIn("streamRotation", payload)
         self.assertIn("streamSchedule", payload)
+        self.assertIn("sourceKind", payload)
+        self.assertIn("sourceUrlResolved", payload)
+        self.assertIn("lastResolveError", payload)
+        self.assertIn("captureDirectSourceUrl", payload)
+        self.assertIn("activeCaptureUrl", payload)
         self.assertIn("pending", payload["streamRotation"])
         self.assertIn("pendingEnforcement", payload["streamSchedule"])
 

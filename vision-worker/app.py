@@ -267,6 +267,14 @@ active_stream_ref = None
 active_mjpeg_server_ref = None
 active_control_panel_ref = None
 active_snapshot_writer_ref = None
+stream_source_status_lock = threading.Lock()
+stream_source_status_ref = {
+    "sourceKind": "",
+    "sourceUrlResolved": False,
+    "lastResolveError": "",
+    "captureDirectSourceUrl": "",
+    "captureSourceUrl": "",
+}
 stream_rotation_status_lock = threading.Lock()
 stream_rotation_status_ref = {
     "enabled": False,
@@ -596,6 +604,13 @@ class PipelineRuntime:
     def get_config(self) -> dict | None:
         with self._lock:
             return dict(self._config or {}) if self._config else None
+
+    def get_active_capture_url(self) -> str:
+        with self._lock:
+            stream = self._stream
+        if stream is None:
+            return ""
+        return str(getattr(stream, "url", "") or "").strip()
 
     def start(self, config: dict):
         self.stop()
@@ -966,6 +981,22 @@ def create_mjpeg_app() -> Flask:
         payload["cameraId"] = activation.get("readyCameraId") or active_config.get("camera_id", "")
         payload["sourceUrl"] = active_config.get("stream_url", "")
         payload["captureSourceUrl"] = active_config.get("capture_source_url", "")
+        source_status = get_stream_source_status()
+        payload["captureDirectSourceUrl"] = (
+            source_status.get("captureDirectSourceUrl")
+            or active_config.get("capture_direct_source_url", "")
+        )
+        payload["activeCaptureUrl"] = (
+            pipeline_runtime.get_active_capture_url()
+            or payload["captureSourceUrl"]
+            or payload["captureDirectSourceUrl"]
+        )
+        payload["sourceKind"] = (
+            source_status.get("sourceKind")
+            or classify_source_kind(payload["sourceUrl"])
+        )
+        payload["sourceUrlResolved"] = bool(source_status.get("sourceUrlResolved", False))
+        payload["lastResolveError"] = str(source_status.get("lastResolveError") or "")
         payload["processedStreamPath"] = activation.get("readyProcessedStreamPath") or active_config.get("processed_stream_path", "")
         payload["selectedStreamProfileId"] = (
             active_config.get("selected_stream_profile_id", "")
@@ -1835,6 +1866,8 @@ def sync_config_with_selected_profile(cfg: dict, profile: dict) -> dict:
 
 def normalize_config(cfg: dict | None) -> dict:
     cfg = dict(cfg or {})
+    cfg["youtube_cookies_from_browser"] = str(cfg.get("youtube_cookies_from_browser") or "").strip()
+    cfg["youtube_cookies_file"] = str(cfg.get("youtube_cookies_file") or "").strip()
     cfg["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
         cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
     )
@@ -1909,6 +1942,8 @@ def load_config(path: str = "config.json") -> dict:
         "session_id": os.getenv("SESSION_ID"),
         "line_id": os.getenv("LINE_ID"),
         "stream_url": os.getenv("STREAM_URL"),
+        "youtube_cookies_from_browser": os.getenv("YOUTUBE_COOKIES_FROM_BROWSER"),
+        "youtube_cookies_file": os.getenv("YOUTUBE_COOKIES_FILE"),
     }
 
     for key, value in env_overrides.items():
@@ -2466,6 +2501,36 @@ def is_youtube_url(value: str) -> bool:
     return host.endswith("youtube.com") or host.endswith("youtu.be") or host.endswith("youtube-nocookie.com")
 
 
+def classify_source_kind(stream_url: str) -> str:
+    normalized = str(stream_url or "").strip()
+    if not normalized:
+        return "unknown"
+    return "youtube" if is_youtube_url(normalized) else "direct"
+
+
+def update_stream_source_status(
+    *,
+    source_url: str = "",
+    source_kind: str = "",
+    source_url_resolved: bool = False,
+    capture_direct_source_url: str = "",
+    capture_source_url: str = "",
+    last_resolve_error: str = "",
+):
+    with stream_source_status_lock:
+        normalized_source_kind = str(source_kind or classify_source_kind(source_url)).strip() or "unknown"
+        stream_source_status_ref["sourceKind"] = normalized_source_kind
+        stream_source_status_ref["sourceUrlResolved"] = bool(source_url_resolved)
+        stream_source_status_ref["captureDirectSourceUrl"] = str(capture_direct_source_url or "").strip()
+        stream_source_status_ref["captureSourceUrl"] = str(capture_source_url or "").strip()
+        stream_source_status_ref["lastResolveError"] = str(last_resolve_error or "").strip()
+
+
+def get_stream_source_status() -> dict:
+    with stream_source_status_lock:
+        return dict(stream_source_status_ref)
+
+
 def validate_stream_url(value: str) -> str:
     stream_url = str(value or "").strip()
     if is_blob_url(stream_url):
@@ -2473,7 +2538,12 @@ def validate_stream_url(value: str) -> str:
     return stream_url
 
 
-def resolve_youtube_stream_url(stream_url: str, *, timeout_seconds: int = 20) -> str:
+def build_youtube_resolve_command(
+    stream_url: str,
+    *,
+    cookies_from_browser: str = "",
+    cookies_file: str = "",
+) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -2483,8 +2553,29 @@ def resolve_youtube_stream_url(stream_url: str, *, timeout_seconds: int = 20) ->
         "-f",
         "best[protocol^=m3u8]/best",
         "-g",
-        stream_url,
     ]
+    browser_name = str(cookies_from_browser or "").strip()
+    cookies_path = str(cookies_file or "").strip()
+    if browser_name:
+        command.extend(["--cookies-from-browser", browser_name])
+    elif cookies_path:
+        command.extend(["--cookies", cookies_path])
+    command.append(stream_url)
+    return command
+
+
+def resolve_youtube_stream_url(
+    stream_url: str,
+    *,
+    timeout_seconds: int = 20,
+    cookies_from_browser: str = "",
+    cookies_file: str = "",
+) -> str:
+    command = build_youtube_resolve_command(
+        stream_url,
+        cookies_from_browser=cookies_from_browser,
+        cookies_file=cookies_file,
+    )
     result = subprocess.run(
         command,
         capture_output=True,
@@ -2513,7 +2604,12 @@ def resolve_stream_source_url(stream_url: str, cfg: dict | None = None) -> Strea
         return StreamUrlResolution(original_url=original_url, capture_url=original_url, resolved=False)
 
     timeout_seconds = int((cfg or {}).get("youtube_resolve_timeout_seconds", 20) or 20)
-    capture_url = resolve_youtube_stream_url(original_url, timeout_seconds=timeout_seconds)
+    capture_url = resolve_youtube_stream_url(
+        original_url,
+        timeout_seconds=timeout_seconds,
+        cookies_from_browser=str((cfg or {}).get("youtube_cookies_from_browser") or "").strip(),
+        cookies_file=str((cfg or {}).get("youtube_cookies_file") or "").strip(),
+    )
     return StreamUrlResolution(original_url=original_url, capture_url=capture_url, resolved=True)
 
 
@@ -2664,7 +2760,19 @@ def build_pipeline_config(cfg: dict, *, source_url: str | None = None, camera_id
         camera_id or cfg.get("camera_id", "") or "cam_001"
     )
     original_source_url = str(source_url or cfg.get("stream_url") or "").strip()
-    resolved_source = resolve_stream_source_url(original_source_url, cfg)
+    source_kind = classify_source_kind(original_source_url)
+    try:
+        resolved_source = resolve_stream_source_url(original_source_url, cfg)
+    except Exception as exc:
+        update_stream_source_status(
+            source_url=original_source_url,
+            source_kind=source_kind,
+            source_url_resolved=False,
+            capture_direct_source_url="",
+            capture_source_url="",
+            last_resolve_error=str(exc),
+        )
+        raise
     raw_path = str(raw_stream_path or f"raw/{normalized_camera_id}").strip()
     processed_path = str(processed_stream_path or f"processed/{normalized_camera_id}").strip()
     rtsp_base = str(cfg.get("mediamtx_rtsp_url") or "rtsp://localhost:8554").strip().rstrip("/")
@@ -2684,9 +2792,18 @@ def build_pipeline_config(cfg: dict, *, source_url: str | None = None, camera_id
     pipeline_cfg["capture_fallback_source_url"] = capture_fallback_source_url
     pipeline_cfg["capture_direct_source_url"] = capture_direct_source_url
     pipeline_cfg["source_url_resolved"] = resolved_source.resolved
+    pipeline_cfg["source_kind"] = source_kind
     pipeline_cfg["publisher_rtsp_url"] = f"{rtsp_base}/{processed_path}"
     pipeline_cfg.setdefault("publisher_fps", 10)
     pipeline_cfg.setdefault("publisher_ffmpeg_bin", "ffmpeg")
+    update_stream_source_status(
+        source_url=resolved_source.original_url,
+        source_kind=source_kind,
+        source_url_resolved=resolved_source.resolved,
+        capture_direct_source_url=capture_direct_source_url,
+        capture_source_url=capture_source_url,
+        last_resolve_error="",
+    )
     return pipeline_cfg
 
 
@@ -4416,6 +4533,50 @@ class EditorControlPanel:
             return str(rotation_status.get("lastMessage") or "Rotacao aguardando janela segura.")
         return "Livre para operar na stream atual."
 
+    def _build_source_runtime_status(self, activation_status: dict) -> str:
+        active_config = pipeline_runtime.get_config() or {}
+        source_status = get_stream_source_status()
+        source_url = str(active_config.get("stream_url") or "").strip()
+        capture_source_url = str(active_config.get("capture_source_url") or "").strip()
+        capture_direct_source_url = str(
+            source_status.get("captureDirectSourceUrl")
+            or active_config.get("capture_direct_source_url")
+            or ""
+        ).strip()
+        active_capture_url = str(
+            pipeline_runtime.get_active_capture_url()
+            or capture_source_url
+            or capture_direct_source_url
+        ).strip()
+        source_kind = str(
+            source_status.get("sourceKind")
+            or active_config.get("source_kind")
+            or classify_source_kind(source_url)
+        ).strip() or "unknown"
+        last_resolve_error = str(source_status.get("lastResolveError") or "").strip()
+        resolved = bool(source_status.get("sourceUrlResolved", False))
+        profile_label = str(
+            activation_status.get("readyProfileLabel")
+            or activation_status.get("requestedProfileLabel")
+            or ""
+        ).strip()
+
+        parts = []
+        if profile_label:
+            parts.append(profile_label)
+        parts.append(f"Tipo: {source_kind}")
+        if source_url:
+            parts.append(f"Origem: {shorten_text(source_url, max_len=96)}")
+        if source_kind == "youtube":
+            parts.append("Resolucao: ok via yt-dlp" if resolved else "Resolucao: pendente")
+        if active_capture_url:
+            parts.append(f"Captura: {shorten_text(active_capture_url, max_len=96)}")
+        elif capture_direct_source_url:
+            parts.append(f"Captura direta: {shorten_text(capture_direct_source_url, max_len=96)}")
+        if last_resolve_error:
+            parts.append(f"Erro: {shorten_text(last_resolve_error, max_len=140)}")
+        return " | ".join(parts) if parts else "Sem source ativa no momento."
+
     def request_close(self):
         self.should_close = True
 
@@ -4516,6 +4677,7 @@ class CompactEditorControlPanel:
         self._active_schedule_var = tk.StringVar(value="-")
         self._rotation_state_var = tk.StringVar(value="-")
         self._safe_window_var = tk.StringVar(value="-")
+        self._source_runtime_var = tk.StringVar(value="-")
         self._schedule_form_dirty = False
         self._programmatic_schedule_form_update = False
 
@@ -4578,6 +4740,10 @@ class CompactEditorControlPanel:
         ttk.Label(state_frame, text="Janela segura").grid(row=4, column=0, sticky="w")
         ttk.Label(state_frame, textvariable=self._safe_window_var, wraplength=420).grid(
             row=5, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(state_frame, text="Source runtime").grid(row=6, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(state_frame, textvariable=self._source_runtime_var, wraplength=860).grid(
+            row=7, column=0, columnspan=2, sticky="w"
         )
 
     def _build_streams_tab(self):
@@ -5424,6 +5590,50 @@ class CompactEditorControlPanel:
             return "Fora do horario"
         return "Sem horario"
 
+    def _build_source_runtime_status(self, activation_status: dict) -> str:
+        active_config = pipeline_runtime.get_config() or {}
+        source_status = get_stream_source_status()
+        source_url = str(active_config.get("stream_url") or "").strip()
+        capture_source_url = str(active_config.get("capture_source_url") or "").strip()
+        capture_direct_source_url = str(
+            source_status.get("captureDirectSourceUrl")
+            or active_config.get("capture_direct_source_url")
+            or ""
+        ).strip()
+        active_capture_url = str(
+            pipeline_runtime.get_active_capture_url()
+            or capture_source_url
+            or capture_direct_source_url
+        ).strip()
+        source_kind = str(
+            source_status.get("sourceKind")
+            or active_config.get("source_kind")
+            or classify_source_kind(source_url)
+        ).strip() or "unknown"
+        last_resolve_error = str(source_status.get("lastResolveError") or "").strip()
+        resolved = bool(source_status.get("sourceUrlResolved", False))
+        profile_label = str(
+            activation_status.get("readyProfileLabel")
+            or activation_status.get("requestedProfileLabel")
+            or ""
+        ).strip()
+
+        parts = []
+        if profile_label:
+            parts.append(profile_label)
+        parts.append(f"Tipo: {source_kind}")
+        if source_url:
+            parts.append(f"Origem: {shorten_text(source_url, max_len=96)}")
+        if source_kind == "youtube":
+            parts.append("Resolucao: ok via yt-dlp" if resolved else "Resolucao: pendente")
+        if active_capture_url:
+            parts.append(f"Captura: {shorten_text(active_capture_url, max_len=96)}")
+        elif capture_direct_source_url:
+            parts.append(f"Captura direta: {shorten_text(capture_direct_source_url, max_len=96)}")
+        if last_resolve_error:
+            parts.append(f"Erro: {shorten_text(last_resolve_error, max_len=140)}")
+        return " | ".join(parts) if parts else "Sem source ativa no momento."
+
     def _update_state_summary(self):
         schedule_status = get_stream_schedule_status()
         rotation_status = get_stream_rotation_status()
@@ -5437,6 +5647,7 @@ class CompactEditorControlPanel:
         self._active_schedule_var.set(self._build_active_schedule_status(schedule_status))
         self._rotation_state_var.set(self._build_rotation_state(rotation_status))
         self._safe_window_var.set(self._build_safe_window_status(schedule_status, rotation_status, activation_status))
+        self._source_runtime_var.set(self._build_source_runtime_status(activation_status))
 
     def _build_schedule_status_text(self, schedule_status: dict) -> str:
         active_rule_name = str(schedule_status.get("activeRuleName") or "").strip()

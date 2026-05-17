@@ -39,13 +39,31 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CreateStream_rejects_web_page_url()
+    public async Task CreateStream_accepts_youtube_watch_url()
+    {
+        var request = new CreateStreamRequest
+        {
+            Name = "YouTube Cam",
+            CameraId = "cam_yt",
+            SourceUrl = "https://www.youtube.com/watch?v=DSgn-lTHJzM",
+            SourceProtocol = "hls",
+            CountLine = new CountLineRequest { X1 = 0, Y1 = 400, X2 = 1280, Y2 = 400 },
+            Direction = "down_to_up",
+        };
+
+        var response = await _client.PostAsJsonAsync("/streams", request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateStream_rejects_generic_web_page_url()
     {
         var request = new CreateStreamRequest
         {
             Name = "Bad Cam",
             CameraId = "cam_bad",
-            SourceUrl = "https://www.youtube.com/watch?v=abc",
+            SourceUrl = "https://example.com/index.html",
             SourceProtocol = "hls",
             CountLine = new CountLineRequest { X1 = 0, Y1 = 400, X2 = 1280, Y2 = 400 },
             Direction = "down_to_up",
@@ -108,9 +126,53 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    private async Task<StreamSessionResponse> CreateSessionAsync()
+    [Fact]
+    public async Task StartSession_with_direct_source_registers_backend_mediamtx_raw_path()
     {
-        var request = new CreateStreamRequest
+        _factory.MediaMtxClient.Reset();
+        var session = await CreateSessionAsync(new CreateStreamRequest
+        {
+            Name = "Direct Cam",
+            CameraId = "cam_direct",
+            SourceUrl = "rtsp://10.0.0.1:554/live",
+            SourceProtocol = "rtsp",
+            CountLine = new CountLineRequest { X1 = 0, Y1 = 400, X2 = 1280, Y2 = 400 },
+            Direction = "down_to_up",
+        });
+
+        var response = await _client.PostAsync($"/streams/{session.Id}/start", content: null);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Contains(
+            _factory.MediaMtxClient.AddedPaths,
+            call => call.PathName == "raw/cam_direct" && call.SourceUrl == "rtsp://10.0.0.1:554/live");
+    }
+
+    [Fact]
+    public async Task StartSession_with_youtube_source_skips_backend_mediamtx_raw_registration()
+    {
+        _factory.MediaMtxClient.Reset();
+        var session = await CreateSessionAsync(new CreateStreamRequest
+        {
+            Name = "YouTube Cam",
+            CameraId = "cam_yt",
+            SourceUrl = "https://www.youtube.com/watch?v=DSgn-lTHJzM",
+            SourceProtocol = "hls",
+            CountLine = new CountLineRequest { X1 = 0, Y1 = 400, X2 = 1280, Y2 = 400 },
+            Direction = "down_to_up",
+        });
+
+        var response = await _client.PostAsync($"/streams/{session.Id}/start", content: null);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.DoesNotContain(
+            _factory.MediaMtxClient.AddedPaths,
+            call => call.PathName == "raw/cam_yt");
+    }
+
+    private async Task<StreamSessionResponse> CreateSessionAsync(CreateStreamRequest? request = null)
+    {
+        request ??= new CreateStreamRequest
         {
             Name = "Integration Cam",
             CameraId = "cam_001",
