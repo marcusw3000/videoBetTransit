@@ -13,17 +13,18 @@ $manifestPath = Join-Path $backup 'manifest.json'
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'manifest.json ausente.' }
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 if ($manifest.SchemaVersion -ne 2) { throw 'Versao de manifesto nao suportada.' }
-$backupPrefix = $backup.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
-$targetPrefix = $target.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
 if (((Get-Item -LiteralPath $backup).Attributes -band [IO.FileAttributes]::ReparsePoint) -or
     ((Get-Item -LiteralPath $target).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'BackupPath e TargetRoot nao podem ser junctions ou links.' }
 $verified = [System.Collections.Generic.List[object]]::new()
 foreach ($item in $manifest.Items) {
     $relative = [string]$item.Path
-    if ([string]::IsNullOrWhiteSpace($relative) -or [IO.Path]::IsPathRooted($relative)) { throw "Caminho invalido no manifesto: $relative" }
+    $segments = $relative -split '[\\/]'
+    if ([string]::IsNullOrWhiteSpace($relative) -or
+        [IO.Path]::IsPathRooted($relative) -or
+        $relative -match '^[A-Za-z]:' -or
+        ($segments | Where-Object { $_ -eq '..' })) { throw "Caminho fora do escopo no manifesto: $relative" }
     $source = [IO.Path]::GetFullPath((Join-Path $backup $relative))
     $destination = [IO.Path]::GetFullPath((Join-Path $target $relative))
-    if (-not $source.StartsWith($backupPrefix, [StringComparison]::OrdinalIgnoreCase) -or -not $destination.StartsWith($targetPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Caminho fora do escopo no manifesto: $relative" }
     if (-not (Test-Path -LiteralPath $source) -or (Get-Item -LiteralPath $source).PSIsContainer) { throw "Arquivo ausente: $relative" }
     if ((Get-Item -LiteralPath $source).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Origem contem link: $relative" }
     if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne $item.Sha256 -or (Get-Item -LiteralPath $source).Length -ne $item.Length) { throw "Checksum ou tamanho invalido: $relative" }
@@ -31,12 +32,14 @@ foreach ($item in $manifest.Items) {
 }
 foreach ($item in $verified) {
     $cursor = Split-Path $item.Destination -Parent
-    while ($cursor.StartsWith($targetPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    while ($cursor) {
         if (Test-Path -LiteralPath $cursor) {
             if ((Get-Item -LiteralPath $cursor).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Destino contem junction ou link: $($item.Relative)" }
         }
         if ($cursor -eq $target) { break }
-        $cursor = Split-Path $cursor -Parent
+        $parent = Split-Path $cursor -Parent
+        if ($parent -eq $cursor) { break }
+        $cursor = $parent
     }
 }
 foreach ($item in $verified) {
