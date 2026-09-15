@@ -24,8 +24,8 @@ if not exist "%D%.venv\Scripts\python.exe" (
     exit /b 1
 )
 
-if not exist "%D%traffic-counter-front\package.json" (
-    echo [ERRO] Frontend nao encontrado em %D%traffic-counter-front
+if not exist "%D%frontend\package.json" (
+    echo [ERRO] Frontend nao encontrado em %D%frontend
     exit /b 1
 )
 
@@ -48,7 +48,7 @@ echo [OK] Testes Python aprovados.
 echo.
 
 echo [3/4] Rodando testes da API .NET...
-dotnet test TrafficCounter.Api.Tests\TrafficCounter.Api.Tests.csproj
+dotnet test backend\TrafficCounter.Api.Tests\TrafficCounter.Api.Tests.csproj
 if errorlevel 1 (
     echo [ERRO] Falha nos testes da API .NET.
     exit /b 1
@@ -57,8 +57,14 @@ echo [OK] Testes da API .NET aprovados.
 echo.
 
 echo [4/4] Gerando build do frontend...
-pushd "%D%traffic-counter-front"
-npm run build
+pushd "%D%frontend"
+call npm run lint
+if errorlevel 1 (popd & exit /b 1)
+call npm run check:encoding
+if errorlevel 1 (popd & exit /b 1)
+call npm test
+if errorlevel 1 (popd & exit /b 1)
+call npm run build
 if errorlevel 1 (
     popd
     echo [ERRO] Falha no build do frontend.

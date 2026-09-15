@@ -23,8 +23,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     public InternalApiTests(AppWebApplicationFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
-        _client.DefaultRequestHeaders.Add("X-API-Key", "CHANGE_ME");
+        _client = factory.AuthenticatedClient();
+        _client.DefaultRequestHeaders.Add("X-API-Key", AppWebApplicationFactory.WorkerKey);
     }
 
     [Fact]
@@ -78,8 +78,10 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task RoundCountEvent_creates_and_increments_round_for_camera()
+    public async Task RoundCountEvent_increments_existing_round_for_camera()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_count_smoke");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_round_count_smoke",
@@ -104,6 +106,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task RoundCountEvent_persists_crossing_event_for_round()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_events");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_events",
@@ -135,6 +139,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task RoundLifecycle_persists_round_events()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_events");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_round_events",
@@ -166,6 +172,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task RoundCountEvent_uses_explicit_round_id_when_present()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_round");
+
         var firstEvent = new RoundCountEventDto
         {
             CameraId = "cam_explicit_round",
@@ -202,8 +210,11 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task RoundCountEvent_ignores_explicit_round_id_from_other_camera()
+    public async Task RoundCountEvent_rejects_explicit_round_id_from_other_camera()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_001");
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_002");
+
         var seedCameraOne = new RoundCountEventDto
         {
             CameraId = "cam_explicit_other_001",
@@ -241,24 +252,26 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             TotalCount = 2,
         };
 
-        (await _client.PostAsJsonAsync("/internal/round-count-event", conflictingEvent)).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PostAsJsonAsync("/internal/round-count-event", conflictingEvent)).StatusCode);
 
         var updatedCameraOneRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_001");
         var updatedCameraTwoRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_explicit_other_002");
 
         Assert.NotNull(updatedCameraOneRound);
         Assert.NotNull(updatedCameraTwoRound);
-        Assert.Equal(2, updatedCameraOneRound!.CurrentCount);
+        Assert.Equal(1, updatedCameraOneRound!.CurrentCount);
         Assert.Equal(1, updatedCameraTwoRound!.CurrentCount);
 
         var cameraOneEvents = await _client.GetFromJsonAsync<List<CrossingEventResponse>>($"/rounds/{updatedCameraOneRound.RoundId}/count-events");
         Assert.NotNull(cameraOneEvents);
-        Assert.Contains(cameraOneEvents!, e => e.TrackId == 102);
+        Assert.DoesNotContain(cameraOneEvents!, e => e.TrackId == 102);
     }
 
     [Fact]
     public async Task RoundCountEvent_is_idempotent_for_duplicate_event_hash()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_idempotent");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_idempotent",
@@ -300,6 +313,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task RoundResponse_exposes_normal_mode_by_default()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_mode_default");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_round_mode_default",
@@ -726,7 +741,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var activeRound = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_source_reset_active");
         Assert.NotNull(activeRound);
 
-        var betResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var betResponse = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-source-swap-001",
             GameSessionId = "session-source-swap-001",
@@ -1109,6 +1124,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task GetRoundById_returns_requested_round()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_lookup");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_round_lookup",
@@ -1134,6 +1151,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task GetRecentRounds_returns_active_and_closed_rounds_for_camera()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_recent_rounds");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_recent_rounds",
@@ -1177,6 +1196,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task RoundTimeline_returns_round_and_crossing_events()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_timeline");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_timeline",
@@ -1209,6 +1230,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task RoundLifecycle_transitions_through_settling_before_settled()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_settling");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_settling",
@@ -1254,6 +1277,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
     [Fact]
     public async Task Next_round_waits_for_cooldown_after_settlement()
     {
+        await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_round_cooldown");
+
         var dto = new RoundCountEventDto
         {
             CameraId = "cam_round_cooldown",
@@ -1580,7 +1605,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.NotNull(round);
         var market = Assert.Single(round!.Markets, m => m.MarketType == "exact");
 
-        var response = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var response = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-bet-create-001",
             GameSessionId = "session-bet-create-001",
@@ -1603,7 +1628,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.Equal(market.Odds, bet.Odds);
         Assert.Equal(12.50m, bet.StakeAmount);
         Assert.Equal(decimal.Round(12.50m * market.Odds, 2, MidpointRounding.AwayFromZero), bet.PotentialPayout);
-        Assert.Equal("player-123", bet.PlayerRef);
+        Assert.Equal("admin", bet.PlayerRef);
     }
 
     [Fact]
@@ -1623,8 +1648,8 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             Currency = "BRL",
         };
 
-        var first = await _client.PostAsJsonAsync("/internal/bets", payload);
-        var second = await _client.PostAsJsonAsync("/internal/bets", payload);
+        var first = await _client.PostAsJsonAsync("/bets", payload);
+        var second = await _client.PostAsJsonAsync("/bets", payload);
 
         first.EnsureSuccessStatusCode();
         second.EnsureSuccessStatusCode();
@@ -1658,7 +1683,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             await db.SaveChangesAsync();
         }
 
-        var response = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var response = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-bet-closed-001",
             GameSessionId = "session-bet-closed-001",
@@ -1677,7 +1702,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_market_validation");
         Assert.NotNull(round);
 
-        var response = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var response = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-bet-market-miss-001",
             GameSessionId = "session-bet-market-miss-001",
@@ -1697,7 +1722,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.NotNull(round);
         var market = round!.Markets.First();
 
-        var createResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var createResponse = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-bet-lookup-001",
             GameSessionId = "session-bet-lookup-001",
@@ -1718,7 +1743,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             var persistedMarket = await db.RoundMarkets.FirstAsync(m => m.MarketId == Guid.Parse(market.MarketId));
             persistedMarket.Label = "Alterado depois";
             persistedMarket.Odds = 9.99m;
-            await db.SaveChangesAsync();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
         }
 
         var fetchedBet = await _client.GetFromJsonAsync<BetResponse>($"/bets/{createdBet!.Id}");
@@ -1737,7 +1762,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var winningMarket = round!.Markets.First(m => m.MarketType == "exact");
         var losingMarket = round.Markets.First(m => m.MarketType == "under");
 
-        var winningResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var winningResponse = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-bet-win-001",
             GameSessionId = "session-bet-settlement-001",
@@ -1746,7 +1771,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
             StakeAmount = 10m,
             Currency = "BRL",
         });
-        var losingResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var losingResponse = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-bet-loss-001",
             GameSessionId = "session-bet-settlement-001",
@@ -1797,7 +1822,7 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_void");
         Assert.NotNull(round);
 
-        var createResponse = await _client.PostAsJsonAsync("/internal/bets", new CreateBetDto
+        var createResponse = await _client.PostAsJsonAsync("/bets", new CreateBetDto
         {
             TransactionId = "txn-bet-void-001",
             GameSessionId = "session-bet-void-001",
@@ -1855,11 +1880,11 @@ public class InternalApiTests : IClassFixture<AppWebApplicationFactory>
         Assert.Equal($"Menos de {underThreshold}", under.Label);
         Assert.Equal(underThreshold, under.TargetValue);
 
-        Assert.Equal($"{rangeMin} a {rangeMax}", range.Label);
+        Assert.Equal($"Entre {rangeMin} e {rangeMax}", range.Label);
         Assert.Equal(rangeMin, range.Min);
         Assert.Equal(rangeMax, range.Max);
 
-        Assert.Equal($"Exato {exactTarget}", exact.Label);
+        Assert.Equal($"Exatamente {exactTarget}", exact.Label);
         Assert.Equal(exactTarget, exact.TargetValue);
 
         Assert.Equal($"{overThreshold} ou mais", over.Label);

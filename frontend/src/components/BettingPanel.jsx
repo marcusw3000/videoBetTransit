@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import BetsHistory from './BetsHistory'
 
 function formatCountdown(seconds) {
   const safe = Math.max(0, Math.floor(seconds || 0))
@@ -33,7 +34,6 @@ function getMarketBtnClass(marketType) {
   }
 }
 
-const POSITIONS_TABS = ['Posicoes', 'Em aberto', 'Encerrados']
 
 export default function BettingPanel({
   markets = [],
@@ -47,12 +47,10 @@ export default function BettingPanel({
   stakeOptions = [1, 10, 50, 100],
   locale = 'pt-BR',
   currency = 'BRL',
-  balance = 0,
   isSuspended = false,
-  recentBets = [],
+  pendingBet = null,
   isSubmittingBet = false,
 }) {
-  const [posTab, setPosTab] = useState('Posicoes')
 
   const numericStake = Number.parseFloat(String(stakeAmount).replace(',', '.'))
   const hasValidStake = Number.isFinite(numericStake) && numericStake > 0
@@ -66,23 +64,12 @@ export default function BettingPanel({
     ? numericStake * Number(selectedMarket.odds ?? 1)
     : 0
 
-  const isBettingOpen = roundPhase === 'open' && !isSuspended
+  const isBettingOpen = roundPhase === 'open' && !isSuspended && !pendingBet
   const canBet = isBettingOpen && hasValidStake && !!selectedMarket
 
   function handleStakeIncrement(delta) {
     const next = Math.max(0, (hasValidStake ? numericStake : 0) + delta)
     onStakeChange?.(String(next % 1 === 0 ? next : next.toFixed(2)))
-  }
-
-  function getBetStatusLabel(status) {
-    switch ((status || '').toLowerCase()) {
-      case 'accepted': return 'Em aberto'
-      case 'settled_win': return 'Ganhou'
-      case 'settled_loss': return 'Perdeu'
-      case 'void': return 'Anulada'
-      case 'rollback': return 'Rollback'
-      default: return 'Pendente'
-    }
   }
 
   return (
@@ -101,7 +88,7 @@ export default function BettingPanel({
           type="button"
           className="bet-type-tab bet-type-tab-active"
         >
-          Comprar
+          Apostar
         </button>
         <span className="bet-type-refresh" title="Atualizar odds">R</span>
       </div>
@@ -128,10 +115,16 @@ export default function BettingPanel({
         })}
       </div>
 
+      <details className="round-rules">
+        <summary>Como funciona a rodada</summary>
+        <p>As apostas encerram no horário indicado. A contagem continua até o fim da rodada, seguida da apuração. A próxima rodada depende da câmera estar pronta.</p>
+        <p>O vídeo pode ter atraso. O contador e o resultado oficiais são informados pelo servidor. Os valores são simulados.</p>
+        <p>Menos de exclui o limite; ou mais inclui o limite; entre inclui os dois extremos; exatamente exige igualdade.</p>
+      </details>
       <div className="stake-section-panel">
         <div className="stake-section-header">
           <span className="stake-section-label">Quantia</span>
-          <span className="stake-balance">Saldo: {formatCurrency(balance, locale, currency)}</span>
+          <span className="stake-balance">Valor simulado</span>
         </div>
 
         <div className="stake-control-row">
@@ -143,7 +136,9 @@ export default function BettingPanel({
           <div className="stake-display">
             <input
               type="number"
-              min="0"
+              aria-label="Valor da aposta simulada"
+              min="0.01"
+              max="10000"
               step="0.01"
               inputMode="decimal"
               className="stake-display-input"
@@ -172,9 +167,9 @@ export default function BettingPanel({
           <button
             type="button"
             className="stake-chip-panel"
-            onClick={() => onStakeChange?.(String(balance > 0 ? balance : stakeOptions[stakeOptions.length - 1]))}
+            onClick={() => onStakeChange?.(String(stakeOptions[stakeOptions.length - 1]))}
           >
-            MAX
+            Maior valor
           </button>
         </div>
       </div>
@@ -209,34 +204,11 @@ export default function BettingPanel({
                 : `Comprar ${selectedMarket.label || selectedMarket.marketType}`}
       </button>
 
-      <div className="positions-section">
-        <span className="positions-title">Minhas posicoes</span>
-        <div className="positions-tabs">
-          {POSITIONS_TABS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={`positions-tab${posTab === t ? ' positions-tab-active' : ''}`}
-              onClick={() => setPosTab(t)}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        {recentBets.length === 0 ? (
-          <div className="positions-empty">
-            Nenhuma aposta feita nesta sessao ainda.
-          </div>
-        ) : (
-          <div className="positions-list">
-            {recentBets.slice(0, 4).map((bet) => (
-              <div key={bet.id || bet.transactionId} className="positions-empty">
-                {bet.marketLabel} | {formatCurrency(bet.stakeAmount, locale, currency)} | {getBetStatusLabel(bet.status)}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {pendingBet && <div role="status" className="pending-bet">
+        <p>A confirmacao da tentativa anterior esta pendente. Ela sera reenviada com o mesmo identificador.</p>
+        <button disabled={isSubmittingBet} onClick={() => onSubmitBet?.()}>Confirmar tentativa</button>
+      </div>}
+      <BetsHistory locale={locale} />
     </div>
   )
 }

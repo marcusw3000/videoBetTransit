@@ -75,6 +75,7 @@ public class RoundService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var now = DateTime.UtcNow;
+        await _betService.ReconcileAsync();
         var repairedRounds = await CollapseDuplicateActiveRoundsAsync(db, now);
 
         var rounds = await db.Rounds
@@ -116,7 +117,7 @@ public class RoundService
                 continue;
             }
 
-            if (round.Status == RoundStatus.Settling && now >= round.EndsAt.AddSeconds(_options.SettleDelaySeconds))
+            if (round.Status == RoundStatus.Settling && now >= round.EndsAt.AddSeconds(GetFrozenSeconds(round, "settleDelaySeconds", _options.SettleDelaySeconds)))
             {
                 round.Status = RoundStatus.Settled;
                 round.FinalCount = round.CurrentCount;
@@ -140,8 +141,6 @@ public class RoundService
 
         foreach (var round in settledRounds)
         {
-            if (round.FinalCount.HasValue && round.SettledAt.HasValue)
-                await _betService.SettleAcceptedBetsForRoundAsync(round.RoundId, round.FinalCount.Value, round.SettledAt.Value);
 
             await BroadcastAsync("round_settled", round);
         }
@@ -154,29 +153,7 @@ public class RoundService
         return changed || repairedRounds.Count > 0;
     }
 
-    public async Task<Round?> IncrementCountAsync(string cameraId = "default")
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var normalizedCameraId = NormalizeCameraId(cameraId);
-
-        var round = await FindCountableRoundAsync(db, normalizedCameraId);
-        if (round is null)
-        {
-            await CreateNewRoundAsync(db, normalizedCameraId);
-            round = await FindCountableRoundAsync(db, normalizedCameraId);
-        }
-
-        if (round is null)
-            return null;
-
-        round.CurrentCount++;
-        await db.SaveChangesAsync();
-
-        await BroadcastAsync("count_updated", round);
-        return round;
-    }
-
-    public async Task<Round?> RecordCountEventAsync(RoundCountEventDto dto)
+    public async Task<Round?> RecordCountEventAsync(RoundCountEventDto dto, Guid? sessionId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -184,6 +161,17 @@ public class RoundService
         var crossedAt = dto.CrossedAt == default ? DateTime.UtcNow : dto.CrossedAt;
         var trackId = long.TryParse(dto.TrackId, out var parsedTrackId) ? parsedTrackId : 0;
         var eventHash = BuildEventHash(dto, cameraId, crossedAt, trackId);
+        if (eventHash.Length > 128) throw new RequestRejectedException("Identificador de evento invalido.", 400);
+        var receipt = await db.EventReceipts.AsNoTracking().FirstOrDefaultAsync(e => e.Id == eventHash);
+        if (receipt is not null)
+            return await db.Rounds.Include(r => r.Markets).FirstAsync(r => r.RoundId == receipt.RoundId);
+        StreamSession? session = null;
+        if (sessionId.HasValue)
+        {
+            session = await db.StreamSessions.FirstOrDefaultAsync(s => s.Id == sessionId);
+            if (session is null || session.Status is not SessionStatus.Running and not SessionStatus.Degraded)
+                throw new RequestRejectedException("Sessao indisponivel.");
+        }
 
         var duplicate = await db.VehicleCrossingEvents
             .AsNoTracking()
@@ -204,14 +192,25 @@ public class RoundService
                 .FirstOrDefaultAsync();
         }
 
-        var round = await ResolveRoundForCountEventAsync(db, cameraId, dto.RoundId);
-        if (round is null)
+        // Bind by occurrence time. An explicit round must match; never fall through to a new one.
+        var candidates = db.Rounds.Include(r => r.Markets).Where(r => r.CameraId == cameraId);
+        if (!string.IsNullOrWhiteSpace(dto.RoundId))
         {
-            _logger.LogWarning(
-                "[RoundCountEvent] Evento recebido durante settling para camera {CameraId}; ignorando count ate o proximo round oficial.",
-                cameraId);
-            return await GetCurrentRoundAsync(cameraId);
+            if (!Guid.TryParse(dto.RoundId, out var requestedRoundId))
+                throw new RequestRejectedException("Round invalido.", 400);
+            candidates = candidates.Where(r => r.RoundId == requestedRoundId);
         }
+        var round = await candidates.Where(r => r.CreatedAt <= crossedAt && crossedAt < r.EndsAt)
+            .OrderByDescending(r => r.CreatedAt).FirstOrDefaultAsync();
+        if (round is null || round.Status is RoundStatus.Settled or RoundStatus.Void)
+            throw new RequestRejectedException("Evento fora da janela de uma rodada pendente. Mantido para revisao no worker.");
+        if (crossedAt > DateTime.UtcNow.AddSeconds(2))
+            throw new RequestRejectedException("Horario do evento esta no futuro.", 400);
+        if (round.OperationalSnapshotJson is not null &&
+            !string.Equals(dto.ConfigurationVersion, ConfigurationVersion(round.OperationalSnapshotJson), StringComparison.Ordinal))
+            throw new RequestRejectedException("Configuracao do evento difere da rodada original.");
+        db.EventReceipts.Add(new EventReceipt { Id = eventHash, RoundId = round.RoundId });
+        if (session is not null) session.TotalCount++;
 
         var officialCountBefore = round.CurrentCount;
         var officialCountAfter = officialCountBefore + 1;
@@ -222,7 +221,7 @@ public class RoundService
         {
             Id = Guid.NewGuid(),
             RoundId = round.RoundId,
-            SessionId = null,
+            SessionId = sessionId,
             CameraId = cameraId,
             TimestampUtc = crossedAt,
             TrackId = trackId,
@@ -310,7 +309,7 @@ public class RoundService
             : GetNextRoundStartsAtUtc(latestFinishedRound, DateTime.UtcNow);
     }
 
-    public async Task<bool> VoidRoundAsync(Guid roundId, string reason)
+    public async Task<bool> VoidRoundAsync(Guid roundId, string reason, string reasonCode = "manual_intervention", string actor = "worker")
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -320,7 +319,7 @@ public class RoundService
 
         if (round is null)
             return false;
-        return await VoidRoundAsync(db, round, reason, "internal_api");
+        return await VoidRoundAsync(db, round, reason, actor, reasonCode: reasonCode);
     }
 
     public async Task NotifyStreamProfileActivatedAsync(
@@ -354,6 +353,12 @@ public class RoundService
 
         var normalizedProfileId = NormalizeOptional(streamProfileId);
         var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
+        if (state.OperationalConfigurationJson is not null)
+        {
+            using var configuration = System.Text.Json.JsonDocument.Parse(state.OperationalConfigurationJson);
+            if (configuration.RootElement.GetProperty("streamProfileId").GetString() != normalizedProfileId)
+                throw new InvalidOperationException("Registre a configuracao do perfil antes de ativa-lo.");
+        }
         var effectiveActivationSessionId = normalizedActivationSessionId ?? state.ActivationSessionId;
         var previousProfileId = state.ActiveStreamProfileId;
         var sameProfile = string.Equals(state.ActiveStreamProfileId, normalizedProfileId, StringComparison.Ordinal);
@@ -595,6 +600,7 @@ public class RoundService
         state.ActivationRequestedAt = now;
         state.RoundsSinceProfileSwitch = 0;
         state.LastProfileChangedAt = now;
+        state.OperationalConfigurationJson = null;
         state.LastSourceFingerprint = sourceFingerprint;
         state.LastSourceUrl = normalizedSourceUrl;
         state.LastSourceChangedAt = now;
@@ -627,6 +633,33 @@ public class RoundService
             "camera_source_changed",
             sourceChangeReason);
     }
+
+    public async Task<string> RegisterOperationalConfigurationAsync(OperationalConfigurationDto dto)
+    {
+        var json = dto.ToSnapshot();
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var cameraId = NormalizeCameraId(dto.CameraId);
+        var state = await GetOrCreateCameraRoundStateAsync(db, cameraId);
+        if (state.OperationalConfigurationJson == json) return ConfigurationVersion(json);
+        var locked = dto.AllowSettling ? await IsCameraLockedForBoundaryChangeAsync(cameraId, db)
+            : await IsCameraLockedForRoundAsync(cameraId, db);
+        if (locked) throw new InvalidOperationException(CameraLockedMessage);
+        state.OperationalConfigurationJson = json;
+        state.ExpectedFrontendAckNonce = null;
+        state.ActivationSessionId = null;
+        state.FrontendAckReceived = false;
+        state.ReadyForRounds = false;
+        state.ActivationPhase = "waiting_configuration";
+        state.UpdatedAt = DateTime.UtcNow;
+        db.AdministrativeAudits.Add(new AdministrativeAudit {
+            Actor = "worker", Action = "camera.configuration", Target = cameraId, Outcome = "completed",
+            ReasonCode = "configuration_change", Reason = "version=" + ConfigurationVersion(json)
+        });
+        await db.SaveChangesAsync();
+        return ConfigurationVersion(json);
+    }
+
+    public static string ConfigurationVersion(string json) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
 
     public async Task<bool> IsCameraLockedForRoundAsync(string cameraId = "default")
     {
@@ -675,7 +708,7 @@ public class RoundService
 
             var now = DateTime.UtcNow;
             var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
-            if (!CanCreateRounds(state))
+            if (!CanCreateRounds(state) || (_options.RequireOperationalSnapshot && state.OperationalConfigurationJson is null))
             {
                 _logger.LogInformation(
                     "[Round] Criacao adiada para camera {CameraId} porque activationPhase={Phase} readyForRounds={ReadyForRounds} activationSessionId={ActivationSessionId}.",
@@ -705,6 +738,11 @@ public class RoundService
                 state.RoundsSinceProfileSwitch,
                 state.LastProfileChangedAt,
                 GetMarketTemplates());
+            foreach (var t in marketLine.Templates)
+                t.Label = t.Type.ToLowerInvariant() switch {
+                    "under" => $"Menos de {t.Threshold}", "over" => $"{t.Threshold} ou mais",
+                    "range" => $"Entre {t.Min} e {t.Max}", "exact" => $"Exatamente {t.TargetValue}", _ => t.Label
+                };
             var round = new Round
             {
                 RoundId = Guid.NewGuid(),
@@ -716,6 +754,13 @@ public class RoundService
                 BetCloseAt = now.AddSeconds(timing.BetWindowSeconds),
                 EndsAt = now.AddSeconds(timing.BetWindowSeconds + timing.DurationSeconds),
                 CurrentCount = 0,
+                OperationalSnapshotJson = state.OperationalConfigurationJson,
+                RulesSnapshotJson = System.Text.Json.JsonSerializer.Serialize(new {
+                    version = "normal-v1", betWindowSeconds = timing.BetWindowSeconds,
+                    countAfterBetCloseSeconds = timing.DurationSeconds, settleDelaySeconds = _options.SettleDelaySeconds,
+                    nextRoundDelaySeconds = _options.NextRoundDelaySeconds,
+                    markets = marketLine.Templates
+                }),
             };
 
             var markets = marketLine.Templates.Select((t, i) => new RoundMarket
@@ -770,39 +815,6 @@ public class RoundService
         {
             creationLock.Release();
         }
-    }
-
-    private async Task<Round?> ResolveRoundForCountEventAsync(AppDbContext db, string cameraId, string? explicitRoundId)
-    {
-        if (Guid.TryParse(explicitRoundId, out var parsedRoundId))
-        {
-            var explicitRound = await db.Rounds
-                .Include(r => r.Markets)
-                .Where(r => r.RoundId == parsedRoundId)
-                .Where(r => r.CameraId == cameraId)
-                .Where(r => r.Status == RoundStatus.Open || r.Status == RoundStatus.Closing)
-                .FirstOrDefaultAsync();
-
-            if (explicitRound is not null)
-                return explicitRound;
-        }
-
-        var countableRound = await FindCountableRoundAsync(db, cameraId);
-        if (countableRound is not null)
-            return countableRound;
-
-        var settlingRound = await db.Rounds
-            .Include(r => r.Markets)
-            .Where(r => r.CameraId == cameraId)
-            .Where(r => r.Status == RoundStatus.Settling)
-            .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync();
-
-        if (settlingRound is not null)
-            return null;
-
-        await CreateNewRoundAsync(db, cameraId);
-        return await FindCountableRoundAsync(db, cameraId);
     }
 
     private static Task<Round?> FindCountableRoundAsync(AppDbContext db, string cameraId)
@@ -915,6 +927,13 @@ public class RoundService
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input))).ToLowerInvariant();
     }
 
+    private static int GetFrozenSeconds(Round round, string name, int fallback)
+    {
+        if (round.RulesSnapshotJson is null) return fallback;
+        using var json = System.Text.Json.JsonDocument.Parse(round.RulesSnapshotJson);
+        return json.RootElement.GetProperty(name).GetInt32();
+    }
+
     private static string NormalizeCameraId(string cameraId)
     {
         return string.IsNullOrWhiteSpace(cameraId) ? "default" : cameraId.Trim();
@@ -957,6 +976,7 @@ public class RoundService
         SettledAt = SaoPauloTime.FromUtc(r.SettledAt),
         VoidedAt = SaoPauloTime.FromUtc(r.VoidedAt),
         VoidReason = r.VoidReason,
+        VoidReasonCode = r.VoidReasonCode,
         CurrentCount = r.CurrentCount,
         FinalCount = r.FinalCount,
         Markets = r.Markets
@@ -1041,7 +1061,7 @@ public class RoundService
         if (!completedAt.HasValue)
             return null;
 
-        var nextRoundStartsAt = completedAt.Value.AddSeconds(Math.Max(0, _options.NextRoundDelaySeconds));
+        var nextRoundStartsAt = completedAt.Value.AddSeconds(Math.Max(0, GetFrozenSeconds(round, "nextRoundDelaySeconds", _options.NextRoundDelaySeconds)));
         return nextRoundStartsAt > now ? nextRoundStartsAt : null;
     }
 
@@ -1117,7 +1137,7 @@ public class RoundService
         string source,
         string? preVoidEventType = null,
         string? preVoidEventReason = null,
-        bool createReplacementRound = true)
+        bool createReplacementRound = true, string? reasonCode = null)
     {
         if (round.Status == RoundStatus.Settled || round.Status == RoundStatus.Void)
             return false;
@@ -1137,12 +1157,15 @@ public class RoundService
         round.Status = RoundStatus.Void;
         round.VoidedAt = voidedAt;
         round.VoidReason = reason;
+        round.VoidReasonCode = reasonCode ?? (source is "stream_profile_activation" or "pipeline_orchestrator"
+            ? "configuration_change" : "count_integrity");
+        db.AdministrativeAudits.Add(new AdministrativeAudit { Actor = source, Action = "round.void",
+            Target = round.RoundId.ToString(), Outcome = "completed", ReasonCode = round.VoidReasonCode, Reason = reason });
         db.RoundEvents.Add(CreateRoundEvent(round, "voided", voidedAt, round.CurrentCount, reason, source));
 
         await db.SaveChangesAsync();
         _logger.LogInformation("[Round {Id}] Anulado. Motivo: {Reason}", round.RoundId, reason);
 
-        await _betService.VoidAcceptedBetsForRoundAsync(round.RoundId, voidedAt);
         await BroadcastAsync("round_voided", round);
 
         if (createReplacementRound)

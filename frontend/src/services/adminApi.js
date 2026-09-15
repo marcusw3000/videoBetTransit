@@ -1,15 +1,8 @@
-import axios from 'axios'
-import { API_BASE_URL } from '../config'
+import { api } from './apiClient'
 
-const api = axios.create({ baseURL: API_BASE_URL })
-
-const apiKey = import.meta.env.VITE_API_KEY || 'CHANGE_ME'
-
-api.interceptors.request.use((cfg) => {
-  cfg.headers['X-API-Key'] = apiKey
-  return cfg
-})
-
-export function voidRound(roundId, reason = 'Anulado manualmente pelo painel admin') {
-  return api.post(`/internal/rounds/${roundId}/void`, { reason })
+export function voidRound(roundId, reason, reasonCode = 'manual_intervention') {
+  return api.post(`/admin/rounds/${roundId}/void`, { reason, reasonCode })
 }
+
+export const getRoundConfiguration = (id) => api.get(`/admin/rounds/${id}/configuration`).then(r => r.data)
+export const getAudit = (target, page = 1) => api.get("/admin/audit", { params: { target, page } }).then(r => r.data)

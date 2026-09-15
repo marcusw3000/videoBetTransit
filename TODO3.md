@@ -1,5 +1,7 @@
 # TODO3.md - Regras de negocio e UX do jogo
 
+> Documento histórico. Para execução, consulte [PLANO_CONSOLIDADO.md](PLANO_CONSOLIDADO.md). As regras vigentes estão em [ROUND_RULES.md](ROUND_RULES.md); exemplos antigos de Turbo, duração e limites não descrevem o comportamento atual.
+
 Planejamento da camada comercial do jogo a ser reintroduzida depois da estabilizacao do estado `9230acf`.
 
 Premissa:

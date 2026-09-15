@@ -2,6 +2,7 @@ namespace TrafficCounter.Api.Options;
 
 public class RoundOptions
 {
+    public bool RequireOperationalSnapshot { get; set; } = true;
     public int DurationSeconds { get; set; } = 60;
     public int BetWindowSeconds { get; set; } = 15;
     public int SettleDelaySeconds { get; set; } = 2;

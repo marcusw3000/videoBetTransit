@@ -64,7 +64,7 @@ public class InternalController : ControllerBase
     [HttpPost("rounds/{roundId:guid}/void")]
     public async Task<IActionResult> VoidRound(Guid roundId, [FromBody] VoidRoundRequest request)
     {
-        var ok = await _roundService.VoidRoundAsync(roundId, request.Reason);
+        var ok = await _roundService.VoidRoundAsync(roundId, request.Reason, request.ReasonCode);
         if (!ok)
             return Conflict(new { error = "Round não encontrado ou já encerrado/anulado." });
 
@@ -74,6 +74,7 @@ public class InternalController : ControllerBase
     [HttpPost("rounds/profile-activated")]
     public async Task<IActionResult> NotifyStreamProfileActivated([FromBody] StreamProfileActivatedDto dto)
     {
+        HttpContext.Items["AuditTarget"] = dto.CameraId;
         if (string.IsNullOrWhiteSpace(dto.CameraId))
             return BadRequest(new { error = "cameraId is required." });
 
@@ -110,9 +111,19 @@ public class InternalController : ControllerBase
         });
     }
 
+    [HttpPost("camera-config")]
+    public async Task<IActionResult> RegisterConfiguration(OperationalConfigurationDto dto)
+    {
+        HttpContext.Items["AuditTarget"] = dto.CameraId;
+        try { var version = await _roundService.RegisterOperationalConfigurationAsync(dto); return Ok(new { saved = true, configurationVersion = version }); }
+        catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
     [HttpPost("camera-config/validate-change")]
     public async Task<IActionResult> ValidateCameraConfigChange([FromBody] CameraConfigChangeDto dto)
     {
+        HttpContext.Items["AuditTarget"] = dto.CameraId;
         if (string.IsNullOrWhiteSpace(dto.CameraId))
             return BadRequest(new { error = "cameraId is required." });
 
@@ -127,27 +138,6 @@ public class InternalController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return Conflict(new { error = ex.Message });
-        }
-    }
-
-    [HttpPost("bets")]
-    public async Task<IActionResult> CreateBet([FromBody] CreateBetDto dto)
-    {
-        try
-        {
-            var bet = await _betService.PlaceBetAsync(dto);
-            return Ok(bet);
-        }
-        catch (InvalidOperationException ex)
-        {
-            var message = ex.Message ?? "Bet request rejected.";
-            var isValidationError = message.Contains("required", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("valid guid", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("greater than zero", StringComparison.OrdinalIgnoreCase);
-
-            return isValidationError
-                ? BadRequest(new { error = message })
-                : Conflict(new { error = message });
         }
     }
 

@@ -17,6 +17,44 @@ namespace TrafficCounter.Api.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
 
+            modelBuilder.Entity("TrafficCounter.Api.Domain.Entities.AdministrativeAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReasonCode")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Target", "TimestampUtc");
+
+                    b.ToTable("AdministrativeAudits");
+                });
+
             modelBuilder.Entity("TrafficCounter.Api.Domain.Entities.Bet", b =>
                 {
                     b.Property<Guid>("Id")
@@ -104,6 +142,7 @@ namespace TrafficCounter.Api.Migrations
                         .HasColumnType("numeric(18,2)");
 
                     b.Property<string>("Status")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
@@ -131,10 +170,10 @@ namespace TrafficCounter.Api.Migrations
 
                     b.HasIndex("RoundId");
 
-                    b.HasIndex("TransactionId")
-                        .IsUnique();
-
                     b.HasIndex("RoundId", "Status");
+
+                    b.HasIndex("PlayerRef", "OperatorRef", "TransactionId")
+                        .IsUnique();
 
                     b.ToTable("Bets");
                 });
@@ -145,6 +184,20 @@ namespace TrafficCounter.Api.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ActivationPhase")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("ready");
+
+                    b.Property<DateTime?>("ActivationRequestedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActivationSessionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ActiveStreamProfileId")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
@@ -152,7 +205,27 @@ namespace TrafficCounter.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ExpectedFrontendAckNonce")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("FrontendAckReceived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("FrontendAckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastFrontendAckSessionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("LastProfileChangedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastReadyActivationSessionId")
+                        .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastSourceChangedAt")
@@ -164,6 +237,18 @@ namespace TrafficCounter.Api.Migrations
 
                     b.Property<string>("LastSourceUrl")
                         .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationalConfigurationJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ReadyForRounds")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("RoundsSinceProfileSwitch")
@@ -206,6 +291,60 @@ namespace TrafficCounter.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("CameraSources");
+                });
+
+            modelBuilder.Entity("TrafficCounter.Api.Domain.Entities.EventReceipt", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RoundId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("EventReceipts");
+                });
+
+            modelBuilder.Entity("TrafficCounter.Api.Domain.Entities.OperationalRecoveryDecision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "TimestampUtc");
+
+                    b.ToTable("OperationalRecoveryDecisions");
                 });
 
             modelBuilder.Entity("TrafficCounter.Api.Domain.Entities.RecordingSegment", b =>
@@ -274,9 +413,19 @@ namespace TrafficCounter.Api.Migrations
                     b.Property<int?>("FinalCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("OperationalSnapshotJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RoundMode")
                         .IsRequired()
                         .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RulesSnapshotJson")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("SettledAt")
@@ -289,6 +438,9 @@ namespace TrafficCounter.Api.Migrations
 
                     b.Property<string>("VoidReason")
                         .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VoidReasonCode")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("VoidedAt")
@@ -485,6 +637,7 @@ namespace TrafficCounter.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("TotalCount")
+                        .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -516,6 +669,10 @@ namespace TrafficCounter.Api.Migrations
                     b.Property<int?>("CountBefore")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("CountMethod")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Direction")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -525,6 +682,9 @@ namespace TrafficCounter.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("FallbackBandPx")
+                        .HasColumnType("INTEGER");
 
                     b.Property<long>("FrameNumber")
                         .HasColumnType("INTEGER");

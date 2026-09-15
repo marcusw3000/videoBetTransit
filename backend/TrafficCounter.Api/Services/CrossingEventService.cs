@@ -50,51 +50,23 @@ public class CrossingEventService
 
         var cameraId = StreamPathNaming.ExtractCameraId(session);
 
-        // Find previous event for hash chaining
-        var previousEvent = await db.VehicleCrossingEvents
-            .Where(e => e.SessionId == sessionId)
-            .OrderByDescending(e => e.TimestampUtc)
-            .FirstOrDefaultAsync();
-
-        var previousHash = previousEvent?.EventHash;
-        var expectedHash = ComputeHash(dto, previousHash);
-
-        if (!string.Equals(expectedHash, dto.EventHash, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(dto.EventHash)) return false;
+        if (await db.EventReceipts.AnyAsync(e => e.Id == dto.EventHash)) return true;
+        var previousEvent = await db.VehicleCrossingEvents.Where(e => e.SessionId == sessionId)
+            .OrderByDescending(e => e.TimestampUtc).FirstOrDefaultAsync();
+        var expectedHash = ComputeHash(dto, previousEvent?.EventHash);
+        if (_security.EnforceHashChain && !string.Equals(expectedHash, dto.EventHash, StringComparison.OrdinalIgnoreCase))
+            return false;
+        await _roundService.RecordCountEventAsync(new RoundCountEventDto
         {
-            _logger.LogWarning(
-                "Hash mismatch for session {SessionId} trackId {TrackId}: expected {Expected}, got {Got}",
-                sessionId, dto.TrackId, expectedHash, dto.EventHash);
-
-            if (_security.EnforceHashChain)
-                return false;
-        }
-
-        var round = await _roundService.IncrementCountAsync(cameraId);
-
-        var @event = new VehicleCrossingEvent
-        {
-            Id = Guid.NewGuid(),
-            RoundId = round?.RoundId,
-            SessionId = sessionId,
-            CameraId = cameraId,
-            TimestampUtc = dto.TimestampUtc,
-            TrackId = dto.TrackId,
-            ObjectClass = dto.ObjectClass,
-            Direction = dto.Direction,
-            LineId = dto.LineId,
-            FrameNumber = dto.FrameNumber,
-            Confidence = dto.Confidence,
-            SnapshotUrl = null,
-            Source = "vision_worker_crossing_event",
-            CountMethod = string.IsNullOrWhiteSpace(dto.CountMethod) ? null : dto.CountMethod.Trim(),
-            FallbackBandPx = dto.FallbackBandPx,
-            PreviousEventHash = previousHash,
-            EventHash = expectedHash, // store the server-computed hash
-        };
-
-        db.VehicleCrossingEvents.Add(@event);
-        session.TotalCount++;
-        await db.SaveChangesAsync();
+            ConfigurationVersion = dto.ConfigurationVersion,
+            CameraId = cameraId, TrackId = dto.TrackId.ToString(), CrossedAt = dto.TimestampUtc,
+            VehicleType = dto.ObjectClass, Direction = dto.Direction, LineId = dto.LineId,
+            FrameNumber = dto.FrameNumber, Confidence = dto.Confidence, EventHash = dto.EventHash,
+            PreviousEventHash = dto.PreviousEventHash, CountMethod = dto.CountMethod,
+            FallbackBandPx = dto.FallbackBandPx, Source = "vision_worker_crossing_event",
+        }, sessionId);
+        await db.Entry(session).ReloadAsync();
 
         var oneMinuteAgo = DateTime.UtcNow.AddMinutes(-1);
         var lastMinuteCount = await db.VehicleCrossingEvents

@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = process.cwd()
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCAN_PATHS = [
   'frontend/src',
   'backend/TrafficCounter.Api',
@@ -41,7 +42,7 @@ const TEXT_EXTENSIONS = new Set([
 ])
 
 const SUSPICIOUS_PATTERNS = [
-  /Ã./u,
+  /\u00c3[\u0080-\u00bf\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc\u2013-\u203a\u20ac\u2122]/u,
   /â€”/u,
   /â€"/u,
   /â€˜/u,

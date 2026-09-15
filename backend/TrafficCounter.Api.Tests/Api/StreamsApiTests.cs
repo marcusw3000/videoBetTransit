@@ -15,8 +15,8 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
     public StreamsApiTests(AppWebApplicationFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
-        _client.DefaultRequestHeaders.Add("X-API-Key", "CHANGE_ME");
+        _client = factory.AuthenticatedClient();
+        _client.DefaultRequestHeaders.Add("X-API-Key", AppWebApplicationFactory.WorkerKey);
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class StreamsApiTests : IClassFixture<AppWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CreateStream_without_api_key_returns_401()
+    public async Task CreateStream_without_session_returns_401()
     {
         var clientNoKey = _factory.CreateClient(); // uses test transport, no API key
         var request = new CreateStreamRequest

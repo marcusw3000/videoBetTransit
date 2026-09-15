@@ -18,7 +18,7 @@ public class BetService
         _logger = logger;
     }
 
-    public async Task<BetResponse> PlaceBetAsync(CreateBetDto dto)
+    public async Task<BetResponse> PlaceBetAsync(CreateBetDto dto, string playerRef, string operatorRef)
     {
         var transactionId = NormalizeRequired(dto.TransactionId, "transactionId");
         var gameSessionId = NormalizeRequired(dto.GameSessionId, "gameSessionId");
@@ -26,17 +26,28 @@ public class BetService
         var roundId = ParseGuid(dto.RoundId, "roundId");
         var marketId = ParseGuid(dto.MarketId, "marketId");
 
-        if (dto.StakeAmount <= 0)
-            throw new InvalidOperationException("stakeAmount must be greater than zero.");
+        if (dto.StakeAmount < 0.01m || dto.StakeAmount > 10000m || decimal.Round(dto.StakeAmount, 2) != dto.StakeAmount)
+            throw new RequestRejectedException("Valor deve estar entre 0,01 e 10.000,00, com no maximo duas casas decimais.", 400);
+        if (currency != "BRL") throw new RequestRejectedException("Moeda permitida: BRL.", 400);
+        if (transactionId.Length > 128 || gameSessionId.Length > 128 || (dto.MetadataJson?.Length ?? 0) > 4096)
+            throw new RequestRejectedException("Solicitacao excede os limites de tamanho.", 400);
+        if (string.IsNullOrWhiteSpace(playerRef) || string.IsNullOrWhiteSpace(operatorRef))
+            throw new RequestRejectedException("Identidade obrigatoria.", 401);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var duplicate = await db.Bets
             .AsNoTracking()
-            .FirstOrDefaultAsync(b => b.TransactionId == transactionId);
+            .FirstOrDefaultAsync(b => b.TransactionId == transactionId && b.PlayerRef == playerRef && b.OperatorRef == operatorRef);
 
         if (duplicate is not null)
+        {
+            if (duplicate.RoundId != roundId || duplicate.MarketId != marketId
+                || duplicate.StakeAmount != dto.StakeAmount || duplicate.Currency != currency
+                || duplicate.GameSessionId != gameSessionId || duplicate.MetadataJson != NormalizeOptional(dto.MetadataJson))
+                throw new RequestRejectedException("Identificador ja utilizado com dados diferentes.");
             return ToResponse(duplicate);
+        }
 
         var round = await db.Rounds
             .Include(r => r.Markets)
@@ -77,11 +88,15 @@ public class BetService
             Status = BetStatus.Accepted,
             PlacedAt = now,
             AcceptedAt = now,
-            PlayerRef = NormalizeOptional(dto.PlayerRef),
-            OperatorRef = NormalizeOptional(dto.OperatorRef),
+            PlayerRef = playerRef,
+            OperatorRef = operatorRef,
             MetadataJson = NormalizeOptional(dto.MetadataJson),
         };
 
+        // Participate in the round revision check even though its status does not change.
+        db.Entry(round).Property(r => r.Status).IsModified = true;
+        if (DateTime.UtcNow >= round.BetCloseAt)
+            throw new RequestRejectedException("Janela de apostas encerrada.");
         db.Bets.Add(bet);
         await db.SaveChangesAsync();
 
@@ -96,57 +111,44 @@ public class BetService
         return ToResponse(bet);
     }
 
-    public async Task<BetResponse?> GetByIdAsync(Guid betId)
+    public async Task<BetResponse?> GetByIdAsync(Guid betId, string playerRef, string operatorRef)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var bet = await db.Bets
             .AsNoTracking()
-            .FirstOrDefaultAsync(b => b.Id == betId);
+            .FirstOrDefaultAsync(b => b.Id == betId && b.PlayerRef == playerRef && b.OperatorRef == operatorRef);
 
         return bet is null ? null : ToResponse(bet);
     }
 
-    public async Task SettleAcceptedBetsForRoundAsync(Guid roundId, int finalCount, DateTime settledAtUtc)
+    public async Task<object> ListAsync(string playerRef, string operatorRef, string? status,
+        DateTime? from, DateTime? to, int page, int pageSize)
+    {
+        if (page < 1 || pageSize < 1 || pageSize > 100 || (from.HasValue && to.HasValue && from > to))
+            throw new RequestRejectedException("Paginacao ou periodo invalido.", 400);
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var query = db.Bets.AsNoTracking().Where(b => b.PlayerRef == playerRef && b.OperatorRef == operatorRef);
+        if (status == "open") query = query.Where(b => b.Status == BetStatus.Accepted);
+        else if (status == "closed") query = query.Where(b => b.Status != BetStatus.Accepted);
+        else if (!string.IsNullOrEmpty(status) && status != "all") throw new RequestRejectedException("Filtro invalido.", 400);
+        if (from.HasValue) query = query.Where(b => b.PlacedAt >= from.Value.ToUniversalTime());
+        if (to.HasValue) query = query.Where(b => b.PlacedAt <= to.Value.ToUniversalTime());
+        var total = await query.CountAsync();
+        var items = await query.OrderByDescending(b => b.PlacedAt).ThenBy(b => b.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        return new { items = items.Select(ToResponse), total, page, pageSize };
+    }
+
+    public async Task ReconcileAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-
-        var bets = await db.Bets
-            .Where(b => b.RoundId == roundId && b.Status == BetStatus.Accepted)
-            .ToListAsync();
-
-        if (bets.Count == 0)
-            return;
-
-        foreach (var bet in bets)
-        {
-            bet.Status = EvaluateBet(bet, finalCount) ? BetStatus.SettledWin : BetStatus.SettledLoss;
-            bet.SettledAt = settledAtUtc;
-        }
-
+        var bets = await db.Bets.Include(b => b.Round).Where(b => b.Status == BetStatus.Accepted
+            && (b.Round.Status == RoundStatus.Settled || b.Round.Status == RoundStatus.Void)).ToListAsync();
+        foreach (var bet in bets) AppDbContext.ApplyResult(bet, bet.Round);
         await db.SaveChangesAsync();
     }
 
-    public async Task VoidAcceptedBetsForRoundAsync(Guid roundId, DateTime voidedAtUtc)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-
-        var bets = await db.Bets
-            .Where(b => b.RoundId == roundId && b.Status == BetStatus.Accepted)
-            .ToListAsync();
-
-        if (bets.Count == 0)
-            return;
-
-        foreach (var bet in bets)
-        {
-            bet.Status = BetStatus.Void;
-            bet.VoidedAt = voidedAtUtc;
-        }
-
-        await db.SaveChangesAsync();
-    }
-
-    private static bool EvaluateBet(Bet bet, int finalCount) =>
+    public static bool EvaluateBet(Bet bet, int finalCount) =>
         bet.MarketType switch
         {
             "under" => bet.Threshold.HasValue && finalCount < bet.Threshold.Value,

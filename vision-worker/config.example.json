@@ -1,0 +1,19 @@
+{
+  "camera_id": "cam_001",
+  "stream_url": "",
+  "backend_url": "http://127.0.0.1:8080",
+  "api_key": "",
+  "mjpeg_token": "",
+  "mjpeg_host": "127.0.0.1",
+  "mjpeg_port": 8090,
+  "model": "yolov8s.pt",
+  "tracker": "botsort_traffic.yaml",
+  "show_window": true,
+  "save_snapshots": false,
+  "snapshot_dir": "snapshots",
+  "count_direction": "any",
+  "roi": { "x": 0, "y": 0, "w": 0, "h": 0 },
+  "line": { "x1": 0, "y1": 0, "x2": 0, "y2": 0 },
+  "stream_profiles": [],
+  "stream_rotation": { "enabled": false }
+}

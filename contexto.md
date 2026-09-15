@@ -1,5 +1,7 @@
 # contexto.md - videoBetTransit
 
+> Para instalacao, autenticacao, validacao e recuperacao atuais, consulte [README.md](README.md). As secoes abaixo registram o contexto da pipeline.
+
 Sistema de contagem de veiculos em tempo real com mercado de apostas por faixas de contagem. O projeto roda em tres processos principais: worker Python, backend .NET e frontend React.
 
 ## Arquitetura Geral
@@ -241,7 +243,7 @@ Observacao:
 ## Pontos de Atencao
 
 - O backend grava `trafficcounter.db`, entao rounds, count-events e camera-config sobrevivem a reinicios.
-- Se `BackendApiKey`, `api_key`, `VITE_BACKEND_API_KEY` e `mjpeg_token` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
+- Se `BackendApiKey` e `api_key` estiverem divergentes, o sistema vai aparentar falha de integracao mesmo com os servicos no ar.
 - se quiser sincronizar a esteira no Supabase, crie as tabelas usando [`supabase_stream_profiles.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_profiles.sql) e [`supabase_stream_schedule_rules.sql`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\supabase_stream_schedule_rules.sql), e configure `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` no ambiente ou no `vision-worker/config.json`
 - para agenda por hora, cadastre as regras com faixas sem sobreposicao e com `allowed_profile_ids` apontando para presets existentes
 - para rotação randômica real, cadastre ao menos dois `stream_profiles` com `camera_id` e URL validos

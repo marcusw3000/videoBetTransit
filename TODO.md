@@ -1,5 +1,7 @@
 # TODO.md - videoBetTransit
 
+> Documento histórico. Para execução, consulte [PLANO_CONSOLIDADO.md](PLANO_CONSOLIDADO.md). As regras vigentes estão em [ROUND_RULES.md](ROUND_RULES.md); exemplos antigos de Turbo, duração e limites não descrevem o comportamento atual.
+
 Checklist de evolucao do projeto, organizado por prioridade, impacto e area tecnica. A ideia e servir como guia pratico de implementacao nas proximas iteracoes.
 
 ## Estado de referencia atual

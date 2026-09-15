@@ -27,7 +27,8 @@ public class BetConfiguration : IEntityTypeConfiguration<Bet>
         builder.Property(b => b.OperatorRef).HasMaxLength(128);
 
         builder.HasIndex(b => b.ProviderBetId).IsUnique();
-        builder.HasIndex(b => b.TransactionId).IsUnique();
+        builder.HasIndex(b => new { b.PlayerRef, b.OperatorRef, b.TransactionId }).IsUnique();
+        builder.Property(b => b.Status).IsConcurrencyToken();
         builder.HasIndex(b => b.RoundId);
         builder.HasIndex(b => b.GameSessionId);
         builder.HasIndex(b => new { b.RoundId, b.Status });

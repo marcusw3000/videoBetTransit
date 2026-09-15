@@ -13,7 +13,7 @@ import TimerCard from './TimerCard'
 import VideoPlayer from './VideoPlayer'
 import { getEmbedConfig } from '../embed'
 import { buildHlsUrlFromPath, buildMjpegUrl, buildWebRtcWrapperUrlFromPath } from '../config'
-import { voidRound } from '../services/adminApi'
+import { voidRound, getRoundConfiguration, getAudit } from '../services/adminApi'
 import { startMetricsConnection, stopMetricsConnection } from '../services/metricsSignalr'
 import { getOperationsHealth } from '../services/operationsApi'
 import {
@@ -28,6 +28,12 @@ import {
 import { startRoundConnection, stopRoundConnection } from '../services/roundSignalr'
 import { getEvents, getMetrics, getSession, listSessions, stopSession } from '../services/streamApi'
 import { getRoundPhase, getTimeLeftInSeconds } from '../utils/time'
+
+const DEFAULT_FRONTEND_TRANSPORT_STATE = {
+  status: 'connecting',
+  mode: 'hls',
+  isFallback: false,
+}
 
 function fmtDate(value) {
   if (!value) return '--'
@@ -82,10 +88,9 @@ function filterHistoryByPipelineCameras(history, cameraIds) {
 }
 
 function getRuntimeHistoryCameraIds(operations, activeCameraId) {
-  const activated = Array.isArray(operations?.recentRuntimeCameraIds || operations?.health?.recentRuntimeCameraIds)
-    ? (operations?.recentRuntimeCameraIds || operations?.health?.recentRuntimeCameraIds)
-        .map((item) => String(item || '').trim())
-        .filter(Boolean)
+  const runtimeCameraIds = operations?.recentRuntimeCameraIds ?? operations?.health?.recentRuntimeCameraIds ?? []
+  const activated = Array.isArray(runtimeCameraIds)
+    ? runtimeCameraIds.map((item) => String(item || '').trim()).filter(Boolean)
     : []
 
   if (activated.length > 0) return activated
@@ -185,6 +190,11 @@ export default function AdminDashboard() {
   const [recentRounds, setRecentRounds] = useState([])
   const [roundEvents, setRoundEvents] = useState([])
   const [roundTimeline, setRoundTimeline] = useState([])
+  const [configuration, setConfiguration] = useState(null)
+  const [audit, setAudit] = useState([])
+  const [auditPage, setAuditPage] = useState(1)
+  const [voidReason, setVoidReason] = useState('')
+  const [voidReasonCode, setVoidReasonCode] = useState('manual_intervention')
   const [selectedRoundId, setSelectedRoundId] = useState('')
   const [roundLookup, setRoundLookup] = useState('')
   const [timelineFilter, setTimelineFilter] = useState('all')
@@ -193,7 +203,7 @@ export default function AdminDashboard() {
   const [isStopping, setIsStopping] = useState(false)
   const [isVoiding, setIsVoiding] = useState(false)
   const [isLoadingRoundDetail, setIsLoadingRoundDetail] = useState(false)
-  const [frontendTransportState, setFrontendTransportState] = useState('connecting')
+  const [frontendTransportState, setFrontendTransportState] = useState(DEFAULT_FRONTEND_TRANSPORT_STATE)
   const lastFrontendAckKeyRef = useRef('')
 
   const activeSession = getActiveSession(sessions, selectedSessionId)
@@ -241,6 +251,15 @@ export default function AdminDashboard() {
     [activeCameraId, activeStreamPath, activationSessionId, frontendAckNonce],
   )
 
+  useEffect(() => {
+    const nextMode = hlsSrc ? 'hls' : webrtcSrc ? 'webrtc' : mjpegSrc ? 'mjpeg' : 'hls'
+    setFrontendTransportState({
+      status: 'connecting',
+      mode: nextMode,
+      isFallback: nextMode === 'mjpeg',
+    })
+  }, [activationSessionId, hlsSrc, mjpegSrc, webrtcSrc])
+
   const evidenceEvents = useMemo(
     () => roundEvents.filter((item) => Boolean(item?.snapshotUrl)).slice(0, 6),
     [roundEvents],
@@ -286,14 +305,21 @@ export default function AdminDashboard() {
     if (!roundId) {
       setRoundEvents([])
       setRoundTimeline([])
+      setConfiguration(null)
+      setAudit([])
       return
     }
 
-    const [crossingEvents, timeline] = await Promise.all([
+    const [crossingEvents, timeline, config, auditItems] = await Promise.all([
       getRoundCountEvents(roundId),
       getRoundTimeline(roundId),
+      getRoundConfiguration(roundId),
+      getAudit(),
     ])
 
+    setConfiguration(config)
+    setAudit(auditItems)
+    setAuditPage(1)
     setRoundEvents(Array.isArray(crossingEvents) ? crossingEvents : [])
     setRoundTimeline(Array.isArray(timeline) ? timeline : [])
   }, [])
@@ -330,7 +356,7 @@ export default function AdminDashboard() {
     ])
 
     if (!currentRoundResult.ok) {
-      if (currentRoundResult.error?.response?.status !== 404 || !isAwaitingFrontendAck(operations)) {
+      if (currentRoundResult.error?.response?.status !== 404 || !waitingFrontendAck) {
         throw currentRoundResult.error
       }
     }
@@ -346,7 +372,7 @@ export default function AdminDashboard() {
     const targetRoundId = preferredRoundId || selectedRoundId || nextCurrentRound?.roundId || ''
     const fallbackRound = mergedRecentRounds.find((item) => item.roundId === targetRoundId) || null
     await loadRoundDetail(targetRoundId, fallbackRound)
-  }, [activeCameraId, loadRoundDetail, selectedRoundId])
+  }, [activeCameraId, loadRoundDetail, waitingFrontendAck, selectedRoundId])
 
   const handleFirstPlayableFrame = useCallback(async ({ sourceSignature, mode, activationSessionId: provedActivationSessionId }) => {
     if (!waitingFrontendAck) return
@@ -582,7 +608,7 @@ export default function AdminDashboard() {
     setIsVoiding(true)
     setError('')
     try {
-      await voidRound(inspectedRound.roundId)
+      await voidRound(inspectedRound.roundId, voidReason.trim(), voidReasonCode)
       await loadRounds(inspectedRound.roundId)
     } catch (err) {
       console.error(err)
@@ -634,11 +660,24 @@ export default function AdminDashboard() {
           <button type="button" className="admin-nav-btn" onClick={() => { window.location.href = '/' }}>
             Ir para Mercado
           </button>
+          <label>Motivo da anulação
+            <select className="form-input" value={voidReasonCode} onChange={e => setVoidReasonCode(e.target.value)}>
+              <option value="manual_intervention">Intervenção manual</option>
+              <option value="stream_loss">Perda de transmissão</option>
+              <option value="backend_failure">Falha do backend</option>
+              <option value="count_integrity">Integridade da contagem</option>
+              <option value="configuration_change">Mudança de configuração</option>
+            </select>
+          </label>
+          <label>Justificativa
+            <input className="form-input" value={voidReason} maxLength={512}
+              onChange={e => setVoidReason(e.target.value)} placeholder="Descreva o motivo da anulação" />
+          </label>
           <button
             type="button"
             className="admin-danger-btn"
             onClick={handleVoidRound}
-            disabled={!isVoidable(inspectedRound) || isVoiding}
+            disabled={!isVoidable(inspectedRound) || isVoiding || !voidReason.trim()}
           >
             {isVoiding ? 'Anulando round...' : 'Anular Round Selecionado'}
           </button>
@@ -890,6 +929,26 @@ export default function AdminDashboard() {
                 emptyMessage="Nenhum crossing persistido para o round selecionado."
               />
 
+              <div className="card round-config-card">
+                <h3>Configuração preservada da rodada</h3>
+                <p>{configuration?.available ? `Versão: ${configuration.configurationVersion}` : 'Configuração operacional não registrada nesta rodada. O histórico não foi reconstruído com dados atuais.'}</p>
+                <details><summary>Consultar configuração e regras</summary>
+                  <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(configuration, null, 2)}</pre>
+                </details>
+              </div>
+              <div className="card admin-audit-card">
+                <h3>Auditoria administrativa</h3>
+                <p>Ações e tentativas recentes de todas as câmeras.</p>
+                {audit.length === 0 && <p>Nenhuma ação registrada.</p>}
+                {audit.map(item => <div key={item.id} style={{ overflowWrap: 'anywhere', marginBottom: 12 }}>
+                  <strong>{item.actor} · {item.action} · {item.outcome}</strong>
+                  <div>{item.timestampUtc} · {item.target}</div>
+                  <div>{item.reasonCode} {item.reason}</div>
+                </div>)}
+                <button disabled={auditPage === 1} onClick={async () => { try { setAudit(await getAudit(undefined, auditPage - 1)); setAuditPage(auditPage - 1) } catch { setError('Falha ao consultar auditoria.') } }}>Anterior</button>
+                <span> Página {auditPage} </span>
+                <button disabled={audit.length < 50} onClick={async () => { try { setAudit(await getAudit(undefined, auditPage + 1)); setAuditPage(auditPage + 1) } catch { setError('Falha ao consultar auditoria.') } }}>Próxima</button>
+              </div>
               <RoundTimeline
                 items={roundTimeline}
                 title="Timeline Investigativa"

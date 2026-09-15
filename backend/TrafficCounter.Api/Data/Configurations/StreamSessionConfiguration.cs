@@ -9,6 +9,7 @@ public class StreamSessionConfiguration : IEntityTypeConfiguration<StreamSession
     public void Configure(EntityTypeBuilder<StreamSession> builder)
     {
         builder.HasKey(e => e.Id);
+        builder.Property(e => e.TotalCount).IsConcurrencyToken();
         builder.Property(e => e.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
         builder.Property(e => e.CountDirection).HasMaxLength(32).IsRequired();
         builder.Property(e => e.RawStreamPath).HasMaxLength(256);

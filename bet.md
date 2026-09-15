@@ -1,5 +1,7 @@
 # Plano de Execucao - videoBetTransit Provider
 
+> Documento histórico. Para execução, consulte [PLANO_CONSOLIDADO.md](PLANO_CONSOLIDADO.md). As regras vigentes estão em [ROUND_RULES.md](ROUND_RULES.md); exemplos antigos de Turbo, duração e limites não descrevem o comportamento atual.
+
 Este documento transforma os pontos consolidados de [`TODO.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\TODO.md), [`TODO2.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\TODO2.md) e [`TODO3.md`](c:\Users\Marcus\Desktop\projetos\videoBetTransit\TODO3.md) em um plano de execucao unico, orientado a entrega.
 
 Objetivo:

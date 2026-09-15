@@ -2,7 +2,6 @@ logLevel: info
 logDestinations: [stdout]
 
 api: true
-api: true
 apiAddress: :9997
 apiAllowOrigins: ['*']
 

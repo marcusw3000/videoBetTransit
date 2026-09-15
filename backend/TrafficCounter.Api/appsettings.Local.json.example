@@ -1,0 +1,6 @@
+{
+  "ConnectionStrings": { "DefaultConnection": "Data Source=trafficcounter.db" },
+  "Security": { "BackendApiKey": "" },
+  "Auth": { "Users": [] },
+  "DataProtection": { "KeyPath": ".auth-keys" }
+}

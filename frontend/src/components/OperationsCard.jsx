@@ -38,6 +38,25 @@ function Metric({ label, value }) {
   )
 }
 
+function normalizeStreamState(streamState, healthTransportMode) {
+  if (streamState && typeof streamState === 'object') {
+    const mode = String(streamState.mode || '').trim().toLowerCase()
+    return {
+      status: String(streamState.status || '').trim().toLowerCase(),
+      mode,
+      isFallback: typeof streamState.isFallback === 'boolean' ? streamState.isFallback : mode === 'mjpeg',
+    }
+  }
+
+  const legacyStatus = String(streamState || '').trim().toLowerCase()
+  const legacyMode = String(healthTransportMode || 'mjpeg').trim().toLowerCase()
+  return {
+    status: legacyStatus,
+    mode: legacyMode,
+    isFallback: legacyMode === 'mjpeg',
+  }
+}
+
 export default function OperationsCard({
   operations,
   streamState,
@@ -48,9 +67,10 @@ export default function OperationsCard({
   const captureOnline = Boolean(health?.streamConnected)
   const backendOnline = !operations?.backendError && !backend?.lastError
   const publisherOnline = Boolean(health?.publisherHealthy)
-  const transportMode = String(health?.activeTransport || 'mjpeg').toUpperCase()
-  const frontendOnline = streamState === 'online'
-  const fallbackActive = transportMode !== 'WEBRTC'
+  const frontendTransport = normalizeStreamState(streamState, health?.activeTransport)
+  const transportMode = String(frontendTransport.mode || 'hls').toUpperCase()
+  const frontendOnline = frontendTransport.status === 'online'
+  const fallbackActive = Boolean(frontendTransport.isFallback)
   const estimatedLatencyMs = (health?.avgInferenceMs ?? 0) + (health?.avgJpegEncodeMs ?? 0)
   const frontendAckPhase = String(health?.frontendAckPhase || '').trim().toLowerCase()
   const activation = health?.cameraActivation || {}
@@ -87,8 +107,8 @@ export default function OperationsCard({
         />
         <StatusPill
           label="Frontend"
-          status={frontendOnline ? 'Transmitindo' : streamState === 'error' ? 'Falhou' : 'Conectando'}
-          tone={frontendOnline ? 'ok' : streamState === 'error' ? 'error' : 'warn'}
+          status={frontendOnline ? 'Transmitindo' : frontendTransport.status === 'error' ? 'Falhou' : 'Conectando'}
+          tone={frontendOnline ? 'ok' : frontendTransport.status === 'error' ? 'error' : 'warn'}
         />
         <StatusPill
           label="Transporte"

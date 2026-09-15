@@ -5,6 +5,10 @@ namespace TrafficCounter.Api.Domain.Entities;
 public class Round
 {
     public Guid RoundId { get; set; }
+    public string? OperationalSnapshotJson { get; set; }
+    public string? RulesSnapshotJson { get; set; }
+    public string? VoidReasonCode { get; set; }
+    public Guid Revision { get; set; }
     public string CameraId { get; set; } = "default";
     public RoundMode RoundMode { get; set; } = RoundMode.Normal;
     public RoundStatus Status { get; set; }

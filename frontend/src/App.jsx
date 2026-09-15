@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import AdminDashboard from './components/AdminDashboard'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AuthGate, { useSession } from './components/AuthGate'
+import { clearPendingBet, isDefinitiveRejection, readPendingBet, savePendingBet } from './utils/pendingBet'
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'))
 import BettingPanel from './components/BettingPanel'
 import DetectionsList from './components/DetectionsList'
 import HistoryDropdown from './components/HistoryDropdown'
@@ -43,27 +45,6 @@ function buildTransactionId() {
 
 function getApiErrorMessage(error, fallback) {
   return error?.response?.data?.error || fallback
-}
-
-function reconcileBetWithRound(bet, roundData) {
-  if (!bet || !roundData || bet.roundId !== roundData.roundId) return bet
-
-  if (roundData.status === 'void') {
-    return {
-      ...bet,
-      status: 'void',
-      voidedAt: roundData.voidedAt || new Date().toISOString(),
-    }
-  }
-
-  if (roundData.status !== 'settled') return bet
-
-  const winningMarket = (roundData.markets || []).find((market) => market.marketId === bet.marketId)
-  return {
-    ...bet,
-    status: winningMarket?.isWinner ? 'settled_win' : 'settled_loss',
-    settledAt: roundData.settledAt || new Date().toISOString(),
-  }
 }
 
 function getDisplayName(round) {
@@ -198,6 +179,9 @@ function getRuntimeHistoryCameraIds(workerHealth, activeCameraId) {
 }
 
 function MarketPage() {
+  const user = useSession()
+  const [pendingBet, setPendingBet] = useState(() => readPendingBet(window.sessionStorage, user.username))
+  const submittingRef = useRef(false)
   const [embedConfig, setEmbedConfig] = useState(() => getEmbedConfig())
   const [round, setRound] = useState(null)
   const [history, setHistory] = useState([])
@@ -206,7 +190,6 @@ function MarketPage() {
   const [toast, setToast] = useState(null)
   const [selectedMarketId, setSelectedMarketId] = useState('')
   const [stakeAmount, setStakeAmount] = useState(() => String(getEmbedConfig().defaultStake))
-  const [recentBets, setRecentBets] = useState([])
   const [isSubmittingBet, setIsSubmittingBet] = useState(false)
   const [workerHealth, setWorkerHealth] = useState(null)
   const roundIdRef = useRef('')
@@ -215,7 +198,7 @@ function MarketPage() {
   const roundPhase = getRoundPhase(round)
   const betCloseSeconds = getTimeLeftInSeconds(round?.betCloseAt)
   const roundDurationLabel = getRoundDurationLabel(round)
-  const markets = round?.markets || []
+  const markets = useMemo(() => round?.markets || [], [round?.markets])
   const roundCount = round?.currentCount ?? null
   const workerOnline = Boolean(workerHealth?.ok || workerHealth?.streamConnected)
   const displayCount = roundCount
@@ -314,8 +297,8 @@ function MarketPage() {
     }
   }, [pipelineCameraIds])
 
-  const reconcileRecentBets = useCallback((roundData) => {
-    setRecentBets((current) => current.map((bet) => reconcileBetWithRound(bet, roundData)))
+  const reconcileRecentBets = useCallback(() => {
+    window.dispatchEvent(new Event('bets:changed'))
   }, [])
 
   const handleFirstPlayableFrame = useCallback(async ({ sourceSignature, mode, activationSessionId: provedActivationSessionId }) => {
@@ -363,7 +346,7 @@ function MarketPage() {
     loadCurrentRound,
     playbackSourceSignature,
     selectedStreamProfileId,
-    workerHealth?.frontendAckRequired,
+    workerHealth,
   ])
 
   function handleMarketSelect(market) {
@@ -395,12 +378,13 @@ function MarketPage() {
   }
 
   async function handleSubmitBet() {
-    if (!round || !selectedMarket || !hasValidStake || roundPhase !== 'open' || round?.isSuspended) {
+    if (submittingRef.current) return
+    if (!pendingBet && (!round || !selectedMarket || !hasValidStake || roundPhase !== 'open' || round?.isSuspended)) {
       return
     }
 
-    const transactionId = buildTransactionId()
-    const payload = {
+    const transactionId = pendingBet?.transactionId || buildTransactionId()
+    const payload = pendingBet || {
       transactionId,
       gameSessionId: embedConfig.gameSessionId,
       roundId: round.roundId,
@@ -419,28 +403,43 @@ function MarketPage() {
     emitEmbedEvent('bet-submit', {
       transactionId,
       ...payload,
-      marketLabel: selectedMarket.label,
-      odds: selectedMarket.odds,
+      marketLabel: selectedMarket?.label,
+      odds: selectedMarket?.odds,
     }, embedConfig)
 
     try {
+      submittingRef.current = true
       setIsSubmittingBet(true)
+      try { savePendingBet(window.sessionStorage, user.username, payload) }
+      catch {
+        showToast('Nao foi possivel preservar a tentativa no navegador. Verifique as permissoes de armazenamento antes de apostar.')
+        return
+      }
+      setPendingBet(payload)
       const acceptedBet = await placeBet(payload)
-      setRecentBets((current) => [acceptedBet, ...current.filter((bet) => bet.id !== acceptedBet.id)].slice(0, 8))
+      clearPendingBet(window.sessionStorage, user.username)
+      setPendingBet(null)
+      window.dispatchEvent(new Event('bets:changed'))
       setSelectedMarketId('')
-      showToast(`Aposta aceita: ${selectedMarket.label}.`)
+      showToast(`Aposta aceita: ${acceptedBet.marketLabel}.`)
       emitEmbedEvent('bet-accepted', acceptedBet, embedConfig)
     } catch (err) {
-      const message = getApiErrorMessage(err, 'Nao foi possivel concluir a aposta.')
+      if (isDefinitiveRejection(err)) {
+        clearPendingBet(window.sessionStorage, user.username)
+        setPendingBet(null)
+      }
+      const message = isDefinitiveRejection(err) ? getApiErrorMessage(err, 'Aposta rejeitada.')
+        : 'Confirmacao pendente. Use Confirmar tentativa para consultar ou reenviar a mesma aposta.'
       showToast(message)
-      emitEmbedEvent('bet-rejected', {
+      emitEmbedEvent(isDefinitiveRejection(err) ? 'bet-rejected' : 'bet-pending', {
         transactionId,
         message,
-        roundId: round.roundId,
-        marketId: selectedMarket.marketId || selectedMarket.id,
-        marketLabel: selectedMarket.label,
+        roundId: payload.roundId,
+        marketId: payload.marketId,
+        marketLabel: selectedMarket?.label,
       }, embedConfig)
     } finally {
+      submittingRef.current = false
       setIsSubmittingBet(false)
     }
   }
@@ -676,13 +675,13 @@ function MarketPage() {
             </div>
           </div>
           <div className="header-right">
-            <button
+            {user.role === 'admin' && <button
               type="button"
               className="header-link-btn"
               onClick={() => { window.location.href = '?view=admin' }}
             >
               Admin
-            </button>
+            </button>}
           </div>
         </header>
 
@@ -776,9 +775,8 @@ function MarketPage() {
                 stakeOptions={embedConfig.stakeOptions}
                 locale={embedConfig.locale}
                 currency={embedConfig.currency}
-                balance={0}
                 isSuspended={round?.isSuspended}
-                recentBets={recentBets}
+                pendingBet={pendingBet}
                 isSubmittingBet={isSubmittingBet}
               />
             )}
@@ -825,5 +823,5 @@ export default function App() {
     }
   }, [])
 
-  return view === 'admin' ? <AdminDashboard /> : <MarketPage />
+  return <AuthGate admin={view === 'admin'}><Suspense fallback={<p role="status">Carregando painel...</p>}>{view === 'admin' ? <AdminDashboard /> : <MarketPage />}</Suspense></AuthGate>
 }

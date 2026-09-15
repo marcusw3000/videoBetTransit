@@ -9,6 +9,7 @@ public class RoundConfiguration : IEntityTypeConfiguration<Round>
     public void Configure(EntityTypeBuilder<Round> builder)
     {
         builder.HasKey(r => r.RoundId);
+        builder.Property(r => r.Revision).IsConcurrencyToken();
         builder.Property(r => r.CameraId).HasMaxLength(128).IsRequired();
         builder.Property(r => r.RoundMode).HasConversion<string>().HasMaxLength(32).IsRequired();
         builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(32).IsRequired();

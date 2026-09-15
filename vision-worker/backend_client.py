@@ -1,3 +1,6 @@
+import os
+from datetime import datetime, timezone
+from event_outbox import EventOutbox
 import hashlib
 import logging
 import queue
@@ -48,6 +51,7 @@ class BackendClient:
         count_worker_count: int = 2,
         live_worker_count: int = 1,
         start_workers: bool = True,
+        outbox_path: str | None = None,
     ):
         self.base_url = normalize_api_root(base_url)
         self.count_events_url = normalize_crossing_events_url(base_url)
@@ -63,10 +67,13 @@ class BackendClient:
         self.count_direction = count_direction
         self.line_id = line_id
 
-        self._previous_event_hash: str | None = None
+        self._outbox = EventOutbox(outbox_path or os.environ.get("EVENT_OUTBOX_PATH")
+            or os.path.join(os.path.dirname(__file__), "data", "events.sqlite3"))
+        self._stop = threading.Event()
+        self._previous_event_hash: str | None = self._outbox.previous_hash(session_id)
         self._hash_lock = threading.Lock()
 
-        self._count_queue = queue.Queue(maxsize=max(1, count_queue_size))
+        self._count_queue = self._outbox
         self._live_queue = queue.Queue(maxsize=max(1, live_queue_size))
         self._lock = threading.Lock()
         self._stats = {
@@ -226,7 +233,10 @@ class BackendClient:
         phase: str = "requested",
         activation_nonce: str = "",
         activation_session_id: str = "",
+        configuration: dict | None = None,
     ) -> bool:
+        if configuration is not None and not self.register_operational_configuration(configuration, allow_settling=allow_settling):
+            return False
         payload = {
             "cameraId": str(camera_id or "").strip(),
             "streamProfileId": str(stream_profile_id or "").strip(),
@@ -267,14 +277,31 @@ class BackendClient:
             logger.error("[BACKEND] Erro ao notificar stream profile: %s", exc)
             return False
 
-    def save_camera_config(
-        self,
-        camera_id: str,
-        _roi: dict,
-        _line: dict,
-        _count_direction: str,
-    ) -> bool:
-        return self.validate_camera_config_change(camera_id)
+    def register_operational_configuration(self, profile: dict, *, allow_settling=False) -> bool:
+        payload = {
+            "cameraId": profile.get("camera_id", ""),
+            "streamProfileId": profile.get("id") or profile.get("selected_stream_profile_id", ""),
+            "sourceUrl": profile.get("stream_url", ""),
+            "roi": profile.get("roi", {}), "line": profile.get("line", {}),
+            "countDirection": profile.get("count_direction", "any"),
+            "secondaryVerificationEnabled": bool(profile.get("secondary_verification_enabled", False)),
+            "secondaryVerificationBandPx": int(profile.get("secondary_verification_band_px", 0)),
+            "allowSettling": bool(allow_settling),
+        }
+        try:
+            response = self._session.post(f"{self.base_url}/internal/camera-config", json=payload,
+                                          headers=self._default_headers, timeout=5)
+            if response.status_code >= 400:
+                self._mark_error(f"configuration HTTP {response.status_code}")
+                return False
+            version = response.json().get("configurationVersion")
+            if not version:
+                return False
+            self.configuration_version = version
+            return True
+        except (requests.RequestException, ValueError):
+            self._mark_error("configuration registration failed")
+            return False
 
     def ensure_camera_change_allowed(
         self,
@@ -336,6 +363,7 @@ class BackendClient:
     def send_count_event(self, payload: dict):
         if not self.session_id:
             round_payload = {
+                "configurationVersion": getattr(self, "configuration_version", None),
                 "cameraId": payload.get("cameraId", ""),
                 "roundId": payload.get("roundId", ""),
                 "streamProfileId": payload.get("streamProfileId", ""),
@@ -347,7 +375,7 @@ class BackendClient:
                 "frameNumber": int(payload.get("frameNumber", 0) or 0),
                 "crossedAt": payload.get(
                     "crossedAt",
-                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    datetime.now(timezone.utc).isoformat(),
                 ),
                 "snapshotUrl": payload.get("snapshotUrl", ""),
                 "source": payload.get("source", "vision_worker_round_count"),
@@ -375,7 +403,7 @@ class BackendClient:
 
         timestamp_utc = payload.get(
             "crossedAt",
-            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            datetime.now(timezone.utc).isoformat(),
         )
         track_id = int(payload.get("trackId", 0))
         object_class = payload.get("vehicleType", "car")
@@ -394,6 +422,7 @@ class BackendClient:
         )
 
         new_payload = {
+            "configurationVersion": getattr(self, "configuration_version", None),
             "sessionId": self.session_id,
             "timestampUtc": timestamp_utc,
             "trackId": track_id,
@@ -407,9 +436,6 @@ class BackendClient:
             "previousEventHash": self._previous_event_hash,
             "eventHash": event_hash,
         }
-
-        with self._hash_lock:
-            self._previous_event_hash = event_hash
 
         if self._enqueue_payload(
             self._count_queue,
@@ -444,7 +470,9 @@ class BackendClient:
 
     def get_health_snapshot(self) -> dict:
         with self._lock:
-            return dict(self._stats)
+            snapshot = dict(self._stats)
+        snapshot["countQueued"] = self._outbox.count()
+        return snapshot
 
     def _compute_hash(
         self,
@@ -474,15 +502,9 @@ class BackendClient:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _start_workers(self, count_worker_count: int, live_worker_count: int):
-        for index in range(count_worker_count):
-            worker = threading.Thread(
-                target=self._worker_loop,
-                args=(self._count_queue, "countInFlight", "countQueued"),
-                name=f"backend-count-worker-{index + 1}",
-                daemon=True,
-            )
-            worker.start()
-            self._count_workers.append(worker)
+        worker = threading.Thread(target=self._count_loop, name="backend-outbox-worker", daemon=True)
+        worker.start()
+        self._count_workers.append(worker)
 
         for index in range(live_worker_count):
             worker = threading.Thread(
@@ -494,14 +516,54 @@ class BackendClient:
             worker.start()
             self._live_workers.append(worker)
 
+    def deliver_pending_once(self):
+        job = self._outbox.claim()
+        if job is None:
+            return False
+        self._increment_stat("countInFlight")
+        try:
+            resp = self._session.post(job["url"], json=job["payload"], headers=self._default_headers, timeout=5)
+            accepted = 200 <= resp.status_code < 300 and resp.json().get("received") is True
+            permanent = resp.status_code in (400, 409, 410, 422)
+            self._outbox.complete(job, accepted=accepted, permanent=permanent, error=f"HTTP {resp.status_code}")
+            if accepted:
+                self._mark_success()
+            else:
+                self._mark_error(f"Evento pendente/rejeitado: HTTP {resp.status_code}")
+        except Exception as exc:
+            self._outbox.complete(job, error=type(exc).__name__)
+            self._mark_error(f"Envio pendente: {type(exc).__name__}")
+        finally:
+            self._decrement_stat("countInFlight")
+        return True
+
+    def _count_loop(self):
+        while not self._stop.is_set():
+            try:
+                if not self.deliver_pending_once():
+                    self._stop.wait(0.25)
+            except Exception:
+                logger.exception("[BACKEND] Falha ao acessar fila persistente")
+                self._stop.wait(1)
+
+    def close(self):
+        self._stop.set()
+        for worker in self._count_workers + self._live_workers:
+            worker.join(timeout=7)
+        self._session.close()
+        self._outbox.close()
+
     def _worker_loop(
         self,
         payload_queue: queue.Queue,
         inflight_key: str,
         queued_key: str,
     ):
-        while True:
-            job = payload_queue.get()
+        while not self._stop.is_set():
+            try:
+                job = payload_queue.get(timeout=0.25)
+            except queue.Empty:
+                continue
             self._decrement_stat(queued_key)
             self._increment_stat(inflight_key)
             try:
@@ -521,6 +583,12 @@ class BackendClient:
         replace_oldest: bool,
         target_url: str,
     ) -> bool:
+        if payload_queue is self._outbox:
+            event_hash = self._outbox.enqueue(target_url, payload)
+            if payload.get("sessionId"):
+                with self._hash_lock:
+                    self._previous_event_hash = event_hash
+            return True
         job = {
             "url": target_url,
             "payload": payload,

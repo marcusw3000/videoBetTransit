@@ -28,3 +28,19 @@ snapshots/
 artifacts/
 config.json
 vision-worker/config.json
+
+# Local credentials and generated runtime data
+.env
+.env.*
+!.env.*.example
+appsettings.Local.json
+**/publish_dev/
+*.log
+*.db.*
+*.sqlite3*
+logs/
+.auth-keys/
+artifacts/
+**/test-results/
+**/playwright-report/
+appsettings.Local.json.tmp

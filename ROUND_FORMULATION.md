@@ -1,5 +1,7 @@
 # Formulacao da Criacao de Rounds
 
+> Documento histórico. Para execução, consulte [PLANO_CONSOLIDADO.md](PLANO_CONSOLIDADO.md). As regras vigentes estão em [ROUND_RULES.md](ROUND_RULES.md); exemplos antigos de Turbo, duração e limites não descrevem o comportamento atual.
+
 ## Objetivo
 
 Definir como um `round` deve nascer, evoluir e encerrar no `videoBetTransit`, agora que a contagem oficial deve vir do backend.

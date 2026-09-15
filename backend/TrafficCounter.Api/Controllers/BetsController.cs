@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TrafficCounter.Api.Services;
 using TrafficCounter.Api.Contracts.Inbound;
@@ -6,6 +8,7 @@ namespace TrafficCounter.Api.Controllers;
 
 [ApiController]
 [Route("bets")]
+[Authorize(Roles = "player,admin")]
 public class BetsController : ControllerBase
 {
     private readonly BetService _betService;
@@ -20,7 +23,7 @@ public class BetsController : ControllerBase
     {
         try
         {
-            var bet = await _betService.PlaceBetAsync(dto);
+            var bet = await _betService.PlaceBetAsync(dto, User.FindFirstValue(ClaimTypes.NameIdentifier)!, User.FindFirstValue("operator")!);
             return Ok(bet);
         }
         catch (InvalidOperationException ex)
@@ -36,10 +39,17 @@ public class BetsController : ControllerBase
         }
     }
 
+    [HttpGet]
+    public async Task<IActionResult> List([FromQuery] string? status = null,
+        [FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _betService.ListAsync(User.FindFirstValue(ClaimTypes.NameIdentifier)!,
+            User.FindFirstValue("operator")!, status, from, to, page, pageSize));
+
     [HttpGet("{betId:guid}")]
     public async Task<IActionResult> GetById(Guid betId)
     {
-        var bet = await _betService.GetByIdAsync(betId);
+        var bet = await _betService.GetByIdAsync(betId, User.FindFirstValue(ClaimTypes.NameIdentifier)!, User.FindFirstValue("operator")!);
         if (bet is null)
             return NotFound(new { error = $"Bet '{betId}' nao encontrada." });
 

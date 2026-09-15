@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Hls from 'hls.js'
 
 const WEBRTC_BOOT_TIMEOUT_MS = 3500
 const CAMERA_TRANSITION_TIMEOUT_MS = 5000
@@ -13,10 +12,10 @@ function buildReloadedSrc(src, reloadToken) {
 }
 
 function getPreferredMode(webrtcSrc, primarySrc, fallbackSrc) {
-  if (fallbackSrc) return 'mjpeg'
   if (primarySrc) return 'hls'
   if (webrtcSrc) return 'webrtc'
-  return 'webrtc'
+  if (fallbackSrc) return 'mjpeg'
+  return 'hls'
 }
 
 export default function VideoPlayer({
@@ -46,7 +45,7 @@ export default function VideoPlayer({
   const [mode, setMode] = useState(() => getPreferredMode(webrtcSrc, src, fallbackSrc))
   const [hasError, setHasError] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
-  const [webrtcReady, setWebrtcReady] = useState(false)
+  const [, setWebrtcReady] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
 
   const reloadedWebRtcSrc = useMemo(() => buildReloadedSrc(webrtcSrc, reloadToken), [reloadToken, webrtcSrc])
@@ -85,8 +84,13 @@ export default function VideoPlayer({
     [title, transitionLabel],
   )
 
-  const notifyStatus = useCallback((status) => {
-    onStreamStatusChange?.(status)
+  const notifyStatus = useCallback((status, playbackMode = '') => {
+    const normalizedMode = String(playbackMode || '').trim().toLowerCase()
+    onStreamStatusChange?.({
+      status,
+      mode: normalizedMode,
+      isFallback: normalizedMode === 'mjpeg',
+    })
   }, [onStreamStatusChange])
 
   const notifyPlayableFrame = useCallback((playbackMode) => {
@@ -155,14 +159,14 @@ export default function VideoPlayer({
     if (!mjpegFallbackSrc) {
       finishCameraTransition()
       setHasError(true)
-      notifyStatus('error')
+      notifyStatus('error', mode)
       return
     }
 
     setMode('mjpeg')
     setHasError(false)
-    notifyStatus('fallback')
-  }, [clearHlsResources, finishCameraTransition, mjpegFallbackSrc, notifyStatus])
+    notifyStatus('connecting', 'mjpeg')
+  }, [clearHlsResources, finishCameraTransition, mjpegFallbackSrc, mode, notifyStatus])
 
   const switchToHls = useCallback(() => {
     if (!primarySrc) {
@@ -174,16 +178,17 @@ export default function VideoPlayer({
     setWebrtcReady(false)
     setMode('hls')
     setHasError(false)
-    notifyStatus('connecting')
+    notifyStatus('connecting', 'hls')
   }, [clearHlsResources, notifyStatus, primarySrc, switchToFallback])
 
   const handleReset = useCallback(() => {
+    const nextMode = getPreferredMode(webrtcSrc, src, fallbackSrc)
     setHasError(false)
     setWebrtcReady(false)
-    setMode(getPreferredMode(webrtcSrc, src, fallbackSrc))
+    setMode(nextMode)
     setReloadToken(Date.now())
     beginCameraTransition()
-    notifyStatus('reconnecting')
+    notifyStatus('reconnecting', nextMode)
   }, [beginCameraTransition, fallbackSrc, notifyStatus, src, webrtcSrc])
 
   useEffect(() => {
@@ -215,7 +220,7 @@ export default function VideoPlayer({
       && !transitioning
       && !previousExternalTransitioning
     ) {
-      beginCameraTransition()
+        beginCameraTransition()
       setReloadToken(Date.now())
       lastPlayableNotificationRef.current = ''
       lastPlayableSourceRef.current = ''
@@ -226,7 +231,7 @@ export default function VideoPlayer({
     if (!reloadedWebRtcSrc || mode !== 'webrtc') return undefined
 
     setWebrtcReady(false)
-    notifyStatus('connecting')
+    notifyStatus('connecting', 'webrtc')
 
     const handleMessage = (event) => {
       const payload = event.data
@@ -236,7 +241,7 @@ export default function VideoPlayer({
         setWebrtcReady(true)
         setHasError(false)
         finishCameraTransition()
-        notifyStatus('online')
+        notifyStatus('online', 'webrtc')
         return
       }
 
@@ -276,7 +281,7 @@ export default function VideoPlayer({
         setHasError(false)
         lastPlayableSourceRef.current = playbackSessionKey
         finishCameraTransition()
-        notifyStatus('online')
+        notifyStatus('online', 'hls')
         notifyPlayableFrame('hls')
       }
       const handleNativeError = () => switchToFallback()
@@ -291,9 +296,12 @@ export default function VideoPlayer({
       }
     }
 
+    let cancelled = false
+    void import('hls.js').then(({ default: Hls }) => {
+      if (cancelled) return
     if (!Hls.isSupported()) {
-      const fallbackTimerId = window.setTimeout(() => switchToFallback(), 0)
-      return () => window.clearTimeout(fallbackTimerId)
+      switchToFallback()
+      return
     }
 
     const hls = new Hls({
@@ -311,7 +319,10 @@ export default function VideoPlayer({
 
     const handleLoaded = () => {
       setHasError(false)
-      notifyStatus('online')
+      lastPlayableSourceRef.current = playbackSessionKey
+      finishCameraTransition()
+      notifyStatus('online', 'hls')
+      notifyPlayableFrame('hls')
       void video.play().catch(() => {})
     }
 
@@ -343,10 +354,13 @@ export default function VideoPlayer({
       }
     }, 2500)
 
+    }).catch(() => { if (!cancelled) switchToFallback() })
+
     return () => {
+      cancelled = true
       clearHlsResources()
     }
-  }, [clearHlsResources, mode, notifyPlayableFrame, notifyStatus, playbackSessionKey, primarySrc, switchToFallback])
+  }, [clearHlsResources, finishCameraTransition, mode, notifyPlayableFrame, notifyStatus, playbackSessionKey, primarySrc, switchToFallback])
 
   useEffect(() => () => {
     clearHlsResources()
@@ -357,7 +371,7 @@ export default function VideoPlayer({
     setHasError(false)
     lastPlayableSourceRef.current = playbackSessionKey
     finishCameraTransition()
-    notifyStatus('online')
+    notifyStatus('online', 'mjpeg')
     notifyPlayableFrame('mjpeg')
   }
 
@@ -368,7 +382,7 @@ export default function VideoPlayer({
   function handleFallbackError() {
     finishCameraTransition()
     setHasError(true)
-    notifyStatus('error')
+    notifyStatus('error', 'mjpeg')
   }
 
   const liveBadgeLabel = mode === 'webrtc' ? 'WEBRTC' : mode === 'hls' ? 'HLS' : 'MJPEG'
@@ -399,6 +413,7 @@ export default function VideoPlayer({
           <strong className="video-count-value">{countValue ?? 0}</strong>
         </div>
 
+        {/* eslint-disable-next-line no-constant-binary-expression */}
         {false && (
           <div className="video-transition-overlay" aria-live="polite">
             <div className="video-transition-chip">

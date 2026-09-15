@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -791,24 +793,34 @@ class WorkerApiContractTests(unittest.TestCase):
         self.assertIn("pending", payload["streamRotation"])
         self.assertIn("pendingEnforcement", payload["streamSchedule"])
 
+    def test_pipeline_control_rejects_missing_default_and_media_keys(self):
+        client = create_mjpeg_app().test_client()
+        for expected, provided in [("", ""), ("CHANGE_ME", "CHANGE_ME"), ("worker-only", "media-only"), ("worker-only", "")]:
+            with self.subTest(expected=expected, provided=provided):
+                with patch.dict(create_mjpeg_app.__globals__, {"backend_client_ref": SimpleNamespace(api_key=expected)}):
+                    response = client.post("/pipeline/stop", headers={"X-API-Key": provided})
+                self.assertEqual(401, response.status_code)
+
     def test_pipeline_start_accepts_stream_contract_without_starting_capture_inline(self):
         client = create_mjpeg_app().test_client()
 
-        response = client.post(
-            "/pipeline/start",
-            json={
-                "sessionId": "session-1",
-                "cameraId": "cam_contract",
-                "sourceUrl": "rtsp://camera-contract/live",
-                "rawStreamPath": "raw/cam_contract",
-                "processedStreamPath": "processed/cam_contract",
-                "direction": "left",
-                "countLine": {"x1": 1, "y1": 2, "x2": 3, "y2": 4},
-            },
-        )
+        with patch.dict(create_mjpeg_app.__globals__, {"backend_client_ref": SimpleNamespace(api_key="test-worker-key")}):
+            response = client.post(
+                "/pipeline/start",
+                headers={"X-API-Key": "test-worker-key"},
+                json={
+                    "sessionId": "session-1",
+                    "cameraId": "cam_contract",
+                    "sourceUrl": "rtsp://camera-contract/live",
+                    "rawStreamPath": "raw/cam_contract",
+                    "processedStreamPath": "processed/cam_contract",
+                    "direction": "left",
+                    "countLine": {"x1": 1, "y1": 2, "x2": 3, "y2": 4},
+                },
+            )
 
+            queued, should_stop, should_refresh = consume_pipeline_commands()
         self.assertEqual(200, response.status_code)
-        queued, should_stop, should_refresh = consume_pipeline_commands()
         self.assertFalse(should_stop)
         self.assertFalse(should_refresh)
         self.assertEqual("cam_contract", queued.camera_id)
@@ -847,6 +859,27 @@ class _FakeSession:
 
 
 class SupabaseSyncTests(unittest.TestCase):
+    def test_from_config_ignores_placeholder_credentials(self):
+        self.assertIsNone(
+            SupabaseStreamProfileSync.from_config(
+                {
+                    "supabase_url": "https://your_project_ref.supabase.co",
+                    "supabase_service_key": "CHANGE_ME",
+                }
+            )
+        )
+
+    def test_from_config_accepts_configured_credentials(self):
+        sync = SupabaseStreamProfileSync.from_config(
+            {
+                "supabase_url": "https://example.supabase.co",
+                "supabase_service_key": "service-role",
+            }
+        )
+
+        self.assertIsNotNone(sync)
+        self.assertEqual("https://example.supabase.co", sync.url)
+
     def test_schedule_rules_round_trip_uses_separate_table(self):
         sync = SupabaseStreamProfileSync(
             url="https://example.supabase.co",

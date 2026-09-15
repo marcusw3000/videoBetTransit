@@ -187,6 +187,7 @@ public class RoundsController : ControllerBase
         return Ok(timeline);
     }
 
+    [Microsoft.AspNetCore.Authorization.Authorize]
     [HttpPost("frontend-ready")]
     public async Task<IActionResult> FrontendReady([FromBody] FrontendReadyAckDto dto)
     {
@@ -232,6 +233,7 @@ public class RoundsController : ControllerBase
         CooldownMessage = nextRoundStartsAtUtc.HasValue ? "O proximo round ja vai comecar" : null,
         IsCooldown = nextRoundStartsAtUtc.HasValue,
         VoidReason = r.VoidReason,
+        VoidReasonCode = r.VoidReasonCode,
         CurrentCount = r.CurrentCount,
         FinalCount = r.FinalCount,
         Markets = r.Markets

@@ -2,6 +2,8 @@ namespace TrafficCounter.Api.Domain.Entities;
 
 public class CameraRoundState
 {
+    public Guid Revision { get; set; }
+    public string? OperationalConfigurationJson { get; set; }
     public string CameraId { get; set; } = "default";
     public string? ActiveStreamProfileId { get; set; }
     public string? LastSourceFingerprint { get; set; }

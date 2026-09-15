@@ -30,7 +30,7 @@ class _FakeSession:
 
 
 class BackendClientQueueTests(unittest.TestCase):
-    def test_count_event_drops_when_queue_is_full(self):
+    def test_count_events_persist_beyond_previous_queue_limit(self):
         client = BackendClient(
             "http://localhost:5000/api/rounds/count-events",
             "SUA_API_KEY",
@@ -39,15 +39,16 @@ class BackendClientQueueTests(unittest.TestCase):
             count_worker_count=1,
             live_worker_count=1,
             start_workers=False,
+            outbox_path=":memory:",
         )
 
         client.send_count_event({"trackId": "trk-1"})
         client.send_count_event({"trackId": "trk-2"})
 
         snapshot = client.get_health_snapshot()
-        self.assertEqual(1, snapshot["countQueued"])
-        self.assertEqual(1, snapshot["countDropped"])
-        queued = client._count_queue.get_nowait()
+        self.assertEqual(2, snapshot["countQueued"])
+        self.assertEqual(0, snapshot["countDropped"])
+        queued = client._outbox.claim()
         self.assertEqual("http://localhost:5000/internal/round-count-event", queued["url"])
         self.assertEqual("trk-1", queued["payload"]["trackId"])
 
@@ -60,6 +61,7 @@ class BackendClientQueueTests(unittest.TestCase):
             count_worker_count=1,
             live_worker_count=1,
             start_workers=False,
+            outbox_path=":memory:",
         )
 
         first_payload = {"frameId": "frame-1"}
@@ -79,6 +81,7 @@ class BackendClientRoundFetchTests(unittest.TestCase):
             "http://localhost:8080/internal/round-count-event",
             "SUA_API_KEY",
             start_workers=False,
+            outbox_path=":memory:",
         )
         fake_session = _FakeSession(_FakeResponse(payload={"roundId": "rnd_1"}))
         client._session = fake_session
@@ -93,6 +96,7 @@ class BackendClientRoundFetchTests(unittest.TestCase):
             "http://localhost:8080/internal/round-count-event",
             "SUA_API_KEY",
             start_workers=False,
+            outbox_path=":memory:",
         )
 
         class _RoundThenVoidSession(_FakeSession):

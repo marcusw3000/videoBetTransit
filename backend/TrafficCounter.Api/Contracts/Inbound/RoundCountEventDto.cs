@@ -5,6 +5,8 @@ namespace TrafficCounter.Api.Contracts.Inbound;
 /// </summary>
 public class RoundCountEventDto
 {
+    public string? ConfigurationVersion { get; set; }
+
     public string CameraId { get; set; } = string.Empty;
     public string? RoundId { get; set; }
     public string? StreamProfileId { get; set; }

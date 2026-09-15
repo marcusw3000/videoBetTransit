@@ -1,9 +1,4 @@
-import axios from 'axios'
-import { API_BASE_URL } from '../config'
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-})
+import { api } from './apiClient'
 
 function normalizeBet(bet) {
   if (!bet) return null
@@ -42,4 +37,9 @@ function normalizeBet(bet) {
 export async function placeBet(payload) {
   const { data } = await api.post('/bets', payload)
   return normalizeBet(data)
+}
+
+export async function listBets(params, signal) {
+  const { data } = await api.get('/bets', { params, signal })
+  return { ...data, items: data.items.map(normalizeBet) }
 }

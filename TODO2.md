@@ -1,5 +1,7 @@
 # TODO2.md - Integracao como game provider regulado
 
+> Documento histórico. Para execução, consulte [PLANO_CONSOLIDADO.md](PLANO_CONSOLIDADO.md). As regras vigentes estão em [ROUND_RULES.md](ROUND_RULES.md); exemplos antigos de Turbo, duração e limites não descrevem o comportamento atual.
+
 Planejamento estrategico para integrar o produto dentro de uma operadora regulada, partindo do estado estavel `9230acf`.
 
 Premissa:

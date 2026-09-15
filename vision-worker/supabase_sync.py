@@ -35,7 +35,13 @@ class SupabaseStreamProfileSync:
             or cfg.get("supabase_service_key")
             or ""
         ).strip()
-        if not url or not service_key:
+        placeholder_tokens = ("YOUR_PROJECT", "CHANGE_ME")
+        if (
+            not url
+            or not service_key
+            or any(token in url.upper() for token in placeholder_tokens)
+            or any(token in service_key.upper() for token in placeholder_tokens)
+        ):
             return None
 
         return cls(

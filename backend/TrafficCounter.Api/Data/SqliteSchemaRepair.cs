@@ -263,6 +263,7 @@ internal static class SqliteSchemaRepair
 
         var productVersion = await GetLatestProductVersionAsync(connection, transaction, cancellationToken) ?? "8.0.0";
         await EnsureMigrationRowAsync(connection, transaction, MigrationRoundOperationalFields, productVersion, cancellationToken);
+        await EnsureMigrationRowAsync(connection, transaction, "20260424020000_AddCrossingVerificationFields", productVersion, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -288,8 +289,6 @@ internal static class SqliteSchemaRepair
             "ActivationRequestedAt",
         };
 
-        if (requiredColumns.All(existingColumns.Contains))
-            return;
 
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 

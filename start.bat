@@ -108,6 +108,28 @@ if errorlevel 1 (
 echo [OK] Dependencias Python prontas.
 echo.
 
+echo Verificando configuracao local segura...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%D%scripts\Test-LocalInstallation.ps1" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Configuracao local ausente ou incompleta.
+    echo [INFO] Na primeira execucao, defina a senha da conta admin.
+    echo [INFO] A senha deve ter pelo menos 12 caracteres e nao sera exibida.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%D%scripts\configure-local.ps1"
+    if errorlevel 1 (
+        echo [ERRO] Nao foi possivel criar a configuracao local.
+        echo Execute manualmente: powershell -ExecutionPolicy Bypass -File scripts\configure-local.ps1
+        pause & exit /b 1
+    )
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%D%scripts\Test-LocalInstallation.ps1"
+    if errorlevel 1 (
+        echo [ERRO] A configuracao local foi criada, mas nao passou na validacao.
+        pause & exit /b 1
+    )
+)
+echo [OK] Configuracao local pronta.
+echo.
+
 echo Garantindo MediaMTX...
 powershell -NoProfile -Command "if(Get-NetTCPConnection -LocalPort 9997 -State Listen -ErrorAction SilentlyContinue){ exit 0 } else { exit 1 }"
 if errorlevel 1 (

@@ -2,6 +2,8 @@ namespace TrafficCounter.Api.Contracts.Inbound;
 
 public class CrossingEventInboundDto
 {
+    public string? ConfigurationVersion { get; set; }
+
     public string SessionId { get; set; } = string.Empty;
     public DateTime TimestampUtc { get; set; }
     public long TrackId { get; set; }

@@ -1,10 +1,6 @@
-import axios from 'axios'
-import { API_BASE_URL } from '../config'
+import { api } from './apiClient'
 import { normalizeRoundContract } from '../utils/roundContract'
 
-const api = axios.create({
-  baseURL: API_BASE_URL,
-})
 
 const MAX_RETRIES = 10
 const RETRY_DELAY_MS = 3000

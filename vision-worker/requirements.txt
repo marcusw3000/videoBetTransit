@@ -6,3 +6,5 @@ lap>=0.5.12
 flask
 waitress
 yt-dlp
+
+tzdata

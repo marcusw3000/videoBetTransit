@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TrafficCounter.Api.Contracts.Requests;
 using TrafficCounter.Api.Domain.Enums;
@@ -8,20 +9,23 @@ namespace TrafficCounter.Api.Controllers;
 
 [ApiController]
 [Route("streams")]
+[Authorize(Roles = "admin")]
 public class StreamsController : ControllerBase
 {
     private readonly StreamSessionService _sessionService;
     private readonly PipelineOrchestratorService _orchestrator;
     private readonly UrlValidationService _urlValidation;
+    private readonly RoundService _rounds;
 
     public StreamsController(
         StreamSessionService sessionService,
         PipelineOrchestratorService orchestrator,
-        UrlValidationService urlValidation)
+        UrlValidationService urlValidation, RoundService rounds)
     {
         _sessionService = sessionService;
         _orchestrator = orchestrator;
         _urlValidation = urlValidation;
+        _rounds = rounds;
     }
 
     [HttpGet]
@@ -34,7 +38,6 @@ public class StreamsController : ControllerBase
     }
 
     [HttpPost]
-    [RequireApiKey]
     public async Task<IActionResult> CreateStream([FromBody] CreateStreamRequest request)
     {
         var validation = await _urlValidation.ValidateAsync(request.SourceUrl, request.SourceProtocol);
@@ -60,11 +63,13 @@ public class StreamsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/start")]
-    [RequireApiKey]
     public async Task<IActionResult> StartSession(Guid id)
     {
         var session = await _sessionService.GetAsync(id);
         if (session is null) return NotFound();
+
+        try { await _rounds.EnsureCameraUnlockedAsync(StreamPathNaming.ExtractCameraId(session)); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
 
         // Must be in Ready state; if still Created, auto-transition through validation
         if (session.Status == SessionStatus.Created.ToString())
@@ -86,7 +91,6 @@ public class StreamsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/stop")]
-    [RequireApiKey]
     public async Task<IActionResult> StopSession(Guid id)
     {
         var session = await _sessionService.GetAsync(id);

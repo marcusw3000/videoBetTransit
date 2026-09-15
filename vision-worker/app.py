@@ -1,3 +1,14 @@
+import hmac
+from worker_defaults import (DEFAULT_ROI, DEFAULT_LINE, DEFAULT_STREAM_ROTATION, DEFAULT_STREAM_SCHEDULE, DEFAULT_SECONDARY_VERIFICATION_ENABLED, DEFAULT_SECONDARY_VERIFICATION_BAND_PX, SECONDARY_VERIFICATION_MIN_BAND_FRAMES, SECONDARY_VERIFICATION_MIN_PROGRESS_PX, STREAM_ROTATION_SAFE_STATUSES, STREAM_ROTATION_DEFER_STATUSES)
+from runtime_stats import (RuntimeStats)
+from stream_capture import (normalize_ffmpeg_capture_options, StreamCapture)
+from video_publisher import (RtspFramePublisher)
+from stream_schedule import (normalize_schedule_timezone, normalize_outside_window_behavior, normalize_schedule_time_text, schedule_time_to_minutes, make_stream_schedule_rule_id, normalize_allowed_profile_ids, expand_schedule_rule_windows, schedule_windows_overlap, validate_stream_schedule_rules, build_stream_schedule_rule, normalize_stream_schedule_config, schedule_rule_is_active, format_stream_schedule_window, resolve_stream_schedule_state, is_profile_allowed_by_schedule, choose_schedule_enforcement_profile, format_stream_schedule_rule_row)
+from worker_config import (normalize_roi_config, normalize_line_config, normalize_count_direction, normalize_secondary_verification_enabled, normalize_secondary_verification_band_px, normalize_stream_rotation_config, get_round_status, get_round_id, is_round_safe_for_stream_rotation, should_defer_stream_rotation, select_random_stream_profile, should_apply_pending_stream_rotation, choose_stream_rotation_target, ensure_stream_rotation_profile_state, count_settled_round_for_stream_rotation, stream_rotation_target_reached, format_stream_rotation_progress, shorten_text, guess_stream_profile_name, format_stream_profile_label, format_stream_profile_table_row, make_stream_profile_id, build_stream_profile, sync_config_with_selected_profile, normalize_config, load_config, save_config, bootstrap_stream_profiles_from_supabase, sync_stream_profiles_to_supabase, get_selected_stream_profile, StreamProfileStore, StreamScheduleStore, is_blob_url, validate_stream_url)
+from count_geometry import (should_process_frame, inside_roi, crossed_horizontal_segment, crossed_vertical_segment, count_line_is_horizontal, line_geometry_metrics, point_inside_line_band, distance_point_to_segment, segment_orientation, point_on_segment, segments_intersect, segment_distance, bbox_distance_to_line_segment, bbox_touches_line_band, movement_delta_for_direction, movement_matches_direction, should_count_track_fallback, should_count_track, count_direction_display_name, anchor_point, clamp, build_class_names, is_countable_vehicle, bbox_area)
+from frame_overlay import (annotate_frame)
+from calibration_editor import (ConfigEditor)
+
 import json
 import logging
 import math
@@ -82,182 +93,6 @@ def release_single_instance_lock():
         pass
     finally:
         single_instance_socket = None
-
-
-class RuntimeStats:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._started_at = time.time()
-        self._captured_frames = 0
-        self._frames_processed = 0
-        self._published_frames = 0
-        self._last_capture_at = None
-        self._last_capture_frame_at = None
-        self._last_frame_at = None
-        self._last_publish_at = None
-        self._capture_fps_instant = 0.0
-        self._capture_fps_average = 0.0
-        self._fps_instant = 0.0
-        self._fps_average = 0.0
-        self._publish_fps_instant = 0.0
-        self._publish_fps_average = 0.0
-        self._last_inference_ms = 0.0
-        self._avg_inference_ms = 0.0
-        self._last_jpeg_encode_ms = 0.0
-        self._avg_jpeg_encode_ms = 0.0
-        self._last_pipeline_ms = 0.0
-        self._avg_pipeline_ms = 0.0
-        self._mjpeg_clients = 0
-        self._stream_connected = False
-        self._stream_failures = 0
-        self._last_stream_error_at = None
-        self._total_count = 0
-        self._publisher_healthy = False
-        self._publisher_restart_count = 0
-        self._active_transport = "mjpeg"
-
-    def record_capture(self, captured_at: float):
-        with self._lock:
-            self._captured_frames += 1
-            if self._last_capture_frame_at is not None:
-                elapsed = captured_at - self._last_capture_frame_at
-                if elapsed > 0:
-                    self._capture_fps_instant = 1.0 / elapsed
-            total_elapsed = captured_at - self._started_at
-            if total_elapsed > 0:
-                self._capture_fps_average = self._captured_frames / total_elapsed
-            self._last_capture_frame_at = captured_at
-            self._last_capture_at = captured_at
-
-    def record_processed_frame(self, total_count: int):
-        now_ts = time.time()
-        with self._lock:
-            self._frames_processed += 1
-            self._total_count = total_count
-            if self._last_frame_at is not None:
-                elapsed = now_ts - self._last_frame_at
-                if elapsed > 0:
-                    self._fps_instant = 1.0 / elapsed
-            total_elapsed = now_ts - self._started_at
-            if total_elapsed > 0:
-                self._fps_average = self._frames_processed / total_elapsed
-            self._last_frame_at = now_ts
-
-    def record_published_frame(self, published_at: float | None = None):
-        now_ts = published_at or time.time()
-        with self._lock:
-            self._published_frames += 1
-            if self._last_publish_at is not None:
-                elapsed = now_ts - self._last_publish_at
-                if elapsed > 0:
-                    self._publish_fps_instant = 1.0 / elapsed
-            total_elapsed = now_ts - self._started_at
-            if total_elapsed > 0:
-                self._publish_fps_average = self._published_frames / total_elapsed
-            self._last_publish_at = now_ts
-
-    def record_inference_ms(self, duration_ms: float):
-        with self._lock:
-            self._last_inference_ms = duration_ms
-            n = self._frames_processed or 1
-            self._avg_inference_ms += (duration_ms - self._avg_inference_ms) / n
-
-    def record_jpeg_encode_ms(self, duration_ms: float):
-        with self._lock:
-            self._last_jpeg_encode_ms = duration_ms
-            n = self._frames_processed or 1
-            self._avg_jpeg_encode_ms += (duration_ms - self._avg_jpeg_encode_ms) / n
-
-    def record_pipeline_ms(self, duration_ms: float):
-        with self._lock:
-            self._last_pipeline_ms = duration_ms
-            n = self._frames_processed or 1
-            self._avg_pipeline_ms += (duration_ms - self._avg_pipeline_ms) / n
-
-    def set_stream_status(self, connected: bool, failures: int):
-        with self._lock:
-            self._stream_connected = connected
-            self._stream_failures = failures
-            if not connected:
-                self._last_stream_error_at = time.time()
-
-    def add_mjpeg_client(self):
-        with self._lock:
-            self._mjpeg_clients += 1
-
-    def remove_mjpeg_client(self):
-        with self._lock:
-            self._mjpeg_clients = max(0, self._mjpeg_clients - 1)
-
-    def set_publisher_status(
-        self,
-        healthy: bool,
-        *,
-        restart_count: int | None = None,
-        active_transport: str | None = None,
-    ):
-        with self._lock:
-            self._publisher_healthy = healthy
-            if restart_count is not None:
-                self._publisher_restart_count = max(0, int(restart_count))
-            if active_transport:
-                self._active_transport = str(active_transport)
-
-    def reset_pipeline_readiness(self):
-        with self._lock:
-            self._last_capture_at = None
-            self._last_capture_frame_at = None
-            self._last_frame_at = None
-            self._last_publish_at = None
-            self._stream_connected = False
-            self._stream_failures = 0
-            self._publisher_healthy = False
-            self._active_transport = "mjpeg"
-
-    def snapshot(self, backend_health: dict | None = None) -> dict:
-        now_ts = time.time()
-        with self._lock:
-            raw_frame_age_ms = (
-                round((now_ts - self._last_capture_at) * 1000, 2)
-                if self._last_capture_at is not None
-                else None
-            )
-            annotated_frame_age_ms = (
-                round((now_ts - self._last_frame_at) * 1000, 2)
-                if self._last_frame_at is not None
-                else None
-            )
-            return {
-                "ok": self._stream_connected,
-                "captureFps": round(self._capture_fps_average, 2),
-                "captureFpsInstant": round(self._capture_fps_instant, 2),
-                "inferenceFps": round(self._fps_average, 2),
-                "framesProcessed": self._frames_processed,
-                "fpsInstant": round(self._fps_instant, 2),
-                "fpsAverage": round(self._fps_average, 2),
-                "publishFps": round(self._publish_fps_average, 2),
-                "publishFpsInstant": round(self._publish_fps_instant, 2),
-                "lastInferenceMs": round(self._last_inference_ms, 2),
-                "avgInferenceMs": round(self._avg_inference_ms, 2),
-                "lastJpegEncodeMs": round(self._last_jpeg_encode_ms, 2),
-                "avgJpegEncodeMs": round(self._avg_jpeg_encode_ms, 2),
-                "lastPipelineMs": round(self._last_pipeline_ms, 2),
-                "avgPipelineMs": round(self._avg_pipeline_ms, 2),
-                "mjpegClients": self._mjpeg_clients,
-                "streamConnected": self._stream_connected,
-                "streamFailures": self._stream_failures,
-                "lastCaptureAt": self._last_capture_at,
-                "lastFrameAt": self._last_frame_at,
-                "lastPublishAt": self._last_publish_at,
-                "lastStreamErrorAt": self._last_stream_error_at,
-                "totalCount": self._total_count,
-                "rawFrameAgeMs": raw_frame_age_ms,
-                "annotatedFrameAgeMs": annotated_frame_age_ms,
-                "publisherHealthy": self._publisher_healthy,
-                "publisherRestartCount": self._publisher_restart_count,
-                "activeTransport": "mjpeg" if self._mjpeg_clients > 0 else self._active_transport,
-                "backend": backend_health or {},
-            }
 
 
 runtime_stats = RuntimeStats()
@@ -413,165 +248,6 @@ class PipelineStartRequest:
     processed_stream_path: str = ""
     direction: str = "any"
     count_line: dict | None = None
-
-
-class RtspFramePublisher:
-    MAX_RESTART_BACKOFF_SECONDS = 5.0
-
-    def __init__(
-        self,
-        *,
-        rtsp_url: str,
-        fps: float,
-        ffmpeg_bin: str = "ffmpeg",
-        stats: RuntimeStats | None = None,
-    ):
-        self.rtsp_url = rtsp_url
-        self.fps = max(1.0, float(fps))
-        self.ffmpeg_bin = ffmpeg_bin or "ffmpeg"
-        self.stats = stats
-        self._process: subprocess.Popen | None = None
-        self._shape = None
-        self._restart_count = 0
-        self._lock = threading.Lock()
-        self._next_restart_at = 0.0
-        self._restart_backoff_seconds = 0.5
-
-    @property
-    def restart_count(self) -> int:
-        with self._lock:
-            return self._restart_count
-
-    def _build_command(self, frame_shape) -> list[str]:
-        height, width = frame_shape[:2]
-        gop = max(1, int(round(self.fps)))
-        return [
-            self.ffmpeg_bin,
-            "-loglevel", "warning",
-            "-fflags", "nobuffer",
-            "-f", "rawvideo",
-            "-pix_fmt", "bgr24",
-            "-s", f"{width}x{height}",
-            "-r", f"{self.fps:.02f}",
-            "-i", "-",
-            "-an",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
-            "-pix_fmt", "yuv420p",
-            "-bf", "0",
-            "-g", str(gop),
-            "-keyint_min", str(gop),
-            "-rtsp_transport", "tcp",
-            "-f", "rtsp",
-            self.rtsp_url,
-        ]
-
-    def _set_stats(self, healthy: bool):
-        if self.stats is not None:
-            self.stats.set_publisher_status(
-                healthy,
-                restart_count=self.restart_count,
-                active_transport="webrtc" if healthy else "mjpeg",
-            )
-
-    def _start_process(self, frame_shape):
-        self.stop()
-        command = self._build_command(frame_shape)
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        logger.info("Iniciando publisher RTSP: %s", self.rtsp_url)
-        try:
-            self._process = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=creation_flags,
-            )
-            self._shape = tuple(frame_shape[:2])
-            self._next_restart_at = 0.0
-            self._restart_backoff_seconds = 0.5
-            self._set_stats(True)
-            return True
-        except Exception as exc:
-            logger.warning("Falha ao iniciar publisher RTSP: %s", exc)
-            self._process = None
-            self._shape = None
-            self._set_stats(False)
-            return False
-
-    def publish(self, frame):
-        if frame is None:
-            return False
-
-        now_ts = time.time()
-        frame_shape = tuple(frame.shape[:2])
-        process = self._process
-        process_exited = process is not None and process.poll() is not None
-        if process_exited:
-            logger.warning(
-                "Publisher RTSP saiu inesperadamente (code=%s). Novo restart em %.1fs.",
-                process.poll(),
-                max(0.0, self._next_restart_at - now_ts) if self._next_restart_at > now_ts else 0.0,
-            )
-        if process is None or self._shape != frame_shape or process_exited:
-            if self._next_restart_at > now_ts:
-                self._set_stats(False)
-                return False
-            with self._lock:
-                self._restart_count += 1
-            if not self._start_process(frame.shape):
-                self._next_restart_at = time.time() + self._restart_backoff_seconds
-                self._restart_backoff_seconds = min(
-                    self.MAX_RESTART_BACKOFF_SECONDS,
-                    max(0.5, self._restart_backoff_seconds * 2.0),
-                )
-                return False
-            process = self._process
-
-        try:
-            assert process is not None and process.stdin is not None
-            process.stdin.write(frame.tobytes())
-            process.stdin.flush()
-            if self.stats is not None:
-                self.stats.record_published_frame()
-            self._set_stats(True)
-            return True
-        except Exception as exc:
-            logger.warning("Falha ao publicar frame no RTSP: %s", exc)
-            self._set_stats(False)
-            self._next_restart_at = time.time() + self._restart_backoff_seconds
-            self._restart_backoff_seconds = min(
-                self.MAX_RESTART_BACKOFF_SECONDS,
-                max(0.5, self._restart_backoff_seconds * 2.0),
-            )
-            self.stop()
-            return False
-
-    def stop(self):
-        process = self._process
-        self._process = None
-        self._shape = None
-        if process is None:
-            self._set_stats(False)
-            return
-
-        try:
-            if process.stdin is not None:
-                process.stdin.close()
-        except Exception:
-            pass
-
-        try:
-            process.terminate()
-            process.wait(timeout=3)
-        except Exception:
-            try:
-                process.kill()
-            except Exception:
-                pass
-        finally:
-            self._set_stats(False)
 
 
 class PipelineRuntime:
@@ -956,6 +632,15 @@ def is_mjpeg_request_authorized() -> bool:
 def create_mjpeg_app() -> Flask:
     app = Flask(__name__)
 
+    @app.before_request
+    def authorize_control():
+        if request.path.startswith("/pipeline/") and request.method == "POST":
+            expected = backend_client_ref.api_key if backend_client_ref else ""
+            provided = request.headers.get("X-API-Key", "")
+            if not expected or expected == "CHANGE_ME" or not hmac.compare_digest(expected, provided):
+                return jsonify({"message": "Invalid or missing worker key."}), 401
+        return None
+
     @app.after_request
     def add_cors_headers(response):
         response.headers["Access-Control-Allow-Origin"] = "*"
@@ -1178,7 +863,7 @@ class AsyncSnapshotWriter:
 
 
 def cleanup_runtime():
-    global active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref, active_snapshot_writer_ref
+    global active_stream_ref, active_mjpeg_server_ref, active_control_panel_ref, active_snapshot_writer_ref, backend_client_ref
 
     pipeline_runtime.stop()
 
@@ -1198,6 +883,10 @@ def cleanup_runtime():
         active_snapshot_writer_ref.stop()
         active_snapshot_writer_ref = None
 
+    if backend_client_ref is not None:
+        backend_client_ref.close()
+        backend_client_ref = None
+
     cv2.destroyAllWindows()
     release_single_instance_lock()
 
@@ -1207,1245 +896,6 @@ atexit.register(cleanup_runtime)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-DEFAULT_ROI = {"x": 0, "y": 0, "w": 0, "h": 0}
-DEFAULT_LINE = {"x1": 0, "y1": 0, "x2": 0, "y2": 0}
-DEFAULT_STREAM_ROTATION = {
-    "enabled": False,
-    "mode": "round_boundary",
-    "strategy": "uniform_excluding_current",
-    "min_rounds_per_stream": 6,
-    "max_rounds_per_stream": 11,
-    "current_stream_profile_id": "",
-    "rounds_on_current_stream": 0,
-    "target_rounds_for_current_stream": 0,
-    "last_counted_round_id": "",
-}
-DEFAULT_STREAM_SCHEDULE = {
-    "timezone": "America/Sao_Paulo",
-    "outside_window_behavior": "allow_all",
-    "rules": [],
-}
-DEFAULT_SECONDARY_VERIFICATION_ENABLED = False
-DEFAULT_SECONDARY_VERIFICATION_BAND_PX = 18
-SECONDARY_VERIFICATION_MIN_BAND_FRAMES = 2
-SECONDARY_VERIFICATION_MIN_PROGRESS_PX = 6
-STREAM_ROTATION_SAFE_STATUSES = {"settling", "settled", "void"}
-STREAM_ROTATION_DEFER_STATUSES = {"open", "closing"}
-
-
-def normalize_roi_config(value, fallback: dict | None = None) -> dict:
-    source = value if isinstance(value, dict) else {}
-    base = fallback if isinstance(fallback, dict) else DEFAULT_ROI
-    return {
-        "x": int(source.get("x", base.get("x", 0)) or 0),
-        "y": int(source.get("y", base.get("y", 0)) or 0),
-        "w": int(source.get("w", base.get("w", 0)) or 0),
-        "h": int(source.get("h", base.get("h", 0)) or 0),
-    }
-
-
-def normalize_line_config(value, fallback: dict | None = None) -> dict:
-    source = value if isinstance(value, dict) else {}
-    base = fallback if isinstance(fallback, dict) else DEFAULT_LINE
-    return {
-        "x1": int(source.get("x1", base.get("x1", 0)) or 0),
-        "y1": int(source.get("y1", base.get("y1", 0)) or 0),
-        "x2": int(source.get("x2", base.get("x2", 0)) or 0),
-        "y2": int(source.get("y2", base.get("y2", 0)) or 0),
-    }
-
-
-def normalize_count_direction(value) -> str:
-    direction = str(value or "any").strip().lower()
-    aliases = {
-        "down_to_up": "up",
-        "up_to_down": "down",
-        "left_to_right": "right",
-        "right_to_left": "left",
-        "qualquer direcao": "any",
-        "cima para baixo": "down",
-        "baixo para cima": "up",
-        "esquerda para direita": "right",
-        "direita para esquerda": "left",
-    }
-    direction = aliases.get(direction, direction)
-    if direction in {"up", "down", "left", "right", "any"}:
-        return direction
-    return "any"
-
-
-def normalize_secondary_verification_enabled(value) -> bool:
-    if isinstance(value, str):
-        return str(value).strip().lower() in {"1", "true", "yes", "on", "sim"}
-    return bool(value)
-
-
-def normalize_secondary_verification_band_px(value, fallback: int | None = None) -> int:
-    base = (
-        DEFAULT_SECONDARY_VERIFICATION_BAND_PX
-        if fallback is None
-        else int(fallback or DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
-    )
-    try:
-        band_px = int(value if value is not None else base)
-    except (TypeError, ValueError):
-        band_px = base
-    return max(4, min(120, band_px))
-
-
-def normalize_schedule_timezone(value) -> str:
-    timezone_name = str(value or DEFAULT_STREAM_SCHEDULE["timezone"]).strip() or DEFAULT_STREAM_SCHEDULE["timezone"]
-    try:
-        ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError:
-        return DEFAULT_STREAM_SCHEDULE["timezone"]
-    return timezone_name
-
-
-def normalize_outside_window_behavior(value) -> str:
-    normalized = str(value or DEFAULT_STREAM_SCHEDULE["outside_window_behavior"]).strip().lower()
-    if normalized in {"allow_all", "restrict_configured"}:
-        return normalized
-    return DEFAULT_STREAM_SCHEDULE["outside_window_behavior"]
-
-
-def normalize_schedule_time_text(value: str) -> str:
-    text = str(value or "").strip()
-    try:
-        parsed = datetime.strptime(text, "%H:%M")
-    except ValueError as exc:
-        raise ValueError("Horario da agenda deve estar no formato HH:MM.") from exc
-    return parsed.strftime("%H:%M")
-
-
-def schedule_time_to_minutes(value: str) -> int:
-    normalized = normalize_schedule_time_text(value)
-    hours, minutes = normalized.split(":")
-    return int(hours) * 60 + int(minutes)
-
-
-def make_stream_schedule_rule_id(existing_ids: set[str]) -> str:
-    base = f"schedule_{int(time.time() * 1000)}"
-    candidate = base
-    suffix = 1
-    while candidate in existing_ids:
-        suffix += 1
-        candidate = f"{base}_{suffix}"
-    return candidate
-
-
-def normalize_allowed_profile_ids(value) -> list[str]:
-    normalized: list[str] = []
-    for raw_value in value if isinstance(value, list) else []:
-        profile_id = str(raw_value or "").strip()
-        if profile_id and profile_id not in normalized:
-            normalized.append(profile_id)
-    return normalized
-
-
-def expand_schedule_rule_windows(start_minutes: int, end_minutes: int) -> list[tuple[int, int]]:
-    if start_minutes == end_minutes:
-        raise ValueError("A agenda por hora nao pode ter duracao zero.")
-    if end_minutes > start_minutes:
-        return [(start_minutes, end_minutes)]
-    return [
-        (start_minutes, 24 * 60),
-        (0, end_minutes),
-    ]
-
-
-def schedule_windows_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
-    return left[0] < right[1] and right[0] < left[1]
-
-
-def validate_stream_schedule_rules(rules: list[dict], profile_ids: set[str]) -> None:
-    expanded_rules: list[tuple[str, str, tuple[int, int], set[str]]] = []
-    for rule in rules:
-        rule_id = str(rule.get("id") or "").strip()
-        rule_name = str(rule.get("name") or "").strip() or rule_id or "agenda"
-        allowed_ids = normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))
-        if not allowed_ids:
-            raise ValueError(f"A agenda '{rule_name}' precisa de ao menos uma stream permitida.")
-        missing_ids = [profile_id for profile_id in allowed_ids if profile_id not in profile_ids]
-        if missing_ids:
-            raise ValueError(f"A agenda '{rule_name}' referencia streams inexistentes na esteira.")
-        if not bool(rule.get("enabled", True)):
-            continue
-
-        start_minutes = schedule_time_to_minutes(rule.get("start_time"))
-        end_minutes = schedule_time_to_minutes(rule.get("end_time"))
-        for window in expand_schedule_rule_windows(start_minutes, end_minutes):
-            expanded_rules.append((rule_id, rule_name, window, set(allowed_ids)))
-
-    for index, (rule_id, rule_name, window, allowed_ids) in enumerate(expanded_rules):
-        for other_rule_id, other_rule_name, other_window, other_allowed_ids in expanded_rules[index + 1:]:
-            if rule_id == other_rule_id:
-                continue
-            if allowed_ids.isdisjoint(other_allowed_ids):
-                continue
-            if schedule_windows_overlap(window, other_window):
-                raise ValueError(
-                    f"As agendas '{rule_name}' e '{other_rule_name}' nao podem se sobrepor para a mesma camera."
-                )
-
-
-def build_stream_schedule_rule(
-    source: dict | None,
-    profile_ids: set[str],
-    *,
-    existing_ids: set[str] | None = None,
-) -> dict:
-    source = source if isinstance(source, dict) else {}
-    known_ids = existing_ids if isinstance(existing_ids, set) else set()
-    rule_id = str(source.get("id") or "").strip()
-    if not rule_id or rule_id in known_ids:
-        rule_id = make_stream_schedule_rule_id(known_ids)
-    start_time = normalize_schedule_time_text(source.get("start_time") or source.get("startTime") or "")
-    end_time = normalize_schedule_time_text(source.get("end_time") or source.get("endTime") or "")
-    rule = {
-        "id": rule_id,
-        "name": str(source.get("name") or "").strip() or f"Agenda {start_time}-{end_time}",
-        "enabled": bool(source.get("enabled", True)),
-        "start_time": start_time,
-        "end_time": end_time,
-        "allowed_profile_ids": normalize_allowed_profile_ids(source.get("allowed_profile_ids")),
-    }
-    validate_stream_schedule_rules([rule], profile_ids)
-    return rule
-
-
-def normalize_stream_schedule_config(value, profiles: list[dict]) -> dict:
-    source = value if isinstance(value, dict) else {}
-    profile_ids = {
-        str(profile.get("id") or "").strip()
-        for profile in profiles
-        if str(profile.get("id") or "").strip()
-    }
-    rules: list[dict] = []
-    existing_ids: set[str] = set()
-
-    for raw_rule in source.get("rules", []) if isinstance(source.get("rules"), list) else []:
-        rule = build_stream_schedule_rule(raw_rule, profile_ids, existing_ids=existing_ids)
-        existing_ids.add(rule["id"])
-        rules.append(rule)
-
-    validate_stream_schedule_rules(rules, profile_ids)
-    rules.sort(key=lambda item: (schedule_time_to_minutes(item["start_time"]), str(item.get("id") or "")))
-    return {
-        "timezone": normalize_schedule_timezone(source.get("timezone")),
-        "outside_window_behavior": normalize_outside_window_behavior(source.get("outside_window_behavior")),
-        "rules": rules,
-    }
-
-
-def schedule_rule_is_active(rule: dict, current_minutes: int) -> bool:
-    start_minutes = schedule_time_to_minutes(rule.get("start_time"))
-    end_minutes = schedule_time_to_minutes(rule.get("end_time"))
-    if end_minutes > start_minutes:
-        return start_minutes <= current_minutes < end_minutes
-    return current_minutes >= start_minutes or current_minutes < end_minutes
-
-
-def format_stream_schedule_window(rule: dict | None) -> str:
-    if not isinstance(rule, dict):
-        return ""
-    start_time = str(rule.get("start_time") or "").strip()
-    end_time = str(rule.get("end_time") or "").strip()
-    if not start_time or not end_time:
-        return ""
-    return f"{start_time}-{end_time}"
-
-
-def resolve_stream_schedule_state(
-    schedule: dict | None,
-    profiles: list[dict],
-    *,
-    now: datetime | None = None,
-) -> dict:
-    normalized = normalize_stream_schedule_config(schedule, profiles)
-    timezone_name = normalized["timezone"]
-    tzinfo = ZoneInfo(timezone_name)
-    current_time = now.astimezone(tzinfo) if isinstance(now, datetime) else datetime.now(tzinfo)
-    current_minutes = current_time.hour * 60 + current_time.minute
-    profiles_by_id = {
-        str(profile.get("id") or "").strip(): dict(profile)
-        for profile in profiles
-        if str(profile.get("id") or "").strip()
-    }
-
-    active_rules = [
-        dict(rule)
-        for rule in normalized["rules"]
-        if bool(rule.get("enabled", True)) and schedule_rule_is_active(rule, current_minutes)
-    ]
-    has_enabled_rules = any(bool(rule.get("enabled", True)) for rule in normalized["rules"])
-    outside_window_behavior = normalize_outside_window_behavior(normalized.get("outside_window_behavior"))
-    configured_profile_ids = {
-        str(profile_id or "").strip()
-        for rule in normalized["rules"]
-        if bool(rule.get("enabled", True))
-        for profile_id in rule.get("allowed_profile_ids", [])
-        if str(profile_id or "").strip()
-    }
-    always_allowed_profile_ids = [
-        profile_id
-        for profile_id in profiles_by_id
-        if profile_id not in configured_profile_ids
-    ]
-
-    if not active_rules:
-        if has_enabled_rules and outside_window_behavior == "restrict_configured":
-            eligible_profiles = [
-                dict(profiles_by_id[profile_id])
-                for profile_id in always_allowed_profile_ids
-            ]
-        else:
-            eligible_profiles = [dict(profile) for profile in profiles]
-    else:
-        eligible_profile_ids: list[str] = []
-        seen_ids: set[str] = set()
-        for profile_id in always_allowed_profile_ids:
-            if profile_id in profiles_by_id and profile_id not in seen_ids:
-                eligible_profile_ids.append(profile_id)
-                seen_ids.add(profile_id)
-        for rule in active_rules:
-            for profile_id in rule.get("allowed_profile_ids", []):
-                profile_id = str(profile_id or "").strip()
-                if profile_id and profile_id not in seen_ids and profile_id in profiles_by_id:
-                    eligible_profile_ids.append(profile_id)
-                    seen_ids.add(profile_id)
-        eligible_profiles = [
-            dict(profiles_by_id[profile_id])
-            for profile_id in eligible_profile_ids
-        ]
-
-    active_rule = dict(active_rules[0]) if active_rules else None
-    active_rule_names = [str(rule.get("name") or "").strip() for rule in active_rules if str(rule.get("name") or "").strip()]
-    active_windows = []
-    for rule in active_rules:
-        window = format_stream_schedule_window(rule)
-        if window and window not in active_windows:
-            active_windows.append(window)
-
-    return {
-        "timezone": timezone_name,
-        "activeRule": active_rule,
-        "activeRules": active_rules,
-        "activeRuleIds": [str(rule.get("id") or "").strip() for rule in active_rules if str(rule.get("id") or "").strip()],
-        "activeRuleName": " + ".join(active_rule_names),
-        "activeWindow": " | ".join(active_windows),
-        "outsideWindowBehavior": outside_window_behavior,
-        "outsideWindowRestricted": bool(
-            has_enabled_rules
-            and not active_rules
-            and outside_window_behavior == "restrict_configured"
-            and not eligible_profiles
-        ),
-        "eligibleProfiles": eligible_profiles,
-        "eligibleProfileIds": [str(profile.get("id") or "").strip() for profile in eligible_profiles if str(profile.get("id") or "").strip()],
-        "isRestricted": bool(active_rules) or bool(has_enabled_rules and outside_window_behavior == "restrict_configured"),
-        "currentTime": current_time,
-    }
-
-
-def is_profile_allowed_by_schedule(profile: dict | None, schedule_state: dict | None) -> bool:
-    if not isinstance(profile, dict):
-        return False
-    if not isinstance(schedule_state, dict):
-        return True
-    eligible_ids = set(schedule_state.get("eligibleProfileIds") or [])
-    if not schedule_state.get("isRestricted"):
-        return True
-    return str(profile.get("id") or "").strip() in eligible_ids
-
-
-def choose_schedule_enforcement_profile(
-    current_profile: dict | None,
-    eligible_profiles: list[dict],
-) -> dict | None:
-    current_profile_id = str((current_profile or {}).get("id") or "").strip()
-    for profile in eligible_profiles:
-        if str(profile.get("id") or "").strip() == current_profile_id:
-            return dict(profile)
-    if eligible_profiles:
-        return dict(eligible_profiles[0])
-    return None
-
-
-def format_stream_schedule_rule_row(profile_labels_by_id: dict[str, str], rule: dict, *, active: bool = False) -> tuple[str, str, str, str]:
-    allowed_labels = [
-        profile_labels_by_id.get(profile_id, profile_id)
-        for profile_id in rule.get("allowed_profile_ids", [])
-        if str(profile_id or "").strip()
-    ]
-    profiles_label = ", ".join(allowed_labels[:3])
-    if len(allowed_labels) > 3:
-        profiles_label += f" +{len(allowed_labels) - 3}"
-    return (
-        "Ativa" if active else ("Ligada" if bool(rule.get("enabled", True)) else "Pausada"),
-        str(rule.get("name") or "").strip(),
-        format_stream_schedule_window(rule),
-        profiles_label,
-    )
-
-
-def normalize_stream_rotation_config(value) -> dict:
-    source = value if isinstance(value, dict) else {}
-    mode = str(source.get("mode") or DEFAULT_STREAM_ROTATION["mode"]).strip().lower()
-    strategy = str(source.get("strategy") or DEFAULT_STREAM_ROTATION["strategy"]).strip().lower()
-    min_rounds = int(source.get("min_rounds_per_stream", DEFAULT_STREAM_ROTATION["min_rounds_per_stream"]) or 0)
-    max_rounds = int(source.get("max_rounds_per_stream", DEFAULT_STREAM_ROTATION["max_rounds_per_stream"]) or 0)
-    min_rounds = max(1, min_rounds)
-    max_rounds = max(min_rounds, max_rounds)
-    target_rounds = int(source.get("target_rounds_for_current_stream", 0) or 0)
-
-    if mode != "round_boundary":
-        mode = DEFAULT_STREAM_ROTATION["mode"]
-    if strategy != "uniform_excluding_current":
-        strategy = DEFAULT_STREAM_ROTATION["strategy"]
-
-    return {
-        "enabled": bool(source.get("enabled", DEFAULT_STREAM_ROTATION["enabled"])),
-        "mode": mode,
-        "strategy": strategy,
-        "min_rounds_per_stream": min_rounds,
-        "max_rounds_per_stream": max_rounds,
-        "current_stream_profile_id": str(source.get("current_stream_profile_id") or "").strip(),
-        "rounds_on_current_stream": max(0, int(source.get("rounds_on_current_stream", 0) or 0)),
-        "target_rounds_for_current_stream": target_rounds if min_rounds <= target_rounds <= max_rounds else 0,
-        "last_counted_round_id": str(source.get("last_counted_round_id") or "").strip(),
-    }
-
-
-def get_round_status(backend_round: dict | None) -> str:
-    if not isinstance(backend_round, dict):
-        return ""
-    return str(backend_round.get("status") or "").strip().lower()
-
-
-def get_round_id(backend_round: dict | None) -> str:
-    if not isinstance(backend_round, dict):
-        return ""
-    return str(backend_round.get("roundId") or "").strip()
-
-
-def is_round_safe_for_stream_rotation(backend_round: dict | None) -> bool:
-    return get_round_status(backend_round) in STREAM_ROTATION_SAFE_STATUSES
-
-
-def should_defer_stream_rotation(backend_round: dict | None) -> bool:
-    status = get_round_status(backend_round)
-    return not status or status in STREAM_ROTATION_DEFER_STATUSES or status not in STREAM_ROTATION_SAFE_STATUSES
-
-
-def select_random_stream_profile(
-    profiles: list[dict],
-    current_profile_id: str = "",
-    *,
-    rng=random,
-) -> dict | None:
-    eligible = [
-        dict(profile)
-        for profile in profiles
-        if str(profile.get("id") or "").strip()
-        and str(profile.get("stream_url") or "").strip()
-        and str(profile.get("camera_id") or "").strip()
-    ]
-    if len(eligible) < 2:
-        return None
-
-    current_profile_id = str(current_profile_id or "").strip()
-    candidates = [
-        profile for profile in eligible
-        if str(profile.get("id") or "").strip() != current_profile_id
-    ]
-    if not candidates:
-        candidates = eligible
-
-    return dict(rng.choice(candidates))
-
-
-def should_apply_pending_stream_rotation(
-    pending_profile: dict | None,
-    backend_round: dict | None,
-) -> bool:
-    return isinstance(pending_profile, dict) and is_round_safe_for_stream_rotation(backend_round)
-
-
-def choose_stream_rotation_target(rotation: dict, *, rng=random) -> int:
-    normalized = normalize_stream_rotation_config(rotation)
-    return int(rng.randint(
-        normalized["min_rounds_per_stream"],
-        normalized["max_rounds_per_stream"],
-    ))
-
-
-def ensure_stream_rotation_profile_state(
-    rotation: dict,
-    stream_profile_id: str,
-    *,
-    rng=random,
-    force_new_target: bool = False,
-) -> bool:
-    profile_id = str(stream_profile_id or "").strip()
-    previous_profile_id = str(rotation.get("current_stream_profile_id") or "").strip()
-    changed = previous_profile_id != profile_id
-
-    if changed:
-        rotation["current_stream_profile_id"] = profile_id
-        rotation["rounds_on_current_stream"] = 0
-        rotation["last_counted_round_id"] = ""
-
-    if changed or force_new_target or int(rotation.get("target_rounds_for_current_stream", 0) or 0) <= 0:
-        rotation["target_rounds_for_current_stream"] = choose_stream_rotation_target(rotation, rng=rng)
-        return True
-
-    return changed
-
-
-def count_settled_round_for_stream_rotation(rotation: dict, backend_round: dict | None) -> bool:
-    if get_round_status(backend_round) not in {"settling", "settled"}:
-        return False
-
-    round_id = get_round_id(backend_round)
-    if not round_id or round_id == str(rotation.get("last_counted_round_id") or ""):
-        return False
-
-    rotation["last_counted_round_id"] = round_id
-    rotation["rounds_on_current_stream"] = max(
-        0,
-        int(rotation.get("rounds_on_current_stream", 0) or 0),
-    ) + 1
-    return True
-
-
-def stream_rotation_target_reached(rotation: dict) -> bool:
-    target = int(rotation.get("target_rounds_for_current_stream", 0) or 0)
-    if target <= 0:
-        return False
-    rounds = int(rotation.get("rounds_on_current_stream", 0) or 0)
-    return rounds >= target
-
-
-def format_stream_rotation_progress(rotation: dict) -> str:
-    if not rotation.get("enabled"):
-        return "Rotacao randômica desativada."
-    rounds = int(rotation.get("rounds_on_current_stream", 0) or 0)
-    target = int(rotation.get("target_rounds_for_current_stream", 0) or 0)
-    if target <= 0:
-        return "Rotacao ativa: alvo ainda nao sorteado."
-    return f"Rotacao ativa: {rounds}/{target} rounds nesta stream"
-
-
-def shorten_text(value: str, max_len: int = 56) -> str:
-    text = str(value or "").strip()
-    if len(text) <= max_len:
-        return text
-    return f"{text[: max_len - 3]}..."
-
-
-def guess_stream_profile_name(stream_url: str, camera_id: str = "", index: int = 1) -> str:
-    camera_id = str(camera_id or "").strip()
-    if camera_id:
-        return camera_id
-
-    url = str(stream_url or "").strip()
-    if url:
-        parsed = urlparse(url)
-        path_parts = [part for part in parsed.path.split("/") if part]
-        if len(path_parts) >= 2 and path_parts[-1].lower().startswith("stream"):
-            return path_parts[-2]
-        if path_parts:
-            return path_parts[-1]
-        if parsed.netloc:
-            return parsed.netloc
-
-    return f"Stream {index}"
-
-
-def format_stream_profile_label(profile: dict) -> str:
-    name = str(profile.get("name") or "").strip() or guess_stream_profile_name(
-        profile.get("stream_url", ""),
-        profile.get("camera_id", ""),
-    )
-    camera_id = str(profile.get("camera_id") or "").strip()
-    hint = camera_id or str(profile.get("stream_url") or "").strip()
-    hint = shorten_text(hint, max_len=48)
-    if hint and hint != name:
-        return f"{name} | {hint}"
-    return name
-
-
-def format_stream_profile_table_row(profile: dict, *, active: bool = False) -> tuple[str, str, str, str]:
-    name = str(profile.get("name") or "").strip() or guess_stream_profile_name(
-        profile.get("stream_url", ""),
-        profile.get("camera_id", ""),
-    )
-    camera_id = str(profile.get("camera_id") or "").strip()
-    stream_url = shorten_text(str(profile.get("stream_url") or "").strip(), max_len=72)
-    return ("*" if active else "", name, camera_id, stream_url)
-
-
-def make_stream_profile_id(existing_ids: set[str]) -> str:
-    base = f"stream_{int(time.time() * 1000)}"
-    candidate = base
-    suffix = 1
-    while candidate in existing_ids:
-        suffix += 1
-        candidate = f"{base}_{suffix}"
-    return candidate
-
-
-def build_stream_profile(source: dict | None, fallback_cfg: dict, *, index: int) -> dict:
-    source = source if isinstance(source, dict) else {}
-    stream_url = validate_stream_url(
-        source.get("stream_url")
-        or source.get("url")
-        or fallback_cfg.get("stream_url", "")
-    )
-    camera_id = str(source.get("camera_id") or fallback_cfg.get("camera_id", "")).strip()
-    profile = {
-        "id": str(source.get("id") or "").strip(),
-        "name": str(source.get("name") or "").strip(),
-        "stream_url": stream_url,
-        "camera_id": camera_id,
-        "roi": normalize_roi_config(source.get("roi"), fallback_cfg.get("roi")),
-        "line": normalize_line_config(source.get("line"), fallback_cfg.get("line")),
-        "count_direction": normalize_count_direction(
-            source.get("count_direction") or fallback_cfg.get("count_direction", "any")
-        ),
-        "secondary_verification_enabled": normalize_secondary_verification_enabled(
-            source.get("secondary_verification_enabled")
-            if "secondary_verification_enabled" in source
-            else fallback_cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
-        ),
-        "secondary_verification_band_px": normalize_secondary_verification_band_px(
-            source.get("secondary_verification_band_px")
-            if "secondary_verification_band_px" in source
-            else fallback_cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
-            fallback=int(fallback_cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
-        ),
-    }
-    if not profile["name"]:
-        profile["name"] = guess_stream_profile_name(stream_url, camera_id, index=index)
-    return profile
-
-
-def sync_config_with_selected_profile(cfg: dict, profile: dict) -> dict:
-    profile["roi"] = normalize_roi_config(profile.get("roi"), cfg.get("roi"))
-    profile["line"] = normalize_line_config(profile.get("line"), cfg.get("line"))
-    profile["count_direction"] = normalize_count_direction(
-        profile.get("count_direction") or cfg.get("count_direction", "any")
-    )
-    profile["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
-        profile.get("secondary_verification_enabled")
-        if "secondary_verification_enabled" in profile
-        else cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
-    )
-    profile["secondary_verification_band_px"] = normalize_secondary_verification_band_px(
-        profile.get("secondary_verification_band_px")
-        if "secondary_verification_band_px" in profile
-        else cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
-        fallback=int(cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
-    )
-    profile["camera_id"] = str(profile.get("camera_id") or cfg.get("camera_id", "")).strip()
-    profile["stream_url"] = validate_stream_url(profile.get("stream_url") or "")
-    if not profile["name"]:
-        profile["name"] = guess_stream_profile_name(profile["stream_url"], profile["camera_id"])
-
-    cfg["selected_stream_profile_id"] = profile["id"]
-    cfg["stream_url"] = profile["stream_url"]
-    cfg["camera_id"] = profile["camera_id"]
-    cfg["roi"] = dict(profile["roi"])
-    cfg["line"] = dict(profile["line"])
-    cfg["count_direction"] = profile["count_direction"]
-    cfg["secondary_verification_enabled"] = bool(profile["secondary_verification_enabled"])
-    cfg["secondary_verification_band_px"] = int(profile["secondary_verification_band_px"])
-    return profile
-
-
-def normalize_config(cfg: dict | None) -> dict:
-    cfg = dict(cfg or {})
-    cfg["youtube_cookies_from_browser"] = str(cfg.get("youtube_cookies_from_browser") or "").strip()
-    cfg["youtube_cookies_file"] = str(cfg.get("youtube_cookies_file") or "").strip()
-    cfg["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
-        cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
-    )
-    cfg["secondary_verification_band_px"] = normalize_secondary_verification_band_px(
-        cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
-    )
-    cfg["stream_rotation"] = normalize_stream_rotation_config(cfg.get("stream_rotation"))
-    raw_profiles = cfg.get("stream_profiles")
-    profiles = []
-
-    if isinstance(raw_profiles, list):
-        for index, raw_profile in enumerate(raw_profiles, start=1):
-            try:
-                profile = build_stream_profile(raw_profile, cfg, index=index)
-            except ValueError as exc:
-                logger.warning("Stream profile ignorado: %s", exc)
-                continue
-            if profile["stream_url"]:
-                profiles.append(profile)
-
-    if not profiles:
-        try:
-            profiles.append(build_stream_profile({}, cfg, index=1))
-        except ValueError:
-            fallback_cfg = dict(cfg)
-            fallback_cfg["stream_url"] = ""
-            profiles.append(build_stream_profile({}, fallback_cfg, index=1))
-
-    existing_ids: set[str] = set()
-    for index, profile in enumerate(profiles, start=1):
-        if not profile["id"] or profile["id"] in existing_ids:
-            profile["id"] = make_stream_profile_id(existing_ids)
-        if not profile["name"]:
-            profile["name"] = guess_stream_profile_name(
-                profile["stream_url"],
-                profile["camera_id"],
-                index=index,
-            )
-        existing_ids.add(profile["id"])
-
-    cfg["stream_profiles"] = profiles
-    cfg["stream_schedule"] = normalize_stream_schedule_config(cfg.get("stream_schedule"), profiles)
-    selected_profile_id = str(cfg.get("selected_stream_profile_id") or "").strip()
-    selected_profile = next((profile for profile in profiles if profile["id"] == selected_profile_id), None)
-    if selected_profile is None:
-        current_stream_url = validate_stream_url(cfg.get("stream_url") or "")
-        selected_profile = next((profile for profile in profiles if profile["stream_url"] == current_stream_url), None)
-    if selected_profile is None:
-        selected_profile = profiles[0]
-
-    sync_config_with_selected_profile(cfg, selected_profile)
-    return cfg
-
-
-def load_config(path: str = "config.json") -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = normalize_config(json.load(f))
-
-    env_overrides = {
-        "backend_url": os.getenv("BACKEND_URL"),
-        "api_key": os.getenv("BACKEND_API_KEY") or os.getenv("API_KEY"),
-        "mjpeg_token": os.getenv("MJPEG_TOKEN"),
-        "mediamtx_api_url": os.getenv("MEDIAMTX_API_URL"),
-        "mediamtx_rtsp_url": os.getenv("MEDIAMTX_RTSP_URL"),
-        "publisher_ffmpeg_bin": os.getenv("FFMPEG_BIN"),
-        "supabase_url": os.getenv("SUPABASE_URL"),
-        "supabase_service_key": os.getenv("SUPABASE_SERVICE_KEY"),
-        "supabase_stream_profiles_table": os.getenv("SUPABASE_STREAM_PROFILES_TABLE"),
-        "supabase_stream_schedule_table": os.getenv("SUPABASE_STREAM_SCHEDULE_TABLE"),
-        "supabase_stream_profiles_scope": os.getenv("SUPABASE_STREAM_PROFILES_SCOPE"),
-        "camera_id": os.getenv("CAMERA_ID"),
-        "session_id": os.getenv("SESSION_ID"),
-        "line_id": os.getenv("LINE_ID"),
-        "stream_url": os.getenv("STREAM_URL"),
-        "youtube_cookies_from_browser": os.getenv("YOUTUBE_COOKIES_FROM_BROWSER"),
-        "youtube_cookies_file": os.getenv("YOUTUBE_COOKIES_FILE"),
-    }
-
-    for key, value in env_overrides.items():
-        if value is not None and str(value).strip():
-            cfg[key] = value.strip()
-
-    return normalize_config(cfg)
-
-
-def save_config(path: str, cfg: dict):
-    normalized_cfg = normalize_config(cfg)
-    cfg.clear()
-    cfg.update(normalized_cfg)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(normalized_cfg, f, indent=2)
-
-
-def bootstrap_stream_profiles_from_supabase(
-    cfg: dict,
-    config_path: str,
-    sync_client: SupabaseStreamProfileSync | None,
-) -> None:
-    if sync_client is None:
-        return
-
-    try:
-        remote_profiles, remote_selected_profile_id = sync_client.fetch_profiles()
-    except Exception as exc:
-        logger.warning("Falha ao carregar stream profiles do Supabase: %s", exc)
-        remote_profiles = []
-        remote_selected_profile_id = None
-
-    try:
-        remote_schedule_rules, remote_schedule_timezone = sync_client.fetch_schedule_rules()
-    except Exception as exc:
-        logger.warning("Falha ao carregar agenda por hora do Supabase: %s", exc)
-        remote_schedule_rules = []
-        remote_schedule_timezone = None
-
-    remote_profiles_loaded = bool(remote_profiles)
-    remote_schedule_loaded = bool(remote_schedule_rules)
-
-    if remote_profiles_loaded:
-        cfg["stream_profiles"] = remote_profiles
-        if remote_selected_profile_id:
-            cfg["selected_stream_profile_id"] = remote_selected_profile_id
-
-    if remote_schedule_loaded:
-        current_schedule = cfg.get("stream_schedule") if isinstance(cfg.get("stream_schedule"), dict) else {}
-        cfg["stream_schedule"] = {
-            "timezone": remote_schedule_timezone or current_schedule.get("timezone") or DEFAULT_STREAM_SCHEDULE["timezone"],
-            "rules": remote_schedule_rules,
-        }
-
-    if remote_profiles_loaded or remote_schedule_loaded:
-        try:
-            normalize_config(cfg)
-            save_config(config_path, cfg)
-            if remote_profiles_loaded:
-                logger.info(
-                    "Stream profiles carregados do Supabase: %d perfil(is)",
-                    len(cfg.get("stream_profiles", [])),
-                )
-            if remote_schedule_loaded:
-                logger.info(
-                    "Agenda por hora carregada do Supabase: %d regra(s)",
-                    len(cfg.get("stream_schedule", {}).get("rules", [])),
-                )
-        except Exception as exc:
-            logger.warning("Falha ao aplicar estado remoto de streams/agendas: %s", exc)
-
-    if not remote_profiles_loaded:
-        try:
-            sync_client.upsert_profiles(
-                cfg.get("stream_profiles", []),
-                cfg.get("selected_stream_profile_id"),
-            )
-            logger.info(
-                "Supabase sem stream profiles. Config local publicada com %d perfil(is).",
-                len(cfg.get("stream_profiles", [])),
-            )
-        except Exception as exc:
-            logger.warning("Falha ao publicar stream profiles iniciais no Supabase: %s", exc)
-
-    if not remote_schedule_loaded:
-        try:
-            sync_client.upsert_schedule_rules(
-                cfg.get("stream_schedule", {}).get("rules", []),
-                cfg.get("stream_schedule", {}).get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
-            )
-            logger.info(
-                "Supabase sem agenda por hora. Config local publicada com %d regra(s).",
-                len(cfg.get("stream_schedule", {}).get("rules", [])),
-            )
-        except Exception as exc:
-            logger.warning("Falha ao publicar agenda por hora inicial no Supabase: %s", exc)
-
-
-def sync_stream_profiles_to_supabase(
-    cfg: dict,
-    sync_client: SupabaseStreamProfileSync | None,
-) -> None:
-    if sync_client is None:
-        return
-
-    try:
-        sync_client.upsert_profiles(
-            cfg.get("stream_profiles", []),
-            cfg.get("selected_stream_profile_id"),
-        )
-        sync_client.upsert_schedule_rules(
-            cfg.get("stream_schedule", {}).get("rules", []),
-            cfg.get("stream_schedule", {}).get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
-        )
-    except Exception as exc:
-        logger.warning("Falha ao sincronizar esteira no Supabase: %s", exc)
-
-
-def get_selected_stream_profile(cfg: dict) -> dict:
-    selected_id = str(cfg.get("selected_stream_profile_id") or "").strip()
-    profiles = cfg.get("stream_profiles", [])
-    for profile in profiles:
-        if profile.get("id") == selected_id:
-            return profile
-    if profiles:
-        return profiles[0]
-    profile = build_stream_profile({}, cfg, index=1)
-    cfg["stream_profiles"] = [profile]
-    return sync_config_with_selected_profile(cfg, profile)
-
-
-class StreamProfileStore:
-    def __init__(self, cfg: dict):
-        normalized_cfg = normalize_config(cfg)
-        cfg.clear()
-        cfg.update(normalized_cfg)
-        self.cfg = cfg
-
-    def list_profiles(self) -> list[dict]:
-        return [dict(profile) for profile in self.cfg.get("stream_profiles", [])]
-
-    def get_selected_profile(self) -> dict:
-        return dict(get_selected_stream_profile(self.cfg))
-
-    def select_profile(self, profile_id: str) -> dict:
-        for profile in self.cfg.get("stream_profiles", []):
-            if profile.get("id") == profile_id:
-                return dict(sync_config_with_selected_profile(self.cfg, profile))
-        raise ValueError("Stream selecionada nao encontrada.")
-
-    def delete_profile(self, profile_id: str) -> dict:
-        target_id = str(profile_id or "").strip()
-        profiles = self.cfg.get("stream_profiles", [])
-        if len(profiles) <= 1:
-            raise ValueError("A esteira precisa manter pelo menos uma stream salva.")
-
-        selected_id = str(self.cfg.get("selected_stream_profile_id") or "").strip()
-        if target_id == selected_id:
-            raise ValueError("Carregue outra stream antes de apagar esta.")
-
-        for index, profile in enumerate(profiles):
-            if str(profile.get("id") or "") == target_id:
-                deleted = dict(profile)
-                del profiles[index]
-                self.cfg["stream_profiles"] = profiles
-                return deleted
-
-        raise ValueError("Stream selecionada nao encontrada.")
-
-    def save_selected_profile(
-        self,
-        *,
-        name: str | None = None,
-        camera_id: str | None = None,
-        stream_url: str | None = None,
-        roi: dict | None = None,
-        line: dict | None = None,
-        count_direction: str | None = None,
-        secondary_verification_enabled: bool | None = None,
-        secondary_verification_band_px: int | None = None,
-    ) -> dict:
-        current = get_selected_stream_profile(self.cfg)
-        target_url = validate_stream_url(stream_url or current.get("stream_url") or "")
-        target_camera_id = str(camera_id or current.get("camera_id") or self.cfg.get("camera_id") or "").strip()
-        if not target_url:
-            raise ValueError("Informe uma URL de stream antes de salvar.")
-        if not target_camera_id:
-            raise ValueError("Informe um camera_id antes de salvar.")
-
-        selected_stream_url = str(current.get("stream_url") or "").strip()
-        selected_camera_id = str(current.get("camera_id") or "").strip()
-        if target_url != selected_stream_url or target_camera_id != selected_camera_id:
-            for profile in self.cfg.get("stream_profiles", []):
-                if (
-                    str(profile.get("stream_url") or "").strip() == target_url
-                    and str(profile.get("camera_id") or "").strip() == target_camera_id
-                ):
-                    current = profile
-                    break
-            else:
-                current = {
-                    "id": make_stream_profile_id({str(profile.get("id") or "") for profile in self.cfg.get("stream_profiles", [])}),
-                    "name": "",
-                    "stream_url": target_url,
-                    "camera_id": target_camera_id,
-                    "roi": dict(self.cfg.get("roi") or DEFAULT_ROI),
-                    "line": dict(self.cfg.get("line") or DEFAULT_LINE),
-                    "count_direction": self.cfg.get("count_direction", "any"),
-                    "secondary_verification_enabled": normalize_secondary_verification_enabled(
-                        self.cfg.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
-                    ),
-                    "secondary_verification_band_px": normalize_secondary_verification_band_px(
-                        self.cfg.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
-                    ),
-                }
-                self.cfg.setdefault("stream_profiles", []).append(current)
-
-        if name is not None:
-            current["name"] = str(name).strip()
-        current["stream_url"] = target_url
-        current["camera_id"] = target_camera_id
-        if roi is not None:
-            current["roi"] = normalize_roi_config(roi, current.get("roi"))
-        if line is not None:
-            current["line"] = normalize_line_config(line, current.get("line"))
-        if count_direction is not None:
-            current["count_direction"] = normalize_count_direction(count_direction)
-        if secondary_verification_enabled is not None:
-            current["secondary_verification_enabled"] = normalize_secondary_verification_enabled(
-                secondary_verification_enabled
-            )
-        if secondary_verification_band_px is not None:
-            current["secondary_verification_band_px"] = normalize_secondary_verification_band_px(
-                secondary_verification_band_px,
-                fallback=int(current.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX) or DEFAULT_SECONDARY_VERIFICATION_BAND_PX),
-            )
-
-        return dict(sync_config_with_selected_profile(self.cfg, current))
-
-    def save_profile_entry(
-        self,
-        *,
-        name: str | None = None,
-        camera_id: str | None = None,
-        stream_url: str | None = None,
-    ) -> tuple[dict, bool]:
-        target_url = validate_stream_url(stream_url or "")
-        target_camera_id = str(camera_id or "").strip()
-        if not target_url:
-            raise ValueError("Informe uma URL de stream antes de salvar.")
-        if not target_camera_id:
-            raise ValueError("Informe um camera_id antes de salvar.")
-
-        current = None
-        for profile in self.cfg.get("stream_profiles", []):
-            if (
-                str(profile.get("stream_url") or "").strip() == target_url
-                and str(profile.get("camera_id") or "").strip() == target_camera_id
-            ):
-                current = profile
-                break
-
-        created = current is None
-        if current is None:
-            current = {
-                "id": make_stream_profile_id({str(profile.get("id") or "") for profile in self.cfg.get("stream_profiles", [])}),
-                "name": "",
-                "stream_url": target_url,
-                "camera_id": target_camera_id,
-                "roi": dict(DEFAULT_ROI),
-                "line": dict(DEFAULT_LINE),
-                "count_direction": "any",
-                "secondary_verification_enabled": DEFAULT_SECONDARY_VERIFICATION_ENABLED,
-                "secondary_verification_band_px": DEFAULT_SECONDARY_VERIFICATION_BAND_PX,
-            }
-            self.cfg.setdefault("stream_profiles", []).append(current)
-
-        if name is not None:
-            current["name"] = str(name).strip()
-        if not current.get("name"):
-            current["name"] = guess_stream_profile_name(target_url, target_camera_id)
-        current["stream_url"] = target_url
-        current["camera_id"] = target_camera_id
-
-        return dict(current), created
-
-    def apply_stream_url(
-        self,
-        stream_url: str,
-        *,
-        name: str | None = None,
-        camera_id: str | None = None,
-    ) -> tuple[dict, bool]:
-        target_url = validate_stream_url(stream_url or "")
-        target_camera_id = str(camera_id or self.cfg.get("camera_id") or "").strip()
-        if not target_url:
-            raise ValueError("Informe uma URL de stream.")
-        if not target_camera_id:
-            raise ValueError("Informe um camera_id.")
-
-        for profile in self.cfg.get("stream_profiles", []):
-            if (
-                str(profile.get("stream_url") or "").strip() == target_url
-                and str(profile.get("camera_id") or "").strip() == target_camera_id
-            ):
-                if name is not None and str(name).strip():
-                    profile["name"] = str(name).strip()
-                return dict(sync_config_with_selected_profile(self.cfg, profile)), False
-
-        profile = {
-            "id": make_stream_profile_id({str(existing.get("id") or "") for existing in self.cfg.get("stream_profiles", [])}),
-            "name": str(name or "").strip()
-            or guess_stream_profile_name(
-                target_url,
-                target_camera_id,
-                index=len(self.cfg.get("stream_profiles", [])) + 1,
-            ),
-            "stream_url": target_url,
-            "camera_id": target_camera_id,
-            "roi": dict(DEFAULT_ROI),
-            "line": dict(DEFAULT_LINE),
-            "count_direction": "any",
-            "secondary_verification_enabled": DEFAULT_SECONDARY_VERIFICATION_ENABLED,
-            "secondary_verification_band_px": DEFAULT_SECONDARY_VERIFICATION_BAND_PX,
-        }
-        self.cfg.setdefault("stream_profiles", []).append(profile)
-        return dict(sync_config_with_selected_profile(self.cfg, profile)), True
-
-
-class StreamScheduleStore:
-    def __init__(self, cfg: dict):
-        normalized_cfg = normalize_config(cfg)
-        cfg.clear()
-        cfg.update(normalized_cfg)
-        self.cfg = cfg
-
-    def list_rules(self) -> list[dict]:
-        return [dict(rule) for rule in self.cfg.get("stream_schedule", {}).get("rules", [])]
-
-    def get_schedule(self) -> dict:
-        schedule = normalize_stream_schedule_config(
-            self.cfg.get("stream_schedule"),
-            self.cfg.get("stream_profiles", []),
-        )
-        self.cfg["stream_schedule"] = schedule
-        return {
-            "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
-            "rules": [dict(rule) for rule in schedule.get("rules", [])],
-        }
-
-    def save_rule(
-        self,
-        *,
-        rule_id: str = "",
-        name: str | None = None,
-        start_time: str,
-        end_time: str,
-        allowed_profile_ids: list[str],
-        enabled: bool,
-    ) -> tuple[dict, bool]:
-        schedule = self.get_schedule()
-        rules = schedule["rules"]
-        existing_ids = {str(rule.get("id") or "").strip() for rule in rules}
-        target_rule_id = str(rule_id or "").strip()
-        created = not target_rule_id
-
-        if created:
-            target_rule_id = make_stream_schedule_rule_id(existing_ids)
-
-        next_rule = {
-            "id": target_rule_id,
-            "name": str(name or "").strip() or f"Agenda {start_time}-{end_time}",
-            "enabled": bool(enabled),
-            "start_time": start_time,
-            "end_time": end_time,
-            "allowed_profile_ids": list(allowed_profile_ids or []),
-        }
-
-        updated_rules: list[dict] = []
-        replaced = False
-        for rule in rules:
-            if str(rule.get("id") or "").strip() == target_rule_id:
-                updated_rules.append(next_rule)
-                replaced = True
-            else:
-                updated_rules.append(dict(rule))
-
-        if not replaced:
-            updated_rules.append(next_rule)
-
-        normalized_schedule = normalize_stream_schedule_config(
-            {
-                "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
-                "rules": updated_rules,
-            },
-            self.cfg.get("stream_profiles", []),
-        )
-        self.cfg["stream_schedule"] = normalized_schedule
-        saved_rule = next(
-            dict(rule)
-            for rule in normalized_schedule["rules"]
-            if str(rule.get("id") or "").strip() == target_rule_id
-        )
-        return saved_rule, created
-
-    def delete_rule(self, rule_id: str) -> dict:
-        target_rule_id = str(rule_id or "").strip()
-        schedule = self.get_schedule()
-        deleted = None
-        remaining_rules: list[dict] = []
-        for rule in schedule["rules"]:
-            if str(rule.get("id") or "").strip() == target_rule_id:
-                deleted = dict(rule)
-                continue
-            remaining_rules.append(dict(rule))
-
-        if deleted is None:
-            raise ValueError("Agenda por hora nao encontrada.")
-
-        self.cfg["stream_schedule"] = normalize_stream_schedule_config(
-            {
-                "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
-                "rules": remaining_rules,
-            },
-            self.cfg.get("stream_profiles", []),
-        )
-        return deleted
-
-    def toggle_rule(self, rule_id: str) -> dict:
-        target_rule_id = str(rule_id or "").strip()
-        schedule = self.get_schedule()
-        toggled = None
-        updated_rules: list[dict] = []
-        for rule in schedule["rules"]:
-            next_rule = dict(rule)
-            if str(rule.get("id") or "").strip() == target_rule_id:
-                next_rule["enabled"] = not bool(rule.get("enabled", True))
-                toggled = dict(next_rule)
-            updated_rules.append(next_rule)
-
-        if toggled is None:
-            raise ValueError("Agenda por hora nao encontrada.")
-
-        self.cfg["stream_schedule"] = normalize_stream_schedule_config(
-            {
-                "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
-                "rules": updated_rules,
-            },
-            self.cfg.get("stream_profiles", []),
-        )
-        return next(
-            dict(rule)
-            for rule in self.cfg["stream_schedule"]["rules"]
-            if str(rule.get("id") or "").strip() == target_rule_id
-        )
-
-    def assert_profile_not_referenced(self, profile_id: str) -> None:
-        target_id = str(profile_id or "").strip()
-        for rule in self.list_rules():
-            if target_id in rule.get("allowed_profile_ids", []):
-                raise ValueError("A stream esta vinculada a uma agenda por hora ativa ou salva.")
-
-    def detach_profile_references(self, profile_id: str) -> dict:
-        target_id = str(profile_id or "").strip()
-        schedule = self.get_schedule()
-        updated_rule_ids: list[str] = []
-        deleted_rule_ids: list[str] = []
-        next_rules: list[dict] = []
-
-        for rule in schedule["rules"]:
-            allowed_ids = [
-                str(allowed_profile_id or "").strip()
-                for allowed_profile_id in rule.get("allowed_profile_ids", [])
-                if str(allowed_profile_id or "").strip()
-            ]
-            if target_id not in allowed_ids:
-                next_rules.append(dict(rule))
-                continue
-
-            remaining_ids = [allowed_id for allowed_id in allowed_ids if allowed_id != target_id]
-            rule_id = str(rule.get("id") or "").strip()
-            if remaining_ids:
-                next_rule = dict(rule)
-                next_rule["allowed_profile_ids"] = remaining_ids
-                next_rules.append(next_rule)
-                updated_rule_ids.append(rule_id)
-            else:
-                deleted_rule_ids.append(rule_id)
-
-        if updated_rule_ids or deleted_rule_ids:
-            self.cfg["stream_schedule"] = normalize_stream_schedule_config(
-                {
-                    "timezone": schedule.get("timezone", DEFAULT_STREAM_SCHEDULE["timezone"]),
-                    "rules": next_rules,
-                },
-                self.cfg.get("stream_profiles", []),
-            )
-
-        return {
-            "updatedRuleIds": updated_rule_ids,
-            "deletedRuleIds": deleted_rule_ids,
-        }
 
 
 def now() -> str:
@@ -2471,28 +921,11 @@ def resolve_round_sync(
     return backend_round_id, current_total, False
 
 
-def normalize_ffmpeg_capture_options(options) -> str:
-    if isinstance(options, str):
-        return options.strip()
-
-    if isinstance(options, dict):
-        parts = []
-        for key, value in options.items():
-            parts.append(f"{key};{value}")
-        return "|".join(parts)
-
-    return ""
-
-
 @dataclass(frozen=True)
 class StreamUrlResolution:
     original_url: str
     capture_url: str
     resolved: bool = False
-
-
-def is_blob_url(value: str) -> bool:
-    return str(value or "").strip().lower().startswith("blob:")
 
 
 def is_youtube_url(value: str) -> bool:
@@ -2529,13 +962,6 @@ def update_stream_source_status(
 def get_stream_source_status() -> dict:
     with stream_source_status_lock:
         return dict(stream_source_status_ref)
-
-
-def validate_stream_url(value: str) -> str:
-    stream_url = str(value or "").strip()
-    if is_blob_url(stream_url):
-        raise ValueError("URL blob do navegador nao pode ser usada. Cole a URL normal do YouTube.")
-    return stream_url
 
 
 def build_youtube_resolve_command(
@@ -2819,860 +1245,6 @@ def resize_frame_max_width(frame, max_width: int):
     scale = max_width / float(width)
     target_size = (max(1, int(width * scale)), max(1, int(height * scale)))
     return cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
-
-
-def should_process_frame(frame_count: int, stride: int) -> bool:
-    stride = max(1, int(stride))
-    return frame_count == 1 or frame_count % stride == 0
-
-
-def inside_roi(cx: int, cy: int, roi: dict) -> bool:
-    return (
-        roi["x"] <= cx <= roi["x"] + roi["w"]
-        and roi["y"] <= cy <= roi["y"] + roi["h"]
-    )
-
-
-def crossed_horizontal_segment(
-    prev_y: int,
-    curr_y: int,
-    line_y: int,
-    cx: int,
-    x1: int,
-    x2: int,
-    direction: str,
-) -> bool:
-    inside_segment = min(x1, x2) <= cx <= max(x1, x2)
-    if not inside_segment:
-        return False
-
-    raw_direction = str(direction or "").strip().lower()
-    if raw_direction not in {"up", "down", "any", "down_to_up", "up_to_down"}:
-        return False
-
-    direction = normalize_count_direction(direction)
-
-    if direction == "down":
-        return prev_y < line_y <= curr_y
-
-    if direction == "up":
-        return prev_y > line_y >= curr_y
-
-    if direction == "any":
-        return (prev_y < line_y <= curr_y) or (prev_y > line_y >= curr_y)
-
-    return False
-
-
-def crossed_vertical_segment(
-    prev_x: int,
-    curr_x: int,
-    line_x: int,
-    cy: int,
-    y1: int,
-    y2: int,
-    direction: str,
-) -> bool:
-    inside_segment = min(y1, y2) <= cy <= max(y1, y2)
-    if not inside_segment:
-        return False
-
-    raw_direction = str(direction or "").strip().lower()
-    if raw_direction not in {"left", "right", "any", "left_to_right", "right_to_left"}:
-        return False
-
-    direction = normalize_count_direction(direction)
-
-    if direction == "right":
-        return prev_x < line_x <= curr_x
-
-    if direction == "left":
-        return prev_x > line_x >= curr_x
-
-    if direction == "any":
-        return (prev_x < line_x <= curr_x) or (prev_x > line_x >= curr_x)
-
-    return False
-
-
-def count_line_is_horizontal(line: dict) -> bool:
-    return abs(int(line["x2"]) - int(line["x1"])) >= abs(int(line["y2"]) - int(line["y1"]))
-
-
-def line_geometry_metrics(point: tuple[int, int], line: dict) -> dict:
-    px, py = point
-    x1 = float(line["x1"])
-    y1 = float(line["y1"])
-    x2 = float(line["x2"])
-    y2 = float(line["y2"])
-    dx = x2 - x1
-    dy = y2 - y1
-    length = float(np.hypot(dx, dy))
-    if length < 1.0:
-        return {
-            "length": 0.0,
-            "projection": 0.0,
-            "signed_distance": 0.0,
-        }
-
-    tx = dx / length
-    ty = dy / length
-    nx = -dy / length
-    ny = dx / length
-    rel_x = float(px) - x1
-    rel_y = float(py) - y1
-    return {
-        "length": length,
-        "projection": rel_x * tx + rel_y * ty,
-        "signed_distance": rel_x * nx + rel_y * ny,
-    }
-
-
-def point_inside_line_band(point: tuple[int, int], line: dict, band_px: int) -> bool:
-    metrics = line_geometry_metrics(point, line)
-    length = float(metrics["length"])
-    if length < 1.0:
-        return False
-    band = float(normalize_secondary_verification_band_px(band_px))
-    projection = float(metrics["projection"])
-    return (
-        -band <= projection <= length + band
-        and abs(float(metrics["signed_distance"])) <= band
-    )
-
-
-def distance_point_to_segment(
-    point: tuple[float, float],
-    segment_start: tuple[float, float],
-    segment_end: tuple[float, float],
-) -> float:
-    px, py = point
-    x1, y1 = segment_start
-    x2, y2 = segment_end
-    dx = x2 - x1
-    dy = y2 - y1
-    segment_length_sq = (dx * dx) + (dy * dy)
-    if segment_length_sq <= 1e-9:
-        return math.hypot(px - x1, py - y1)
-    t = ((px - x1) * dx + (py - y1) * dy) / segment_length_sq
-    t = max(0.0, min(1.0, t))
-    closest_x = x1 + (t * dx)
-    closest_y = y1 + (t * dy)
-    return math.hypot(px - closest_x, py - closest_y)
-
-
-def segment_orientation(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
-    return ((b[0] - a[0]) * (c[1] - a[1])) - ((b[1] - a[1]) * (c[0] - a[0]))
-
-
-def point_on_segment(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> bool:
-    return (
-        min(start[0], end[0]) - 1e-9 <= point[0] <= max(start[0], end[0]) + 1e-9
-        and min(start[1], end[1]) - 1e-9 <= point[1] <= max(start[1], end[1]) + 1e-9
-    )
-
-
-def segments_intersect(
-    a1: tuple[float, float],
-    a2: tuple[float, float],
-    b1: tuple[float, float],
-    b2: tuple[float, float],
-) -> bool:
-    o1 = segment_orientation(a1, a2, b1)
-    o2 = segment_orientation(a1, a2, b2)
-    o3 = segment_orientation(b1, b2, a1)
-    o4 = segment_orientation(b1, b2, a2)
-
-    if (o1 > 0 and o2 < 0 or o1 < 0 and o2 > 0) and (o3 > 0 and o4 < 0 or o3 < 0 and o4 > 0):
-        return True
-    if abs(o1) <= 1e-9 and point_on_segment(b1, a1, a2):
-        return True
-    if abs(o2) <= 1e-9 and point_on_segment(b2, a1, a2):
-        return True
-    if abs(o3) <= 1e-9 and point_on_segment(a1, b1, b2):
-        return True
-    if abs(o4) <= 1e-9 and point_on_segment(a2, b1, b2):
-        return True
-    return False
-
-
-def segment_distance(
-    a1: tuple[float, float],
-    a2: tuple[float, float],
-    b1: tuple[float, float],
-    b2: tuple[float, float],
-) -> float:
-    if segments_intersect(a1, a2, b1, b2):
-        return 0.0
-    return min(
-        distance_point_to_segment(a1, b1, b2),
-        distance_point_to_segment(a2, b1, b2),
-        distance_point_to_segment(b1, a1, a2),
-        distance_point_to_segment(b2, a1, a2),
-    )
-
-
-def bbox_distance_to_line_segment(bbox: tuple[int, int, int, int], line: dict) -> float:
-    x1, y1, x2, y2 = bbox
-    left = float(min(x1, x2))
-    right = float(max(x1, x2))
-    top = float(min(y1, y2))
-    bottom = float(max(y1, y2))
-    line_start = (float(line["x1"]), float(line["y1"]))
-    line_end = (float(line["x2"]), float(line["y2"]))
-
-    corners = [
-        (left, top),
-        (right, top),
-        (right, bottom),
-        (left, bottom),
-    ]
-    if any(point_inside_line_band((int(px), int(py)), line, 0) for px, py in corners):
-        return 0.0
-
-    rect_edges = [
-        ((left, top), (right, top)),
-        ((right, top), (right, bottom)),
-        ((right, bottom), (left, bottom)),
-        ((left, bottom), (left, top)),
-    ]
-    return min(segment_distance(line_start, line_end, edge_start, edge_end) for edge_start, edge_end in rect_edges)
-
-
-def bbox_touches_line_band(bbox: tuple[int, int, int, int] | None, line: dict, band_px: int) -> bool:
-    if bbox is None:
-        return False
-    band = float(normalize_secondary_verification_band_px(band_px))
-    return bbox_distance_to_line_segment(bbox, line) <= band
-
-
-def movement_delta_for_direction(
-    prev_position: tuple[int, int],
-    curr_position: tuple[int, int],
-    line: dict,
-) -> int:
-    prev_x, prev_y = prev_position
-    curr_x, curr_y = curr_position
-    if count_line_is_horizontal(line):
-        return int(curr_y - prev_y)
-    return int(curr_x - prev_x)
-
-
-def movement_matches_direction(delta: int, direction: str) -> bool:
-    normalized = normalize_count_direction(direction)
-    if normalized == "down":
-        return delta > 0
-    if normalized == "up":
-        return delta < 0
-    if normalized == "right":
-        return delta > 0
-    if normalized == "left":
-        return delta < 0
-    return delta != 0
-
-
-def should_count_track_fallback(
-    prev_position: tuple[int, int] | None,
-    curr_position: tuple[int, int],
-    curr_bbox: tuple[int, int, int, int] | None,
-    line: dict,
-    direction: str,
-    hits: int,
-    min_hits_to_count: int,
-    already_counted: bool,
-    band_px: int,
-    state: dict | None,
-) -> bool:
-    if prev_position is None or already_counted or hits < min_hits_to_count:
-        return False
-
-    state = state if isinstance(state, dict) else {}
-    band = normalize_secondary_verification_band_px(band_px)
-    prev_in_band = point_inside_line_band(prev_position, line, band)
-    curr_in_band = point_inside_line_band(curr_position, line, band)
-    curr_bbox_touches_band = bbox_touches_line_band(curr_bbox, line, band)
-    delta = movement_delta_for_direction(prev_position, curr_position, line)
-    progress_px = abs(delta)
-
-    if not curr_in_band and not curr_bbox_touches_band:
-        return False
-    if progress_px < SECONDARY_VERIFICATION_MIN_PROGRESS_PX:
-        return False
-    if not movement_matches_direction(delta, direction):
-        return False
-
-    best_distance = state.get("bestDistanceToLine")
-    current_distance = (
-        bbox_distance_to_line_segment(curr_bbox, line)
-        if curr_bbox is not None
-        else abs(float(line_geometry_metrics(curr_position, line)["signed_distance"]))
-    )
-    if best_distance is None:
-        best_distance = current_distance
-    else:
-        best_distance = min(float(best_distance), current_distance)
-
-    prior_direction_sign = int(state.get("fallbackDirectionSign") or 0)
-    current_direction_sign = 1 if delta > 0 else -1
-    if prior_direction_sign and current_direction_sign != prior_direction_sign:
-        return False
-
-    if not bool(state.get("enteredFallbackBand")):
-        eligible_frames = 1 if prev_in_band or curr_in_band or curr_bbox_touches_band else 0
-        state["fallbackProgressPx"] = float(progress_px)
-    else:
-        eligible_frames = int(state.get("fallbackEligibleFrames") or 0) + 1
-        state["fallbackProgressPx"] = float(state.get("fallbackProgressPx") or 0.0) + float(progress_px)
-
-    state["enteredFallbackBand"] = True
-    state["bestDistanceToLine"] = best_distance
-    state["fallbackDirectionSign"] = current_direction_sign
-    state["fallbackEligibleFrames"] = eligible_frames
-    state["bboxTouchedBand"] = bool(state.get("bboxTouchedBand")) or curr_bbox_touches_band
-
-    return (
-        eligible_frames >= SECONDARY_VERIFICATION_MIN_BAND_FRAMES
-        and float(state.get("fallbackProgressPx") or 0.0) >= (SECONDARY_VERIFICATION_MIN_PROGRESS_PX * 2)
-        and best_distance <= (band if state.get("bboxTouchedBand") else (band * 0.55))
-    )
-
-
-def should_count_track(
-    prev_position: tuple[int, int] | None,
-    curr_position: tuple[int, int],
-    line: dict,
-    direction: str,
-    hits: int,
-    min_hits_to_count: int,
-    already_counted: bool,
-) -> bool:
-    if prev_position is None or already_counted or hits < min_hits_to_count:
-        return False
-
-    prev_x, prev_y = prev_position
-    curr_x, curr_y = curr_position
-
-    if count_line_is_horizontal(line):
-        return crossed_horizontal_segment(
-            prev_y=prev_y,
-            curr_y=curr_y,
-            line_y=line["y1"],
-            cx=curr_x,
-            x1=line["x1"],
-            x2=line["x2"],
-            direction=direction,
-        )
-
-    return crossed_vertical_segment(
-        prev_x=prev_x,
-        curr_x=curr_x,
-        line_x=line["x1"],
-        cy=curr_y,
-        y1=line["y1"],
-        y2=line["y2"],
-        direction=direction,
-    )
-
-
-def count_direction_display_name(direction: str) -> str:
-    return {
-        "any": "Qualquer direcao",
-        "up": "Baixo para cima",
-        "down": "Cima para baixo",
-        "left": "Direita para esquerda",
-        "right": "Esquerda para direita",
-    }.get(normalize_count_direction(direction), "Qualquer direcao")
-
-
-def anchor_point(x1: int, y1: int, x2: int, y2: int) -> tuple[int, int]:
-    return (int((x1 + x2) / 2), int(y2))
-
-
-def clamp(val: int, lo: int, hi: int) -> int:
-    return max(lo, min(val, hi))
-
-
-def build_class_names(allowed_classes: dict) -> dict[int, str]:
-    return {v: k for k, v in allowed_classes.items()}
-
-
-def is_countable_vehicle(vehicle_name: str) -> bool:
-    return str(vehicle_name or "").strip().lower() == "car"
-
-
-def bbox_area(x1: int, y1: int, x2: int, y2: int) -> int:
-    return max(0, x2 - x1) * max(0, y2 - y1)
-
-
-def annotate_frame(
-    frame,
-    roi: dict,
-    line: dict,
-    detections_list: list[dict],
-    total: int,
-    *,
-    show_roi: bool = True,
-    show_labels: bool = True,
-    show_centers: bool = True,
-    show_total: bool = True,
-    style: str = "classic",
-):
-    annotated = frame.copy()
-
-    def blend_shape(draw_fn, alpha: float):
-        overlay = annotated.copy()
-        draw_fn(overlay)
-        cv2.addWeighted(overlay, alpha, annotated, 1.0 - alpha, 0, annotated)
-
-    def draw_clean_reference_band():
-        x1 = int(line["x1"])
-        y1 = int(line["y1"])
-        x2 = int(line["x2"])
-        y2 = int(line["y2"])
-        dx = x2 - x1
-        dy = y2 - y1
-        length = float(np.hypot(dx, dy))
-        if length < 1.0:
-            cv2.line(annotated, (x1, y1), (x2, y2), (64, 224, 255), 3)
-            return
-
-        nx = -dy / length
-        ny = dx / length
-        band_half = max(12, min(24, int(length * 0.045)))
-        glow_half = band_half + 8
-
-        def build_band(half_width: int):
-            return np.array(
-                [
-                    [int(round(x1 + nx * half_width)), int(round(y1 + ny * half_width))],
-                    [int(round(x2 + nx * half_width)), int(round(y2 + ny * half_width))],
-                    [int(round(x2 - nx * half_width)), int(round(y2 - ny * half_width))],
-                    [int(round(x1 - nx * half_width)), int(round(y1 - ny * half_width))],
-                ],
-                dtype=np.int32,
-            )
-
-        glow_pts = build_band(glow_half)
-        band_pts = build_band(band_half)
-        blend_shape(lambda overlay: cv2.fillConvexPoly(overlay, glow_pts, (90, 255, 255)), 0.16)
-        blend_shape(lambda overlay: cv2.fillConvexPoly(overlay, band_pts, (34, 220, 240)), 0.34)
-        cv2.polylines(annotated, [band_pts], True, (215, 255, 255), 1, lineType=cv2.LINE_AA)
-        cv2.line(annotated, (x1, y1), (x2, y2), (255, 255, 255), 2, lineType=cv2.LINE_AA)
-
-    def draw_stylized_box(x: int, y: int, w: int, h: int, color: tuple[int, int, int], label: str | None):
-        x = int(x)
-        y = int(y)
-        w = max(1, int(w))
-        h = max(1, int(h))
-        x2 = x + w
-        y2 = y + h
-
-        blend_shape(lambda overlay: cv2.rectangle(overlay, (x, y), (x2, y2), color, -1), 0.12)
-
-        corner = max(10, min(24, min(w, h) // 4))
-        thickness = 2
-        line_type = cv2.LINE_AA
-
-        cv2.line(annotated, (x, y), (x + corner, y), color, thickness, lineType=line_type)
-        cv2.line(annotated, (x, y), (x, y + corner), color, thickness, lineType=line_type)
-        cv2.line(annotated, (x2, y), (x2 - corner, y), color, thickness, lineType=line_type)
-        cv2.line(annotated, (x2, y), (x2, y + corner), color, thickness, lineType=line_type)
-        cv2.line(annotated, (x, y2), (x + corner, y2), color, thickness, lineType=line_type)
-        cv2.line(annotated, (x, y2), (x, y2 - corner), color, thickness, lineType=line_type)
-        cv2.line(annotated, (x2, y2), (x2 - corner, y2), color, thickness, lineType=line_type)
-        cv2.line(annotated, (x2, y2), (x2, y2 - corner), color, thickness, lineType=line_type)
-
-        if not label:
-            return
-
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        scale = 0.45
-        weight = 1
-        (text_w, text_h), baseline = cv2.getTextSize(label, font, scale, weight)
-        chip_x = x
-        chip_y2 = max(text_h + 10, y - 6)
-        chip_y1 = max(0, chip_y2 - text_h - baseline - 10)
-        chip_x2 = chip_x + text_w + 16
-
-        blend_shape(
-            lambda overlay: cv2.rectangle(overlay, (chip_x, chip_y1), (chip_x2, chip_y2), color, -1),
-            0.26,
-        )
-        cv2.rectangle(annotated, (chip_x, chip_y1), (chip_x2, chip_y2), color, 1, lineType=line_type)
-        cv2.putText(
-            annotated,
-            label,
-            (chip_x + 8, chip_y2 - 7),
-            font,
-            scale,
-            (255, 255, 255),
-            weight,
-            lineType=line_type,
-        )
-
-    if style == "clean":
-        draw_clean_reference_band()
-    else:
-        cv2.line(
-            annotated,
-            (line["x1"], line["y1"]),
-            (line["x2"], line["y2"]),
-            (0, 0, 255),
-            3,
-        )
-
-    if show_roi:
-        cv2.rectangle(
-            annotated,
-            (roi["x"], roi["y"]),
-            (roi["x"] + roi["w"], roi["y"] + roi["h"]),
-            (255, 255, 0),
-            2,
-        )
-
-    for det in detections_list:
-        dx = det["bbox"]["x"]
-        dy = det["bbox"]["y"]
-        dw = det["bbox"]["w"]
-        dh = det["bbox"]["h"]
-        tid = det["trackId"]
-        vtype = det["vehicleType"]
-        is_counted = det["counted"]
-        color = (80, 255, 160) if is_counted else (34, 220, 240)
-        label = f"#{tid} {vtype}" if show_labels else None
-
-        if style == "clean":
-            draw_stylized_box(dx, dy, dw, dh, color, label)
-        else:
-            cv2.rectangle(annotated, (dx, dy), (dx + dw, dy + dh), color, 2)
-        if show_labels and style != "clean":
-            cv2.putText(
-                annotated,
-                f"#{tid} {vtype}",
-                (dx, dy - 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                color,
-                1,
-            )
-
-        if show_centers:
-            cx_d = det["center"]["x"]
-            cy_d = det["center"]["y"]
-            cv2.circle(annotated, (cx_d, cy_d), 4, (0, 0, 255), -1)
-
-    if show_total:
-        total_color = (80, 255, 160) if style == "clean" else (0, 255, 0)
-        cv2.putText(
-            annotated,
-            f"TOTAL: {total}",
-            (30, 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.2,
-            total_color,
-            3,
-            lineType=cv2.LINE_AA,
-        )
-
-    return annotated
-
-
-class ConfigEditor:
-    HANDLE_RADIUS = 10
-    LINE_HIT_TOLERANCE = 12
-
-    def __init__(self, roi: dict, line: dict):
-        self.mode = "idle"
-        self.message = "R: ROI | L: line | S: save | C: cancel | Q: quit"
-        self.roi = dict(roi)
-        self.line = dict(line)
-        self._saved_roi = dict(roi)
-        self._saved_line = dict(line)
-        self._drag_action = None
-        self._drag_start = None
-        self._roi_start = None
-        self._line_start = None
-        self._frame_w = 0
-        self._frame_h = 0
-        self.dirty = False
-
-    def set_frame_size(self, width: int, height: int):
-        self._frame_w = width
-        self._frame_h = height
-
-    def sync_external_values(self, roi: dict, line: dict):
-        if self.dirty or self.mode != "idle":
-            return
-        self.roi = dict(roi)
-        self.line = dict(line)
-        self._saved_roi = dict(roi)
-        self._saved_line = dict(line)
-
-    def load_values(self, roi: dict, line: dict, message: str | None = None):
-        self.mode = "idle"
-        self.roi = dict(roi)
-        self.line = dict(line)
-        self._saved_roi = dict(roi)
-        self._saved_line = dict(line)
-        self.dirty = False
-        self._reset_drag()
-        self.message = message or "Stream config loaded"
-
-    def begin_roi_mode(self):
-        self.mode = "roi"
-        self._reset_drag()
-        self.message = "ROI mode: drag corners, drag inside to move, drag empty area to create"
-
-    def begin_line_mode(self):
-        self.mode = "line"
-        self._reset_drag()
-        self.message = "Line mode: drag endpoints, drag line to move, drag empty area to create"
-
-    def clear_mode(self):
-        self.mode = "idle"
-        self._reset_drag()
-        self.message = "Edit mode cleared"
-
-    def cancel(self):
-        self.mode = "idle"
-        self.roi = dict(self._saved_roi)
-        self.line = dict(self._saved_line)
-        self.dirty = False
-        self._reset_drag()
-        self.message = "Changes canceled"
-
-    def save(self, cfg: dict, path: str):
-        cfg["roi"] = dict(self.roi)
-        cfg["line"] = dict(self.line)
-        save_config(path, cfg)
-        self._saved_roi = dict(self.roi)
-        self._saved_line = dict(self.line)
-        self.dirty = False
-        self.mode = "idle"
-        self._reset_drag()
-        self.message = f"Saved to {path}"
-
-    def handle_mouse(self, event, x: int, y: int, _flags, _param):
-        x = clamp(x, 0, max(self._frame_w - 1, 0))
-        y = clamp(y, 0, max(self._frame_h - 1, 0))
-
-        if self.mode == "roi":
-            self._handle_roi_mouse(event, x, y)
-        elif self.mode == "line":
-            self._handle_line_mouse(event, x, y)
-
-    def draw_overlay(self, frame):
-        cv2.putText(
-            frame,
-            f"EDIT: {self.mode.upper()}",
-            (30, 85),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 255, 255),
-            2,
-        )
-        cv2.putText(
-            frame,
-            self.message[:90],
-            (30, 115),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            1,
-        )
-
-        for hx, hy in self._roi_handles():
-            cv2.circle(frame, (hx, hy), 6, (255, 255, 0), -1)
-
-        cv2.circle(frame, (self.line["x1"], self.line["y1"]), 7, (0, 0, 255), -1)
-        cv2.circle(frame, (self.line["x2"], self.line["y2"]), 7, (0, 0, 255), -1)
-
-    def _handle_roi_mouse(self, event, x: int, y: int):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            handle = self._hit_test_roi_handle(x, y)
-            if handle is not None:
-                self._drag_action = ("roi_handle", handle)
-            elif self._point_in_roi(x, y, self.roi):
-                self._drag_action = ("roi_move", None)
-            else:
-                self._drag_action = ("roi_new", None)
-                self.roi = {"x": x, "y": y, "w": 0, "h": 0}
-            self._drag_start = (x, y)
-            self._roi_start = dict(self.roi)
-            return
-
-        if event == cv2.EVENT_MOUSEMOVE and self._drag_action and self._drag_start:
-            start_x, start_y = self._drag_start
-            action, handle = self._drag_action
-            if action == "roi_new":
-                self.roi = self._normalize_roi(
-                    {"x": start_x, "y": start_y, "w": x - start_x, "h": y - start_y}
-                )
-            elif action == "roi_move" and self._roi_start is not None:
-                dx = x - start_x
-                dy = y - start_y
-                self.roi = self._clamp_roi(
-                    {
-                        "x": self._roi_start["x"] + dx,
-                        "y": self._roi_start["y"] + dy,
-                        "w": self._roi_start["w"],
-                        "h": self._roi_start["h"],
-                    }
-                )
-            elif action == "roi_handle" and handle and self._roi_start is not None:
-                self.roi = self._resize_roi(handle, x, y, self._roi_start)
-            self.dirty = True
-            return
-
-        if event == cv2.EVENT_LBUTTONUP:
-            self.roi = self._clamp_roi(self._normalize_roi(self.roi))
-            self._reset_drag()
-            self.message = "ROI updated. Press S to save or C to cancel"
-
-    def _handle_line_mouse(self, event, x: int, y: int):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            handle = self._hit_test_line_handle(x, y)
-            if handle is not None:
-                self._drag_action = ("line_handle", handle)
-            elif self._point_near_line(x, y):
-                self._drag_action = ("line_move", None)
-            else:
-                self._drag_action = ("line_new", None)
-                self.line = {"x1": x, "y1": y, "x2": x, "y2": y}
-            self._drag_start = (x, y)
-            self._line_start = dict(self.line)
-            return
-
-        if event == cv2.EVENT_MOUSEMOVE and self._drag_action and self._drag_start:
-            start_x, start_y = self._drag_start
-            action, handle = self._drag_action
-            if action == "line_new" and self._line_start is not None:
-                self.line = {
-                    "x1": self._line_start["x1"],
-                    "y1": self._line_start["y1"],
-                    "x2": x,
-                    "y2": y,
-                }
-            elif action == "line_move" and self._line_start is not None:
-                dx = x - start_x
-                dy = y - start_y
-                self.line = self._clamp_line(
-                    {
-                        "x1": self._line_start["x1"] + dx,
-                        "y1": self._line_start["y1"] + dy,
-                        "x2": self._line_start["x2"] + dx,
-                        "y2": self._line_start["y2"] + dy,
-                    }
-                )
-            elif action == "line_handle" and handle and self._line_start is not None:
-                next_line = dict(self._line_start)
-                next_line[handle] = x
-                next_line["y" + handle[1]] = y
-                self.line = self._clamp_line(next_line)
-            self.dirty = True
-            return
-
-        if event == cv2.EVENT_LBUTTONUP:
-            self.line = self._clamp_line(self.line)
-            self._reset_drag()
-            self.message = "Line updated. Press S to save or C to cancel"
-
-    def _roi_handles(self) -> list[tuple[int, int]]:
-        return [
-            (self.roi["x"], self.roi["y"]),
-            (self.roi["x"] + self.roi["w"], self.roi["y"]),
-            (self.roi["x"], self.roi["y"] + self.roi["h"]),
-            (self.roi["x"] + self.roi["w"], self.roi["y"] + self.roi["h"]),
-        ]
-
-    def _hit_test_roi_handle(self, x: int, y: int) -> str | None:
-        labels = ["tl", "tr", "bl", "br"]
-        for label, (hx, hy) in zip(labels, self._roi_handles()):
-            if abs(x - hx) <= self.HANDLE_RADIUS and abs(y - hy) <= self.HANDLE_RADIUS:
-                return label
-        return None
-
-    def _hit_test_line_handle(self, x: int, y: int) -> str | None:
-        if abs(x - self.line["x1"]) <= self.HANDLE_RADIUS and abs(y - self.line["y1"]) <= self.HANDLE_RADIUS:
-            return "x1"
-        if abs(x - self.line["x2"]) <= self.HANDLE_RADIUS and abs(y - self.line["y2"]) <= self.HANDLE_RADIUS:
-            return "x2"
-        return None
-
-    def _point_in_roi(self, x: int, y: int, roi: dict) -> bool:
-        return roi["x"] <= x <= roi["x"] + roi["w"] and roi["y"] <= y <= roi["y"] + roi["h"]
-
-    def _point_near_line(self, x: int, y: int) -> bool:
-        x1 = self.line["x1"]
-        y1 = self.line["y1"]
-        x2 = self.line["x2"]
-        y2 = self.line["y2"]
-        dx = x2 - x1
-        dy = y2 - y1
-        if dx == 0 and dy == 0:
-            return abs(x - x1) <= self.LINE_HIT_TOLERANCE and abs(y - y1) <= self.LINE_HIT_TOLERANCE
-        t = ((x - x1) * dx + (y - y1) * dy) / float(dx * dx + dy * dy)
-        t = max(0.0, min(1.0, t))
-        proj_x = x1 + t * dx
-        proj_y = y1 + t * dy
-        return ((x - proj_x) ** 2 + (y - proj_y) ** 2) ** 0.5 <= self.LINE_HIT_TOLERANCE
-
-    def _normalize_roi(self, roi: dict) -> dict:
-        x1 = roi["x"]
-        y1 = roi["y"]
-        x2 = roi["x"] + roi["w"]
-        y2 = roi["y"] + roi["h"]
-        left = min(x1, x2)
-        top = min(y1, y2)
-        right = max(x1, x2)
-        bottom = max(y1, y2)
-        return {"x": left, "y": top, "w": right - left, "h": bottom - top}
-
-    def _clamp_roi(self, roi: dict) -> dict:
-        roi = dict(roi)
-        roi["w"] = max(0, roi["w"])
-        roi["h"] = max(0, roi["h"])
-        roi["x"] = clamp(roi["x"], 0, max(self._frame_w - roi["w"], 0))
-        roi["y"] = clamp(roi["y"], 0, max(self._frame_h - roi["h"], 0))
-        roi["w"] = min(roi["w"], max(self._frame_w - roi["x"], 0))
-        roi["h"] = min(roi["h"], max(self._frame_h - roi["y"], 0))
-        return roi
-
-    def _resize_roi(self, handle: str, x: int, y: int, base_roi: dict) -> dict:
-        left = base_roi["x"]
-        top = base_roi["y"]
-        right = base_roi["x"] + base_roi["w"]
-        bottom = base_roi["y"] + base_roi["h"]
-
-        if "l" in handle:
-            left = x
-        else:
-            right = x
-
-        if "t" in handle:
-            top = y
-        else:
-            bottom = y
-
-        return self._clamp_roi(
-            self._normalize_roi(
-                {"x": left, "y": top, "w": right - left, "h": bottom - top}
-            )
-        )
-
-    def _clamp_line(self, line: dict) -> dict:
-        return {
-            "x1": clamp(line["x1"], 0, max(self._frame_w - 1, 0)),
-            "y1": clamp(line["y1"], 0, max(self._frame_h - 1, 0)),
-            "x2": clamp(line["x2"], 0, max(self._frame_w - 1, 0)),
-            "y2": clamp(line["y2"], 0, max(self._frame_h - 1, 0)),
-        }
-
-    def _reset_drag(self):
-        self._drag_action = None
-        self._drag_start = None
-        self._roi_start = None
-        self._line_start = None
 
 
 class EditorControlPanel:
@@ -5718,324 +3290,6 @@ class CompactEditorControlPanel:
 # ---------------------------------------------------------------------------
 # Stream com reconexão automática
 # ---------------------------------------------------------------------------
-class StreamCapture:
-    MAX_FAILURES = 30
-    SOURCE_OPEN_FAILOVER_THRESHOLD = 2
-    LIVE_EDGE_DRAIN_SECONDS = 1.25
-    LIVE_EDGE_MAX_FRAMES = 60
-    LIVE_EDGE_SLOW_READ_MS = 120.0
-
-    def __init__(
-        self,
-        url: str,
-        stats: RuntimeStats | None = None,
-        *,
-        fallback_url: str = "",
-        ffmpeg_options=None,
-        buffer_size: int = 1,
-        open_timeout_ms: int = 5000,
-        read_timeout_ms: int = 5000,
-        target_fps: float = 0.0,
-    ):
-        self.url = str(url or "").strip()
-        self.stats = stats
-        self.cap: cv2.VideoCapture | None = None
-        self._fail_count = 0
-        self.ffmpeg_options = normalize_ffmpeg_capture_options(ffmpeg_options)
-        self.buffer_size = max(1, int(buffer_size))
-        self.open_timeout_ms = max(0, int(open_timeout_ms))
-        self.read_timeout_ms = max(0, int(read_timeout_ms))
-        self.target_fps = max(0.0, float(target_fps))
-        self._effective_fps = 0.0
-        self._reset_requested = False
-        self._refresh_latest_requested = False
-        self._state_lock = threading.Lock()
-        self._last_frame_monotonic = 0.0
-        self._read_started_monotonic = 0.0
-        self._forced_interrupt_count = 0
-        self._source_urls = self._build_source_url_candidates(self.url, fallback_url)
-        self._source_index = 0
-        self._source_open_failures = [0 for _ in self._source_urls]
-        self.url = self._source_urls[self._source_index]
-        self._connect()
-
-    @staticmethod
-    def _build_source_url_candidates(primary_url: str, fallback_url: str) -> list[str]:
-        candidates: list[str] = []
-        for candidate in (primary_url, fallback_url):
-            normalized = str(candidate or "").strip()
-            if normalized and normalized not in candidates:
-                candidates.append(normalized)
-        if not candidates:
-            raise ValueError("Nenhuma URL de captura configurada.")
-        return candidates
-
-    def _advance_source(self, reason: str) -> bool:
-        if len(self._source_urls) <= 1:
-            return False
-        next_index = (self._source_index + 1) % len(self._source_urls)
-        if next_index == self._source_index:
-            return False
-        previous_url = self._source_urls[self._source_index]
-        self._source_index = next_index
-        self.url = self._source_urls[self._source_index]
-        logger.warning(
-            "Alternando fonte de captura: %s -> %s (%s)",
-            previous_url,
-            self.url,
-            reason,
-        )
-        return True
-
-    def _connect(self):
-        if self.cap is not None:
-            self.cap.release()
-
-        attempts_remaining = len(self._source_urls)
-        while attempts_remaining > 0:
-            if self.ffmpeg_options:
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = self.ffmpeg_options
-
-            self.url = self._source_urls[self._source_index]
-            logger.info("Conectando ao stream: %s", self.url)
-            if self.ffmpeg_options:
-                logger.info("FFmpeg capture options: %s", self.ffmpeg_options)
-            self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-            try:
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
-            except Exception:
-                pass
-            try:
-                if self.open_timeout_ms > 0:
-                    self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.open_timeout_ms)
-            except Exception:
-                pass
-            try:
-                if self.read_timeout_ms > 0:
-                    self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.read_timeout_ms)
-            except Exception:
-                pass
-            self._fail_count = 0
-            opened = bool(self.cap.isOpened())
-            if self.stats is not None:
-                self.stats.set_stream_status(opened, self._fail_count)
-            reported_fps = 0.0
-            try:
-                reported_fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
-            except Exception:
-                reported_fps = 0.0
-
-            if self.target_fps > 0:
-                self._effective_fps = self.target_fps
-            elif 1.0 <= reported_fps <= 120.0:
-                self._effective_fps = reported_fps
-            else:
-                self._effective_fps = 15.0
-
-            logger.info(
-                "Pacing do stream: fps configurado=%.2f | fps detectado=%.2f | fps efetivo=%.2f",
-                self.target_fps,
-                reported_fps,
-                self._effective_fps,
-            )
-
-            if opened:
-                self._source_open_failures[self._source_index] = 0
-                return
-
-            self._source_open_failures[self._source_index] += 1
-            logger.warning("Falha ao abrir stream na conexao inicial.")
-            attempts_remaining -= 1
-            should_failover = (
-                len(self._source_urls) > 1
-                and self._source_open_failures[self._source_index] >= self.SOURCE_OPEN_FAILOVER_THRESHOLD
-            )
-            if not should_failover or not self._advance_source("falha de abertura consecutiva"):
-                return
-
-        if self.stats is not None:
-            self.stats.set_stream_status(False, self._fail_count)
-        return
-
-        if self.ffmpeg_options:
-            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = self.ffmpeg_options
-
-        logger.info("Conectando ao stream: %s", self.url)
-        if self.ffmpeg_options:
-            logger.info("FFmpeg capture options: %s", self.ffmpeg_options)
-        self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-        try:
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
-        except Exception:
-            pass
-        try:
-            if self.open_timeout_ms > 0:
-                self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.open_timeout_ms)
-        except Exception:
-            pass
-        try:
-            if self.read_timeout_ms > 0:
-                self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.read_timeout_ms)
-        except Exception:
-            pass
-        self._fail_count = 0
-        if self.stats is not None:
-            self.stats.set_stream_status(self.cap.isOpened(), self._fail_count)
-        reported_fps = 0.0
-        try:
-            reported_fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
-        except Exception:
-            reported_fps = 0.0
-
-        if self.target_fps > 0:
-            self._effective_fps = self.target_fps
-        elif 1.0 <= reported_fps <= 120.0:
-            self._effective_fps = reported_fps
-        else:
-            self._effective_fps = 15.0
-
-        logger.info(
-            "Pacing do stream: fps configurado=%.2f | fps detectado=%.2f | fps efetivo=%.2f",
-            self.target_fps,
-            reported_fps,
-            self._effective_fps,
-        )
-
-        if not self.cap.isOpened():
-            logger.warning("Falha ao abrir stream na conexão inicial.")
-
-    def read(self):
-        if self._refresh_latest_requested:
-            self._refresh_latest_requested = False
-            self._reset_requested = False
-            self._connect()
-            return self._read_most_recent_frame()
-
-        if self._reset_requested:
-            self._reset_requested = False
-            self._connect()
-
-        with self._state_lock:
-            self._read_started_monotonic = time.perf_counter()
-        ret, frame = self.cap.read()
-        with self._state_lock:
-            self._read_started_monotonic = 0.0
-        if not ret:
-            self._fail_count += 1
-            if self.stats is not None:
-                self.stats.set_stream_status(False, self._fail_count)
-
-            if self._fail_count >= self.MAX_FAILURES:
-                logger.warning("Stream perdido — reconectando...")
-                self._connect()
-
-            return False, None
-
-        self._fail_count = 0
-        with self._state_lock:
-            self._last_frame_monotonic = time.perf_counter()
-        if self.stats is not None:
-            self.stats.set_stream_status(True, self._fail_count)
-        return True, frame
-
-    def _read_most_recent_frame(self):
-        if self.cap is None:
-            return False, None
-
-        deadline = time.perf_counter() + self.LIVE_EDGE_DRAIN_SECONDS
-        last_frame = None
-        drained_frames = 0
-
-        while drained_frames < self.LIVE_EDGE_MAX_FRAMES and time.perf_counter() < deadline:
-            read_started = time.perf_counter()
-            ret, frame = self.cap.read()
-            read_elapsed_ms = (time.perf_counter() - read_started) * 1000.0
-
-            if not ret:
-                break
-
-            last_frame = frame
-            drained_frames += 1
-
-            # Reads that stay "fast" usually indicate buffered backlog.
-            # Once the read starts blocking, we are likely near the live edge.
-            if read_elapsed_ms >= self.LIVE_EDGE_SLOW_READ_MS:
-                break
-
-        if last_frame is not None:
-            logger.info(
-                "Atualizacao para frame mais atual concluida | frames descartados: %s",
-                max(0, drained_frames - 1),
-            )
-            self._fail_count = 0
-            if self.stats is not None:
-                self.stats.set_stream_status(True, self._fail_count)
-            return True, last_frame
-
-        if self.stats is not None:
-            self.stats.set_stream_status(False, self._fail_count)
-        return False, None
-
-    def request_reset(self):
-        logger.info("Reset manual do stream solicitado.")
-        self._reset_requested = True
-
-    def request_refresh_latest(self):
-        logger.info("Atualizacao manual para o frame mais atual solicitada.")
-        self._refresh_latest_requested = True
-
-    def get_stall_diagnostics(self) -> dict:
-        with self._state_lock:
-            read_started_monotonic = self._read_started_monotonic
-            last_frame_monotonic = self._last_frame_monotonic
-            forced_interrupt_count = self._forced_interrupt_count
-
-        now_perf = time.perf_counter()
-        read_duration_seconds = (
-            max(0.0, now_perf - read_started_monotonic)
-            if read_started_monotonic > 0.0
-            else 0.0
-        )
-        last_frame_age_seconds = (
-            max(0.0, now_perf - last_frame_monotonic)
-            if last_frame_monotonic > 0.0
-            else None
-        )
-        return {
-            "url": self.url,
-            "readDurationSeconds": read_duration_seconds,
-            "lastFrameAgeSeconds": last_frame_age_seconds,
-            "forcedInterruptCount": forced_interrupt_count,
-            "failCount": self._fail_count,
-        }
-
-    def force_interrupt_stalled_read(self, reason: str) -> bool:
-        cap = self.cap
-        if cap is None:
-            return False
-
-        with self._state_lock:
-            self._forced_interrupt_count += 1
-            forced_interrupt_count = self._forced_interrupt_count
-
-        logger.warning(
-            "Captura travada; forçando reset do stream (%s) | fonte=%s | tentativas=%s",
-            reason,
-            self.url,
-            forced_interrupt_count,
-        )
-        self._reset_requested = True
-        if self.stats is not None:
-            self.stats.set_stream_status(False, max(self._fail_count, 1))
-        try:
-            cap.release()
-        except Exception:
-            pass
-        return True
-
-    def release(self):
-        if self.cap:
-            self.cap.release()
 
 
 # ---------------------------------------------------------------------------
@@ -6245,6 +3499,7 @@ def main():
             auto_switch_round=False,
             phase="requested",
             activation_session_id=str(pending_camera_activation.get("activationSessionId") or ""),
+            configuration=cfg,
         ):
             pending_camera_activation["requestNotified"] = True
 
@@ -6574,11 +3829,22 @@ def main():
         if editor is None:
             return
 
+        allowed, reason = backend.ensure_camera_change_allowed(cfg.get("camera_id", ""), "salvar calibracao")
+        if not allowed:
+            editor.message = reason
+            return
         next_secondary_enabled = secondary_verification_enabled
         next_secondary_band_px = secondary_verification_band_px
         if control_panel is not None:
             next_secondary_enabled, next_secondary_band_px = control_panel._get_secondary_verification_settings()
 
+        proposal = dict(stream_store.get_selected_profile())
+        proposal.update(roi=dict(editor.roi), line=dict(editor.line), count_direction=count_direction,
+                        secondary_verification_enabled=next_secondary_enabled,
+                        secondary_verification_band_px=next_secondary_band_px)
+        if not backend.register_operational_configuration(proposal):
+            editor.message = "Alteracao bloqueada: aguarde o encerramento da rodada e a conexao com o backend."
+            return
         stream_store.save_selected_profile(
             roi=editor.roi,
             line=editor.line,
@@ -6595,13 +3861,14 @@ def main():
         if control_panel is not None:
             control_panel.set_active_stream_profile(stream_store.get_selected_profile())
 
-        editor.message = f"Calibracao salva para {cfg['camera_id']} (round ativo permitido)"
+        queue_stream_profile(proposal, message="Calibracao salva; aguardando ativacao da camera.")
 
     def set_count_direction(direction: str):
         nonlocal count_direction
 
-        count_direction = normalize_count_direction(direction)
-        cfg["count_direction"] = count_direction
+        proposal = dict(stream_store.get_selected_profile())
+        proposal["count_direction"] = normalize_count_direction(direction)
+        queue_stream_profile(proposal, message="Direcao atualizada; aguardando ativacao.")
 
     def request_stream_reset():
         queue_pipeline_refresh()
@@ -6612,6 +3879,12 @@ def main():
         nonlocal pending_stream_profile, roi, line, count_direction
         nonlocal secondary_verification_enabled, secondary_verification_band_px
 
+        allowed, reason = backend.ensure_camera_change_allowed(
+            cfg.get("camera_id", ""), "alterar configuracao", allow_settling=bool(profile.get("_activation_allow_settling")))
+        if not allowed:
+            raise ValueError(reason)
+        if not backend.register_operational_configuration(profile, allow_settling=bool(profile.get("_activation_allow_settling"))):
+            raise ValueError("Configuracao recusada pelo backend; perfil nao aplicado.")
         pending_stream_profile = dict(profile)
         roi = dict(profile["roi"])
         line = dict(profile["line"])
@@ -6659,19 +3932,14 @@ def main():
         )
         if profile is None:
             raise ValueError("Stream selecionada nao encontrada.")
+        allowed, reason = backend.ensure_camera_change_allowed(cfg.get("camera_id", ""), "carregar stream")
+        if not allowed:
+            raise ValueError(reason)
         ensure_profile_allowed_for_schedule(profile, action_name="carregar a stream")
+        queue_stream_profile(profile, message=f"Stream validada: {format_stream_profile_label(profile)}")
         profile = stream_store.select_profile(profile_id)
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
-        queued_profile = dict(profile)
-        queued_profile["_activation_auto_switch_round"] = True
-        queue_stream_profile(
-            queued_profile,
-            message=(
-                "Stream pronta para trocar; round sera alternado automaticamente: "
-                f"{format_stream_profile_label(profile)}"
-            ),
-        )
         return profile
 
     def force_stream_switch(
@@ -6682,6 +3950,9 @@ def main():
     ) -> dict:
         nonlocal pending_rotation_profile
 
+        allowed, reason = backend.ensure_camera_change_allowed(cfg.get("camera_id", ""), "troca manual")
+        if not allowed:
+            raise ValueError(reason)
         target_url = str(stream_url or "").strip()
         target_camera_id = str(camera_id or "").strip()
         target_profile_id = str(profile_id or "").strip()
@@ -6716,33 +3987,9 @@ def main():
             camera_id=target_camera_id or cfg.get("camera_id", ""),
             stream_url=target_url or cfg.get("stream_url", ""),
         )
-        profile = stream_store.select_profile(profile["id"])
-        save_config(config_path, cfg)
-        sync_stream_profiles_to_supabase(cfg, supabase_sync)
-
-        target_camera_id = str(profile.get("camera_id") or "").strip()
-        reason = (
-            "Vision worker forced camera switch "
-            f"from {current_camera_id or 'unknown'} to {target_camera_id or 'unknown'} "
-            f"profile={profile.get('id', '')}"
-        )
-        voided_current = backend.void_current_round(current_camera_id, reason) if current_camera_id else False
-        voided_target = False
-        if target_camera_id and target_camera_id != current_camera_id:
-            voided_target = backend.void_current_round(target_camera_id, reason)
-
+        # Manual controls obey the same freeze as normal profile selection.
         pending_rotation_profile = None
-        forced_profile = dict(profile)
-        forced_profile["_activation_skip_notify"] = True
-        queue_stream_profile(
-            forced_profile,
-            message=(
-                "Troca forcada enviada ao vision: "
-                f"{format_stream_profile_label(profile)} | "
-                f"round atual resetado={voided_current}; destino resetado={voided_target}"
-            ),
-        )
-        return profile
+        return select_stream_profile(profile["id"])
 
     def open_stream_url(stream_url: str, stream_name: str, camera_id: str) -> dict:
         unlocked, reason = backend.ensure_camera_unlocked(cfg.get("camera_id", ""), "alterar stream")
@@ -6858,18 +4105,7 @@ def main():
         )
         save_config(config_path, cfg)
         sync_stream_profiles_to_supabase(cfg, supabase_sync)
-        saved_backend = backend.save_camera_config(
-            camera_id=profile["camera_id"],
-            roi=profile["roi"],
-            line={
-                "x1": profile["line"]["x1"],
-                "y1": profile["line"]["y1"],
-                "x2": profile["line"]["x2"],
-                "y2": profile["line"]["y2"],
-            },
-            count_direction=profile["count_direction"],
-        )
-        backend_suffix = " + backend" if saved_backend else " (backend pendente)"
+        backend_suffix = ""
         queue_stream_profile(
             profile,
             message=(
@@ -7031,6 +4267,9 @@ def main():
             (180, 180, 180),
             1,
         )
+        if editor is not None:
+            idle_h, idle_w = idle_frame.shape[:2]
+            editor.set_display_size(idle_w, idle_h)
         cv2.imshow(WINDOW_NAME, idle_frame)
         key = poll_window_key(1)
         if key == -1:
@@ -7130,6 +4369,17 @@ def main():
                     editor.message = "Falha ao recriar ingestao da source"
 
         if next_pipeline_start is not None:
+            proposal = dict(stream_store.get_selected_profile())
+            proposal.update(stream_url=next_pipeline_start.source_url or cfg.get("stream_url"),
+                            camera_id=next_pipeline_start.camera_id or cfg.get("camera_id"),
+                            count_direction=next_pipeline_start.direction or count_direction,
+                            line=next_pipeline_start.count_line or line)
+            allowed, reason = backend.ensure_camera_change_allowed(cfg.get("camera_id", ""), "iniciar pipeline")
+            if not allowed or not backend.register_operational_configuration(proposal):
+                logger.warning("Pipeline nao alterada: configuracao bloqueada pelo backend.")
+                continue
+            # Reuse the normal profile handshake; do not start a pipeline without its frozen configuration.
+            queue_stream_profile(proposal, message="Pipeline validada; aguardando ativacao.")
             if next_pipeline_start.source_url:
                 cfg["stream_url"] = next_pipeline_start.source_url
             if next_pipeline_start.camera_id:
@@ -7261,16 +4511,17 @@ def main():
                     cfg["stream_url"],
                 )
                 if not bool(profile.get("_activation_skip_notify")):
-                    backend.notify_stream_profile_activated(
+                    request_notified = backend.notify_stream_profile_activated(
                         cfg.get("camera_id", ""),
                         profile.get("id", ""),
                         allow_settling=bool(profile.get("_activation_allow_settling")),
                         auto_switch_round=bool(profile.get("_activation_auto_switch_round")),
                         phase="requested",
                         activation_session_id=activation_session_id,
+                        configuration=cfg,
                     )
                     if isinstance(pending_camera_activation, dict):
-                        pending_camera_activation["requestNotified"] = True
+                        pending_camera_activation["requestNotified"] = request_notified
                 publish_rotation_status(f"Perfil ativo: {format_stream_profile_label(profile)}")
             except Exception as exc:
                 logger.warning("Falha ao aplicar perfil de stream: %s", exc)
@@ -7342,36 +4593,14 @@ def main():
             last_config_poll = now_ts
             admin_cfg = backend.fetch_camera_config(cfg["camera_id"])
             if admin_cfg and (editor is None or (editor.mode == "idle" and not editor.dirty)):
-                if admin_cfg.get("roi"):
-                    roi = admin_cfg["roi"]
-
-                if admin_cfg.get("countLine"):
-                    line = {
-                        "x1": admin_cfg["countLine"]["x1"],
-                        "y1": admin_cfg["countLine"]["y1"],
-                        "x2": admin_cfg["countLine"]["x2"],
-                        "y2": admin_cfg["countLine"]["y2"],
-                    }
-
-                if admin_cfg.get("countDirection"):
-                    count_direction = normalize_count_direction(admin_cfg["countDirection"])
-
-                stream_store.save_selected_profile(
-                    roi=roi,
-                    line=line,
-                    count_direction=count_direction,
-                )
-                sync_stream_profiles_to_supabase(cfg, supabase_sync)
-
-                logger.info(
-                    "Config atualizada pelo admin: line=%s, direction=%s",
-                    line,
-                    count_direction,
-                )
-                if editor is not None:
-                    editor.sync_external_values(roi, line)
-                if control_panel is not None:
-                    control_panel.set_active_stream_profile(stream_store.get_selected_profile())
+                proposal = dict(stream_store.get_selected_profile())
+                proposal.update(roi=admin_cfg.get("roi") or roi,
+                                line=admin_cfg.get("countLine") or line,
+                                count_direction=admin_cfg.get("countDirection") or count_direction)
+                try:
+                    queue_stream_profile(proposal, message="Configuracao remota validada; aguardando ativacao.")
+                except ValueError as exc:
+                    logger.warning("Configuracao remota nao aplicada: %s", exc)
 
         inference_is_fresh = should_process_frame(frame_count, inference_frame_stride)
         inference_start = time.perf_counter()
@@ -7397,8 +4626,6 @@ def main():
 
         if editor is not None:
             editor.set_frame_size(w, h)
-            roi = dict(editor.roi)
-            line = dict(editor.line)
 
         boxes = results[0].boxes
 
@@ -7581,7 +4808,7 @@ def main():
                         "confidence": round(conf, 2),
                         "insideRoi": is_inside,
                         "crossedLine": did_cross,
-                        "countReason": count_reason or fallback_state.get("countReason", ""),
+                        "countReason": count_reason or fallback_states.get(track_id, {}).get("countReason", ""),
                         "counted": is_counted,
                     }
                 )
@@ -7656,6 +4883,8 @@ def main():
                 )
                 operator_stream = resize_frame_max_width(operator_stream, operator_preview_max_width)
                 if editor is not None:
+                    display_h, display_w = operator_stream.shape[:2]
+                    editor.set_display_size(display_w, display_h)
                     editor.draw_overlay(operator_stream)
                 last_operator_preview = operator_stream
                 last_operator_preview_at = time.time()
@@ -7710,7 +4939,7 @@ def main():
                     activation_nonce = uuid.uuid4().hex
                     pending_camera_activation["frontendAckNonce"] = activation_nonce
                 if not bool(pending_camera_activation.get("readyNotified")):
-                    backend.notify_stream_profile_activated(
+                    ready_notified = backend.notify_stream_profile_activated(
                         activation_requested_camera,
                         activation_requested_profile,
                         allow_settling=True,
@@ -7718,8 +4947,11 @@ def main():
                         phase="frontend_pending",
                         activation_nonce=activation_nonce,
                         activation_session_id=activation_session_id,
+                        configuration=cfg,
                     )
-                    pending_camera_activation["readyNotified"] = True
+                    pending_camera_activation["readyNotified"] = ready_notified
+                    if not ready_notified:
+                        continue
                 remember_recent_runtime_camera_id(activation_requested_camera)
                 update_camera_activation_status(
                     phase="ready",
@@ -7745,6 +4977,9 @@ def main():
                 if control_panel.should_close:
                     break
 
+            if editor is not None and operator_stream is not None:
+                display_h, display_w = operator_stream.shape[:2]
+                editor.set_display_size(display_w, display_h)
             cv2.imshow(WINDOW_NAME, operator_stream)
             key = poll_window_key(1)
             if key == -1:

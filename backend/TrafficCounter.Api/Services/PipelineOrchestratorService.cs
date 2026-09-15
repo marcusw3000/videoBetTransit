@@ -21,6 +21,7 @@ public class PipelineOrchestratorService
     private readonly IMediaMtxClient _mediaMtx;
     private readonly IHttpClientFactory _httpFactory;
     private readonly VisionWorkerOptions _visionOptions;
+    private readonly SecurityOptions _security;
     private readonly ILogger<PipelineOrchestratorService> _logger;
 
     // Per-session semaphore to prevent concurrent start/stop on same session
@@ -32,12 +33,14 @@ public class PipelineOrchestratorService
         IMediaMtxClient mediaMtx,
         IHttpClientFactory httpFactory,
         IOptions<VisionWorkerOptions> visionOptions,
+        IOptions<SecurityOptions> security,
         ILogger<PipelineOrchestratorService> logger)
     {
         _scopeFactory = scopeFactory;
         _mediaMtx = mediaMtx;
         _httpFactory = httpFactory;
         _visionOptions = visionOptions.Value;
+        _security = security.Value;
         _logger = logger;
     }
 
@@ -145,6 +148,7 @@ public class PipelineOrchestratorService
         try
         {
             var http = _httpFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("X-API-Key", _security.BackendApiKey);
             var url = _visionOptions.BaseUrl + _visionOptions.StartPipelinePath;
             var body = new
             {
@@ -178,6 +182,7 @@ public class PipelineOrchestratorService
         try
         {
             var http = _httpFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("X-API-Key", _security.BackendApiKey);
             var url = _visionOptions.BaseUrl + _visionOptions.StopPipelinePath;
             await http.PostAsJsonAsync(url, new { sessionId = sessionId.ToString() }, ct);
         }

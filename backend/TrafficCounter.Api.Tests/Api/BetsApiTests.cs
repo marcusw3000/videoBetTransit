@@ -19,11 +19,11 @@ public class BetsApiTests : IClassFixture<AppWebApplicationFactory>
     public BetsApiTests(AppWebApplicationFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
+        _client = factory.AuthenticatedClient("player");
     }
 
     [Fact]
-    public async Task CreateBet_accepts_valid_open_round_without_api_key()
+    public async Task CreateBet_accepts_authenticated_player()
     {
         var round = await _client.GetFromJsonAsync<RoundResponse>("/rounds/current?cameraId=cam_bet_accept");
 

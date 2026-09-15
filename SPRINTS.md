@@ -1,5 +1,7 @@
 # SPRINTS.md - Replanejamento a partir do 9230acf
 
+> Documento histórico. Para execução, consulte [PLANO_CONSOLIDADO.md](PLANO_CONSOLIDADO.md). As regras vigentes estão em [ROUND_RULES.md](ROUND_RULES.md); exemplos antigos de Turbo, duração e limites não descrevem o comportamento atual.
+
 Sequencia recomendada de sprints depois do rollback para o commit estavel `9230acf`.
 
 Premissa:

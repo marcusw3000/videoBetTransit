@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace TrafficCounter.Api.Security;
 
@@ -19,12 +21,14 @@ public class RequireApiKeyAttribute : Attribute, IAsyncAuthorizationFilter
         var configuration = context.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
         var expectedKey = configuration[_configPath];
 
-        if (string.IsNullOrWhiteSpace(expectedKey))
-            return Task.CompletedTask;
-
         var providedKey = context.HttpContext.Request.Headers[HeaderName].FirstOrDefault();
-        if (providedKey == expectedKey)
+        if (!string.IsNullOrWhiteSpace(expectedKey) && expectedKey != "CHANGE_ME"
+            && !string.IsNullOrWhiteSpace(providedKey)
+            && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(providedKey), Encoding.UTF8.GetBytes(expectedKey)))
+        {
+            context.HttpContext.Items["AuthenticatedWorker"] = true;
             return Task.CompletedTask;
+        }
 
         context.Result = new UnauthorizedObjectResult(new { message = "Invalid or missing API key." });
         return Task.CompletedTask;
