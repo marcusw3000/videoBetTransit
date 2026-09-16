@@ -23,6 +23,7 @@ public class InternalController : ControllerBase
     private readonly HealthMonitorOptions _healthOptions;
     private readonly RoundService _roundService;
     private readonly BetService _betService;
+    private readonly CameraManagementService _management;
 
     public InternalController(
         CrossingEventService crossingEventService,
@@ -30,7 +31,7 @@ public class InternalController : ControllerBase
         IDbContextFactory<AppDbContext> dbFactory,
         IOptions<HealthMonitorOptions> healthOptions,
         RoundService roundService,
-        BetService betService)
+        BetService betService, CameraManagementService management)
     {
         _crossingEventService = crossingEventService;
         _sessionService = sessionService;
@@ -38,6 +39,7 @@ public class InternalController : ControllerBase
         _healthOptions = healthOptions.Value;
         _roundService = roundService;
         _betService = betService;
+        _management = management;
     }
 
     [HttpPost("crossing-events")]
@@ -109,6 +111,52 @@ public class InternalController : ControllerBase
             IsLocked = isLocked,
             Reason = isLocked ? RoundService.CameraLockedMessage : null,
         });
+    }
+
+    [HttpGet("camera-management")]
+    public async Task<IActionResult> CameraManagement() => Ok(await _management.GetAsync());
+
+    // The local worker panel uses the device API key, so it never receives an
+    // admin browser cookie. The backend remains the authority and audit source.
+    [HttpPost("camera-management/activate")]
+    public async Task<IActionResult> ActivateCameraManagement([FromBody] ActivateCameraManagementRequest request)
+    {
+        if (!ModelState.IsValid) return BadRequest(new { error = "Informe camera, perfil e justificativa." });
+        return Ok(await _management.ActivateAsync(request, "worker"));
+    }
+
+    [HttpPut("camera-management/draft")]
+    public async Task<IActionResult> UpdateCameraManagementDraft([FromBody] UpdateCameraManagementDraftRequest request)
+    {
+        try
+        {
+            var state = await _management.UpdateDraftAsync(request, "worker");
+            return state is null ? Conflict(await _management.GetAsync()) : Ok(state);
+        }
+        catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
+    [HttpPost("camera-management/select-camera")]
+    public async Task<IActionResult> SelectManagedCamera([FromBody] SelectManagedCameraRequest request)
+    {
+        if (!ModelState.IsValid) return BadRequest(new { error = "Informe camera e perfil." });
+        try { return Ok(await _management.SelectCameraAsync(request, "worker")); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
+    [HttpPost("camera-management/apply")]
+    public async Task<IActionResult> ApplyCameraManagement()
+    {
+        try { return Ok(await _management.ApplyAsync("worker")); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
+    [HttpPost("camera-management/deactivate")]
+    public async Task<IActionResult> DeactivateCameraManagement()
+    {
+        try { return Ok(await _management.DeactivateAsync("worker")); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
     }
 
     [HttpPost("camera-config")]

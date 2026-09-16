@@ -6,7 +6,7 @@ set "D=%~dp0"
 set "BACKEND_PORT=8080"
 set "FRONTEND_PORT=5173"
 set "WORKER_PORT=8090"
-set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%/rounds/current?cameraId=cam_001"
+set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%/health"
 set "WORKER_URL=http://127.0.0.1:%WORKER_PORT%/health"
 
 echo ============================================================

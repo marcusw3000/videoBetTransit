@@ -6,7 +6,7 @@ set "BACKEND_PORT=8080"
 set "FRONTEND_PORT=5173"
 set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%"
 set "FRONTEND_URL=http://127.0.0.1:%FRONTEND_PORT%"
-set "BACKEND_HEALTH_URL=%BACKEND_URL%/rounds/current?cameraId=cam_001"
+set "BACKEND_HEALTH_URL=%BACKEND_URL%/health"
 set "WORKER_URL=http://127.0.0.1:8090/health"
 set "MODE=%~1"
 
@@ -148,19 +148,31 @@ if errorlevel 1 (
 echo [OK] MediaMTX pronto.
 echo.
 
-echo Verificando porta %BACKEND_PORT%...
-powershell -NoProfile -Command "if(Get-NetTCPConnection -LocalPort %BACKEND_PORT% -State Listen -ErrorAction SilentlyContinue){ exit 1 } else { exit 0 }"
-if errorlevel 1 (
-    echo [ERRO] Porta %BACKEND_PORT% ja esta em uso.
-    pause & exit /b 1
+set "BACKEND_ALREADY_RUNNING="
+echo Verificando backend na porta %BACKEND_PORT%...
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing '%BACKEND_HEALTH_URL%' -TimeoutSec 3; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300) { exit 0 } else { exit 1 } } catch { exit 1 }"
+if not errorlevel 1 (
+    set "BACKEND_ALREADY_RUNNING=1"
+    echo [OK] Backend local ja esta saudavel; sera reutilizado.
+) else (
+    powershell -NoProfile -Command "if(Get-NetTCPConnection -LocalPort %BACKEND_PORT% -State Listen -ErrorAction SilentlyContinue){ exit 1 } else { exit 0 }"
+    if errorlevel 1 (
+        echo [ERRO] A porta %BACKEND_PORT% esta ocupada por um backend que nao responde ao healthcheck.
+        echo Feche a janela [BACKEND] antiga e execute start.bat novamente.
+        pause & exit /b 1
+    )
+    echo [OK] Porta %BACKEND_PORT% livre.
 )
-echo [OK] Porta %BACKEND_PORT% livre.
 echo.
 
 if not exist "%D%logs" mkdir "%D%logs"
 
 echo 1. Iniciando Backend .NET (porta %BACKEND_PORT%)...
-start cmd /k "cd /d %D% && call backend-dev.bat"
+if defined BACKEND_ALREADY_RUNNING (
+    echo [INFO] Reutilizando backend local existente.
+) else (
+    start cmd /k "cd /d %D% && call backend-dev.bat"
+)
 call :wait_for_backend
 if errorlevel 1 (
     echo [ERRO] O backend nao respondeu em %BACKEND_URL%.

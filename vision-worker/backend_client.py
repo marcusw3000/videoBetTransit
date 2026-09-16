@@ -62,6 +62,12 @@ class BackendClient:
         self.round_lock_url_template = f"{self.base_url}/internal/cameras/{{camera_id}}/round-lock"
         self.camera_config_validation_url = f"{self.base_url}/internal/camera-config/validate-change"
         self.health_report_url = f"{self.base_url}/internal/health-report"
+        self.management_mode_url = f"{self.base_url}/internal/camera-management"
+        self.management_activate_url = f"{self.management_mode_url}/activate"
+        self.management_draft_url = f"{self.management_mode_url}/draft"
+        self.management_apply_url = f"{self.management_mode_url}/apply"
+        self.management_deactivate_url = f"{self.management_mode_url}/deactivate"
+        self.management_select_camera_url = f"{self.management_mode_url}/select-camera"
         self.api_key = api_key
         self.session_id = session_id
         self.count_direction = count_direction
@@ -181,6 +187,50 @@ class BackendClient:
 
     def fetch_camera_config(self, _camera_id: str) -> dict | None:
         return None
+
+    def fetch_management_mode(self) -> dict | None:
+        try:
+            response = self._session.get(self.management_mode_url, headers=self._default_headers, timeout=3)
+            return response.json() if response.status_code == 200 else None
+        except requests.RequestException:
+            return None
+
+    def activate_management_mode(self, camera_id: str, stream_profile_id: str, reason: str) -> tuple[dict | None, str]:
+        return self._management_request("post", self.management_activate_url, {
+            "cameraId": camera_id, "streamProfileId": stream_profile_id, "reason": reason,
+        })
+
+    def update_management_draft(self, expected_revision: int, roi: dict, line: dict) -> tuple[dict | None, str]:
+        return self._management_request("put", self.management_draft_url, {
+            "expectedRevision": expected_revision, "roi": roi, "line": line,
+        })
+
+    def apply_management_draft(self) -> tuple[dict | None, str]:
+        return self._management_request("post", self.management_apply_url)
+
+    def deactivate_management_mode(self) -> tuple[dict | None, str]:
+        return self._management_request("post", self.management_deactivate_url)
+
+    def select_management_camera(self, camera_id: str, stream_profile_id: str) -> tuple[dict | None, str]:
+        return self._management_request("post", self.management_select_camera_url, {
+            "cameraId": camera_id, "streamProfileId": stream_profile_id,
+        })
+
+    def _management_request(self, method: str, url: str, payload: dict | None = None) -> tuple[dict | None, str]:
+        try:
+            response = getattr(self._session, method)(url, json=payload, headers=self._default_headers, timeout=5)
+            if response.status_code < 300:
+                self._mark_success()
+                return response.json(), ""
+            try:
+                detail = str(response.json().get("error") or response.text[:200])
+            except ValueError:
+                detail = response.text[:200]
+            self._mark_error(f"camera management HTTP {response.status_code}: {detail}")
+            return None, detail or f"HTTP {response.status_code}"
+        except requests.RequestException as exc:
+            self._mark_error(f"camera management request failed: {exc}")
+            return None, "Sem conexao com o backend para alterar o modo de gerenciamento."
 
     def fetch_round_lock(self, camera_id: str) -> dict | None:
         normalized_camera_id = str(camera_id or "").strip()

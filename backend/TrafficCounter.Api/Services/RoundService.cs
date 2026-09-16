@@ -57,7 +57,7 @@ public class RoundService
 
         var normalizedCameraId = NormalizeCameraId(cameraId);
         var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
-        if (!CanCreateRounds(state))
+        if (!CanCreateRounds(state) || await IsPipelineManagementActiveAsync(db))
             return false;
 
         var active = await db.Rounds.AnyAsync(r =>
@@ -669,6 +669,9 @@ public class RoundService
 
     public async Task EnsureCameraUnlockedAsync(string cameraId = "default")
     {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        if (await IsPipelineManagementActiveAsync(db))
+            throw new InvalidOperationException("Pipeline bloqueada pelo modo de gerenciamento de cameras.");
         if (await IsCameraLockedForRoundAsync(cameraId))
             throw new InvalidOperationException(CameraLockedMessage);
     }
@@ -683,6 +686,8 @@ public class RoundService
     private async Task<Round?> CreateNewRoundAsync(AppDbContext db, string cameraId)
     {
         var normalizedCameraId = NormalizeCameraId(cameraId);
+        if (await IsPipelineManagementActiveAsync(db))
+            return null;
         var creationLock = CameraRoundCreationLocks.GetOrAdd(normalizedCameraId, _ => new SemaphoreSlim(1, 1));
         await creationLock.WaitAsync();
 
@@ -708,7 +713,7 @@ public class RoundService
 
             var now = DateTime.UtcNow;
             var state = await GetOrCreateCameraRoundStateAsync(db, normalizedCameraId);
-            if (!CanCreateRounds(state) || (_options.RequireOperationalSnapshot && state.OperationalConfigurationJson is null))
+            if (!CanCreateRounds(state) || await IsPipelineManagementActiveAsync(db) || (_options.RequireOperationalSnapshot && state.OperationalConfigurationJson is null))
             {
                 _logger.LogInformation(
                     "[Round] Criacao adiada para camera {CameraId} porque activationPhase={Phase} readyForRounds={ReadyForRounds} activationSessionId={ActivationSessionId}.",
@@ -1023,6 +1028,9 @@ public class RoundService
     }
 
     private static bool CanCreateRounds(CameraRoundState state) => state.ReadyForRounds;
+
+    private static Task<bool> IsPipelineManagementActiveAsync(AppDbContext db) =>
+        db.PipelineManagementStates.AnyAsync(x => x.Id == 1 && x.IsActive);
 
     private async Task EnsurePendingRoundsAsync()
     {

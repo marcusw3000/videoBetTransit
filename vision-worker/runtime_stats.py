@@ -151,6 +151,8 @@ class RuntimeStats:
                 "captureFps": round(self._capture_fps_average, 2),
                 "captureFpsInstant": round(self._capture_fps_instant, 2),
                 "inferenceFps": round(self._fps_average, 2),
+                "capturedFrames": self._captured_frames,
+                "publishedFrames": self._published_frames,
                 "framesProcessed": self._frames_processed,
                 "fpsInstant": round(self._fps_instant, 2),
                 "fpsAverage": round(self._fps_average, 2),

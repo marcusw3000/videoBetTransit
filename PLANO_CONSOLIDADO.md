@@ -1,6 +1,6 @@
 # Plano consolidado — videoBetTransit
 
-Revisão: 14/09/2026, após implementação e revisão corretiva de P01–P06. Base: código local, incluindo as alterações ainda não publicadas.
+Revisão: 15/09/2026, incluindo correções locais de responsividade do worker e continuidade de vídeo. Base: código local, incluindo as alterações ainda não publicadas.
 
 **P01–P04 concluídos e validados localmente. P05 está parcial pela política de retenção ainda não definida. P06 está em preparação local; faltam os aceites em instalação limpa e ambiente operacional.** Regras vigentes: [ROUND_RULES.md](ROUND_RULES.md).
 
@@ -68,6 +68,14 @@ O produto atual é uma demonstração com apostas simuladas. Não há carteira, 
 A migração [FreezeRoundConfigurationAndAudit](backend/TrafficCounter.Api/Migrations/20260914083515_FreezeRoundConfigurationAndAudit.cs) mantém snapshots e códigos históricos ausentes como nulos. Por padrão, novas rodadas aguardam configuração registrada e ativação da câmera. O painel mostra explicitamente a ausência de configuração nos registros antigos. Ator `worker` identifica a credencial interna; não identifica individualmente quem utiliza a interface local Python.
 
 ### Evidência de validação disponível
+
+#### Correção de desempenho — 15/09/2026
+
+Concluída localmente a investigação dos travamentos periódicos do controle e da entrega irregular de frames. Consultas periódicas e renovação da URL não bloqueiam mais a thread da interface; as tabelas são atualizadas sem reconstrução integral. Para YouTube, o worker pré-carrega até três segmentos comprimidos, decodifica arquivos temporários completos e renova URLs sem reiniciar a sequência. RTSP e formatos HLS não suportados por esse buffer mantêm a captura nativa. O player conserva o decodificador entre atualizações React, e o formulário preserva edições e sua revisão de origem.
+
+O ensaio integrado de 3 minutos produziu aproximadamente **20 frames novos/s**, sem amostras de 1 segundo sem frames depois da preparação inicial. Uma segunda janela de 60 segundos registrou **22,95 frames novos/s**, captura de **29,37 FPS**, publicação de **14,99 FPS**, zero desconexões e zero reinícios do publisher. O controle respondeu a **120 verificações sem timeout de 250 ms** (máximo observado de 87,46 ms). O componente real do frontend reproduziu a stream local a **14,99 FPS por 45 segundos**, sem amostras congeladas nem frames descartados pelo navegador. `validate.bat` foi aprovado com 127 testes Python, 118 .NET e 3 JavaScript; os 5 testes Playwright também passaram.
+
+Esses números são evidência local, não garantia de disponibilidade do YouTube nem homologação da latência ou precisão de contagem. O buffer troca alguma latência por continuidade; não houve alteração de modelo, ROI, linha ou regras de contagem. P05/P06 continuam parciais. Detalhes e comandos: [relatório de desempenho](docs/WORKER_PERFORMANCE.md).
 
 A execução final de `validate.bat`, registrada em `artifacts/validation-p01-p03.log`, aprovou **104 testes Python, 111 testes .NET e 3 testes JavaScript**, além de lint, encoding e build. Os **3 testes Playwright** passaram, incluindo motivo estruturado de anulação, acesso ao snapshot e auditoria, com inspeção visual de desktop e mobile. Total: **221 testes**. Os testes de navegador usam API controlada; a API real e o banco SQLite são exercitados pelos testes .NET.
 

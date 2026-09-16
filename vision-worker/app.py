@@ -25,7 +25,7 @@ import time
 import atexit
 import uuid
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog, ttk
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -37,6 +37,7 @@ from ultralytics import YOLO
 from waitress import create_server
 
 from backend_client import BackendClient
+from background_poll import BackgroundPoll, PENDING
 from supabase_sync import SupabaseStreamProfileSync
 
 # ---------------------------------------------------------------------------
@@ -286,7 +287,7 @@ class PipelineRuntime:
             stream = self._stream
         if stream is None:
             return ""
-        return str(getattr(stream, "url", "") or "").strip()
+        return str(getattr(getattr(stream, "cap", None), "url", None) or getattr(stream, "url", "") or "").strip()
 
     def start(self, config: dict):
         self.stop()
@@ -305,6 +306,9 @@ class PipelineRuntime:
             open_timeout_ms=int(config.get("stream_open_timeout_ms", 5000)),
             read_timeout_ms=int(config.get("stream_read_timeout_ms", 5000)),
             target_fps=float(config.get("stream_target_fps", 0)),
+            lazy_open=True,
+            buffered_hls=(config.get("source_kind") == "youtube" and bool(config.get("youtube_segment_buffering", True))),
+            refresh_url=lambda: resolve_stream_source_url(config.get("stream_url", ""), config).capture_url,
         )
 
         publisher = RtspFramePublisher(
@@ -404,7 +408,7 @@ class PipelineRuntime:
         if watchdog_thread is not None and watchdog_thread.is_alive():
             watchdog_thread.join(timeout=2)
 
-        if stream is not None:
+        if stream is not None and capture_thread is None:
             stream.release()
         if publisher is not None:
             publisher.stop()
@@ -419,6 +423,12 @@ class PipelineRuntime:
         if stream is not None:
             stream.request_refresh_latest()
 
+    def refresh_capture_source(self, url):
+        with self._lock:
+            if self._stream is not None:
+                self._stream.request_source_url(url)
+                self._config.update(capture_source_url=url, capture_direct_source_url=url)
+
     def wait_for_raw_frame(self, last_seq: int, timeout: float = 0.25):
         return self.raw_frames.wait_for_new(last_seq, timeout)
 
@@ -427,7 +437,17 @@ class PipelineRuntime:
         self.mjpeg_streamer.update(frame)
 
     def _capture_loop(self, stream: "StreamCapture", stop_event: threading.Event):
+        try:
+            self._run_capture(stream, stop_event)
+        finally:
+            # VideoCapture must not be released concurrently with native read().
+            stream.release()
+
+    def _run_capture(self, stream: "StreamCapture", stop_event: threading.Event):
+        next_frame_at = time.monotonic()
         while not stop_event.is_set():
+            if stop_event.wait(max(0.0, next_frame_at - time.monotonic())):
+                break
             try:
                 ret, frame = stream.read()
             except Exception as exc:
@@ -435,11 +455,14 @@ class PipelineRuntime:
                 stream.request_reset()
                 time.sleep(0.1)
                 continue
+            if stop_event.is_set():
+                break
             if not ret:
                 time.sleep(0.005)
                 continue
 
             captured_at = time.time()
+            next_frame_at = max(next_frame_at + stream.frame_interval_seconds, time.monotonic())
             self.stats.record_capture(captured_at)
             self.raw_frames.update(frame, captured_at)
 
@@ -474,21 +497,17 @@ class PipelineRuntime:
 
     def _publish_loop(self, publisher: RtspFramePublisher, stop_event: threading.Event, fps: float):
         interval = 1.0 / max(1.0, fps)
-        last_seq = 0
-        last_frame = None
-
+        next_publish_at = time.monotonic()
         while not stop_event.is_set():
-            seq, frame, _ = self.annotated_frames.wait_for_new(last_seq, timeout=interval)
+            _, frame, _ = self.annotated_frames.get_latest()
             if frame is not None:
-                last_seq = seq
-                last_frame = frame
-
-            if last_frame is None:
-                time.sleep(0.01)
-                continue
-
-            publisher.publish(last_frame)
-            time.sleep(interval)
+                publisher.publish(frame)
+            # One deadline, not a wait for a new frame followed by another sleep.
+            next_publish_at += interval
+            now = time.monotonic()
+            if next_publish_at < now:
+                next_publish_at = now + interval
+            stop_event.wait(max(0.0, next_publish_at - now))
 
 
 pipeline_runtime = PipelineRuntime(runtime_stats, streamer)
@@ -1206,7 +1225,15 @@ def build_pipeline_config(cfg: dict, *, source_url: str | None = None, camera_id
     capture_direct_source_url = resolved_source.capture_url
     capture_source_url = capture_direct_source_url
     capture_fallback_source_url = ""
-    if capture_direct_source_url and ensure_mediamtx_source_path(cfg, raw_path, capture_direct_source_url):
+    # YouTube gives yt-dlp a short-lived HLS URL. Relaying it through MediaMTX
+    # adds an extra connection that can repeatedly fail at the live edge; use
+    # that resolved URL directly and refresh it only after a sustained outage.
+    # Other camera sources retain the RTSP relay plus direct fallback.
+    if (
+        source_kind != "youtube"
+        and capture_direct_source_url
+        and ensure_mediamtx_source_path(cfg, raw_path, capture_direct_source_url)
+    ):
         capture_source_url = f"{rtsp_base}/{raw_path}"
         capture_fallback_source_url = capture_direct_source_url
 
@@ -2160,12 +2187,20 @@ class EditorControlPanel:
 
 
 class CompactEditorControlPanel:
+    # The frame loop calls refresh frequently to keep Tk responsive. Rebuilding
+    # Treeviews on every video frame, however, steals enough time from Tk that
+    # typing and clicking in the control panel become noticeably sluggish.
+    DATA_REFRESH_INTERVAL_SECONDS = 0.75
+
     def __init__(
         self,
         editor: ConfigEditor,
         stream_store: StreamProfileStore,
         on_save,
         on_reset_stream,
+        on_begin_camera_edit,
+        on_save_and_resume_camera_edit,
+        on_is_management_active,
         on_select_stream,
         on_open_stream,
         on_save_stream_profile,
@@ -2184,6 +2219,9 @@ class CompactEditorControlPanel:
         self.stream_store = stream_store
         self.on_save = on_save
         self.on_reset_stream = on_reset_stream
+        self.on_begin_camera_edit = on_begin_camera_edit
+        self.on_save_and_resume_camera_edit = on_save_and_resume_camera_edit
+        self.on_is_management_active = on_is_management_active
         self.on_select_stream = on_select_stream
         self.on_open_stream = on_open_stream
         self.on_save_stream_profile = on_save_stream_profile
@@ -2212,6 +2250,10 @@ class CompactEditorControlPanel:
         self._root.resizable(True, True)
         self._root.geometry("1040x760")
         self._root.minsize(920, 680)
+        # The OpenCV preview and the terminal can otherwise take focus when the
+        # worker starts, leaving this control window apparently "missing".
+        self._root.lift()
+        self._root.focus_force()
         self._root.protocol("WM_DELETE_WINDOW", self.request_close)
         self._root.columnconfigure(0, weight=1)
         self._root.rowconfigure(0, weight=1)
@@ -2252,6 +2294,7 @@ class CompactEditorControlPanel:
         self._source_runtime_var = tk.StringVar(value="-")
         self._schedule_form_dirty = False
         self._programmatic_schedule_form_update = False
+        self._next_data_refresh_at = 0.0
 
         self._schedule_name_var.trace_add("write", lambda *_: self._handle_schedule_form_change())
         self._schedule_start_var.trace_add("write", lambda *_: self._handle_schedule_form_change())
@@ -2380,7 +2423,12 @@ class CompactEditorControlPanel:
         ttk.Button(right, text="Salvar preset", command=self.save_stream_profile).grid(
             row=6, column=1, sticky="ew", pady=(0, 6)
         )
-        ttk.Button(right, text="Trocar na proxima janela segura", command=self.force_stream_switch).grid(
+        self._force_stream_switch_button = ttk.Button(
+            right,
+            text="Trocar na proxima janela segura",
+            command=self.force_stream_switch,
+        )
+        self._force_stream_switch_button.grid(
             row=7, column=0, columnspan=2, sticky="ew", pady=(0, 6)
         )
         ttk.Button(right, text="Apagar preset", command=self.delete_stream_profile).grid(
@@ -2488,8 +2536,34 @@ class CompactEditorControlPanel:
 
     def _build_calibracao_tab(self):
         self._tab_calibracao.columnconfigure(0, weight=1)
+        management_frame = ttk.LabelFrame(
+            self._tab_calibracao,
+            text="Gerenciamento da camera",
+        )
+        management_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        management_frame.columnconfigure(0, weight=1)
+        management_frame.columnconfigure(1, weight=1)
+        ttk.Label(
+            management_frame,
+            text=(
+                "Pause a operacao antes de alterar camera, ROI ou linha. "
+                "Enquanto estiver pausada, nenhuma contagem e enviada."
+            ),
+            wraplength=760,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Button(
+            management_frame,
+            text="Editar cameras (pausa a operacao)",
+            command=self.begin_camera_edit,
+        ).grid(row=1, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(
+            management_frame,
+            text="Salvar e retomar",
+            command=self.save_and_resume_camera_edit,
+        ).grid(row=1, column=1, sticky="ew")
+
         frame = ttk.LabelFrame(self._tab_calibracao, text="Ajuste de ROI e Linha")
-        frame.grid(row=0, column=0, sticky="ew")
+        frame.grid(row=1, column=0, sticky="ew")
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
         ttk.Label(frame, text="Direcao de contagem").grid(row=0, column=0, columnspan=2, sticky="w")
@@ -2555,12 +2629,22 @@ class CompactEditorControlPanel:
     def refresh(self):
         self._mode_var.set(f"Modo: {self.editor.mode}")
         self._message_var.set(self.editor.message)
-        self._update_state_summary()
-        if self._should_pause_schedule_refresh():
-            self._update_schedule_editor_summary()
-        else:
-            self._refresh_schedule_cameras()
-            self._refresh_schedule_rules()
+        self._force_stream_switch_button.configure(
+            text=(
+                "Trocar camera agora (modo edicao)"
+                if self.on_is_management_active()
+                else "Trocar na proxima janela segura"
+            )
+        )
+        now = time.monotonic()
+        if now >= self._next_data_refresh_at:
+            self._next_data_refresh_at = now + self.DATA_REFRESH_INTERVAL_SECONDS
+            self._update_state_summary()
+            if self._should_pause_schedule_refresh():
+                self._update_schedule_editor_summary()
+            else:
+                self._refresh_schedule_cameras()
+                self._refresh_schedule_rules()
         try:
             self._root.update_idletasks()
             self._root.update()
@@ -2570,6 +2654,14 @@ class CompactEditorControlPanel:
     def save(self):
         self._commit_count_direction()
         self.on_save()
+        self.set_active_stream_profile(self.stream_store.get_selected_profile())
+
+    def begin_camera_edit(self):
+        self.on_begin_camera_edit()
+
+    def save_and_resume_camera_edit(self):
+        self._commit_count_direction()
+        self.on_save_and_resume_camera_edit()
         self.set_active_stream_profile(self.stream_store.get_selected_profile())
 
     def cancel(self):
@@ -2806,22 +2898,24 @@ class CompactEditorControlPanel:
         self._updating_schedule_camera = True
         try:
             for item_id in self._schedule_camera_table.get_children():
-                self._schedule_camera_table.delete(item_id)
+                if item_id not in self._schedule_camera_ids:
+                    self._schedule_camera_table.delete(item_id)
             for profile in profiles:
                 profile_id = str(profile.get("id") or "")
-                self._schedule_camera_table.insert(
-                    "",
-                    "end",
-                    iid=profile_id,
-                    values=(
+                values = (
                         self._build_camera_schedule_status(profile),
                         str(profile.get("camera_id") or profile_id),
                         self._build_camera_schedule_summary(profile),
-                    ),
                 )
+                if self._schedule_camera_table.exists(profile_id):
+                    if tuple(self._schedule_camera_table.item(profile_id, "values")) != values:
+                        self._schedule_camera_table.item(profile_id, values=values)
+                else:
+                    self._schedule_camera_table.insert("", "end", iid=profile_id, values=values)
             if target_camera_id in self._schedule_camera_ids:
                 self._selected_schedule_camera_id = target_camera_id
-                self._schedule_camera_table.selection_set(target_camera_id)
+                if self._schedule_camera_table.selection() != (target_camera_id,):
+                    self._schedule_camera_table.selection_set(target_camera_id)
                 self._schedule_camera_table.focus(target_camera_id)
                 self._schedule_camera_table.see(target_camera_id)
         finally:
@@ -2842,25 +2936,27 @@ class CompactEditorControlPanel:
         self._updating_schedule_rule = True
         try:
             for item_id in self._camera_rule_table.get_children():
-                self._camera_rule_table.delete(item_id)
+                if item_id not in self._camera_rule_ids:
+                    self._camera_rule_table.delete(item_id)
             for rule in rules:
                 rule_id = str(rule.get("id") or "")
                 status = "Ativa agora" if rule_id in active_rule_ids else ("Ligada" if bool(rule.get("enabled", True)) else "Pausada")
                 if len(normalize_allowed_profile_ids(rule.get("allowed_profile_ids"))) > 1:
                     status = f"{status} | Legado"
-                self._camera_rule_table.insert(
-                    "",
-                    "end",
-                    iid=rule_id,
-                    values=(
+                values = (
                         status,
                         format_stream_schedule_window(rule),
                         str(rule.get("name") or "").strip(),
-                    ),
                 )
+                if self._camera_rule_table.exists(rule_id):
+                    if tuple(self._camera_rule_table.item(rule_id, "values")) != values:
+                        self._camera_rule_table.item(rule_id, values=values)
+                else:
+                    self._camera_rule_table.insert("", "end", iid=rule_id, values=values)
             if target_rule_id in self._camera_rule_ids:
                 self._selected_schedule_rule_id = target_rule_id
-                self._camera_rule_table.selection_set(target_rule_id)
+                if self._camera_rule_table.selection() != (target_rule_id,):
+                    self._camera_rule_table.selection_set(target_rule_id)
                 self._camera_rule_table.focus(target_rule_id)
                 self._camera_rule_table.see(target_rule_id)
             elif self._camera_rule_ids:
@@ -2909,6 +3005,8 @@ class CompactEditorControlPanel:
             return
         selection = self._schedule_camera_table.selection()
         if not selection:
+            return
+        if str(selection[0]) == self._selected_schedule_camera_id:
             return
         self._selected_schedule_camera_id = str(selection[0])
         self._selected_schedule_rule_id = ""
@@ -3440,8 +3538,12 @@ def main():
     frame_count = 0
     last_raw_seq = 0
     last_live_send = 0.0
-    last_config_poll = 0.0
-    last_round_sync = 0.0
+    round_poll = BackgroundPoll()
+    config_poll = BackgroundPoll()
+    source_recovery_poll = BackgroundPoll()
+    initial_management_state = backend.fetch_management_mode()
+    management_mode_active = bool(isinstance(initial_management_state, dict) and initial_management_state.get("isActive"))
+    management_test_count = 0
     last_track_results = None
 
     roi = cfg["roi"]
@@ -3485,12 +3587,14 @@ def main():
     last_rotation_round_id = ""
     rotation_boundary_consumed = False
     pending_stream_refresh_started_at = None
-    youtube_retry_after = 0.0
+    youtube_retry_after = time.time() + 30.0
     current_round_id = str(cfg.get("round_id", "")).strip()
     last_visual_detections: list[dict] = []
     last_operator_preview = None
     last_operator_preview_at = 0.0
 
+    if management_mode_active:
+        pending_camera_activation = None
     if isinstance(pending_camera_activation, dict) and not bool(pending_camera_activation.get("requestNotified")):
         if backend.notify_stream_profile_activated(
             initial_camera_id,
@@ -3621,6 +3725,9 @@ def main():
     def maybe_enforce_stream_schedule(backend_round: dict | None):
         nonlocal pending_schedule_profile, pending_rotation_profile
 
+        if management_mode_active:
+            return
+
         schedule_state = resolve_schedule_state()
         selected_profile = stream_store.get_selected_profile()
 
@@ -3707,6 +3814,9 @@ def main():
     def maybe_schedule_stream_rotation(backend_round: dict | None):
         nonlocal pending_rotation_profile, last_rotation_round_id, rotation_boundary_consumed
 
+        if management_mode_active:
+            return
+
         if pending_rotation_profile is None and not stream_rotation.get("enabled"):
             publish_rotation_status()
             return
@@ -3786,7 +3896,7 @@ def main():
         publish_rotation_status("Rotacao aplicada em janela segura.")
 
     def poll_round_state_if_needed():
-        nonlocal last_round_sync, current_round_id, total
+        nonlocal current_round_id, total
 
         should_poll_round = (
             round_sync_enabled
@@ -3795,12 +3905,12 @@ def main():
             or bool(stream_schedule.get("rules"))
             or pending_schedule_profile is not None
         )
-        now_ts = time.time()
-        if not should_poll_round or now_ts - last_round_sync < ROUND_SYNC_INTERVAL:
+        if not should_poll_round or management_mode_active:
             return
-
-        last_round_sync = now_ts
-        backend_round = backend.fetch_current_round(cfg.get("camera_id", ""))
+        camera_id = cfg.get("camera_id", "")
+        backend_round = round_poll.poll(camera_id, lambda: backend.fetch_current_round(camera_id), ROUND_SYNC_INTERVAL)
+        if backend_round is PENDING or backend_round is None:
+            return
         if round_sync_enabled:
             next_round_id, next_total, round_changed = resolve_round_sync(
                 current_round_id,
@@ -3823,16 +3933,16 @@ def main():
         maybe_enforce_stream_schedule(backend_round)
         maybe_schedule_stream_rotation(backend_round)
 
-    def save_editor_state():
+    def save_editor_state() -> bool:
         nonlocal roi, line, secondary_verification_enabled, secondary_verification_band_px
 
         if editor is None:
-            return
+            return False
 
         allowed, reason = backend.ensure_camera_change_allowed(cfg.get("camera_id", ""), "salvar calibracao")
         if not allowed:
             editor.message = reason
-            return
+            return False
         next_secondary_enabled = secondary_verification_enabled
         next_secondary_band_px = secondary_verification_band_px
         if control_panel is not None:
@@ -3844,7 +3954,7 @@ def main():
                         secondary_verification_band_px=next_secondary_band_px)
         if not backend.register_operational_configuration(proposal):
             editor.message = "Alteracao bloqueada: aguarde o encerramento da rodada e a conexao com o backend."
-            return
+            return False
         stream_store.save_selected_profile(
             roi=editor.roi,
             line=editor.line,
@@ -3862,10 +3972,106 @@ def main():
             control_panel.set_active_stream_profile(stream_store.get_selected_profile())
 
         queue_stream_profile(proposal, message="Calibracao salva; aguardando ativacao da camera.")
+        return True
+
+    camera_editing_active = False
+
+    def begin_camera_edit():
+        nonlocal camera_editing_active, management_mode_active, management_test_count
+        nonlocal pending_rotation_profile, pending_schedule_profile
+
+        if camera_editing_active or management_mode_active:
+            if editor is not None:
+                editor.message = "Edicao de cameras ja esta ativa; ajuste a configuracao e use Salvar e retomar."
+            return
+
+        selected_profile = stream_store.get_selected_profile()
+        reason = simpledialog.askstring(
+            "Gerenciamento da camera",
+            "Justificativa para pausar rounds e editar a camera:",
+            parent=control_panel._root if control_panel is not None else None,
+        )
+        if not str(reason or "").strip():
+            if editor is not None:
+                editor.message = "Gerenciamento cancelado: informe uma justificativa."
+            return
+
+        state, error = backend.activate_management_mode(
+            str(selected_profile.get("camera_id") or cfg.get("camera_id") or ""),
+            str(selected_profile.get("id") or cfg.get("selected_stream_profile_id") or "local"),
+            str(reason).strip(),
+        )
+        if state is None:
+            if editor is not None:
+                editor.message = f"Nao foi possivel iniciar o gerenciamento: {error}"
+            return
+
+        camera_editing_active = True
+        management_mode_active = True
+        management_test_count = 0
+        pending_rotation_profile = None
+        pending_schedule_profile = None
+        if editor is not None:
+            editor.message = (
+                "Modo de gerenciamento ativo. A camera continua em preview e inferencia; rounds, agenda, rotacao e contagem oficial estao bloqueados."
+            )
+
+    def save_and_resume_camera_edit():
+        nonlocal camera_editing_active
+
+        if not camera_editing_active:
+            if editor is not None:
+                editor.message = "Clique em Editar cameras antes de salvar e retomar a operacao."
+            return
+
+        current_state = backend.fetch_management_mode()
+        if not isinstance(current_state, dict) or not current_state.get("isActive"):
+            if editor is not None:
+                editor.message = "O modo de gerenciamento nao esta ativo no backend. Recarregue o painel."
+            return
+
+        saved_state, error = backend.update_management_draft(
+            int(current_state.get("revision") or 0), dict(editor.roi), dict(editor.line)
+        )
+        if saved_state is None:
+            if editor is not None:
+                editor.message = f"Nao foi possivel salvar a calibracao: {error}"
+            return
+        applied_state, error = backend.apply_management_draft()
+        if applied_state is None:
+            if editor is not None:
+                editor.message = f"Calibracao enviada, mas nao aplicada: {error}"
+            return
+        resumed_state, error = backend.deactivate_management_mode()
+        if resumed_state is None:
+            if editor is not None:
+                editor.message = f"Calibracao aplicada, mas a retomada foi bloqueada: {error}"
+            return
+
+        editor.save(cfg, config_path)
+        profile = stream_store.save_selected_profile(
+            roi=editor.roi,
+            line=editor.line,
+            count_direction=count_direction,
+        )
+        sync_stream_profiles_to_supabase(cfg, supabase_sync)
+        try:
+            # The normal profile activation handshake creates the next round only
+            # after this same camera is again ready for frames and the frontend.
+            queue_stream_profile(profile, message="Calibracao aplicada; aguardando ativacao para retomar a operacao.")
+        except ValueError as exc:
+            if editor is not None:
+                editor.message = f"Calibracao aplicada, mas a camera nao foi retomada: {exc}"
+            return
+        camera_editing_active = False
+        if editor is not None:
+            editor.message = "Calibracao aplicada; aguardando a camera ficar pronta para retomar a operacao."
 
     def set_count_direction(direction: str):
         nonlocal count_direction
 
+        if normalize_count_direction(direction) == count_direction:
+            return
         proposal = dict(stream_store.get_selected_profile())
         proposal["count_direction"] = normalize_count_direction(direction)
         queue_stream_profile(proposal, message="Direcao atualizada; aguardando ativacao.")
@@ -3902,6 +4108,44 @@ def main():
             control_panel.set_active_stream_profile(profile)
         publish_rotation_status(message)
         publish_schedule_status(message)
+
+    def queue_management_camera_profile(profile: dict, *, message: str) -> dict:
+        """Switch the preview immediately while global management mode is active.
+
+        This intentionally bypasses the normal round/profile handshake: management
+        mode has already voided rounds and the worker must keep producing test-only
+        inference until the operator explicitly resumes operations.
+        """
+        nonlocal pending_stream_profile, roi, line, count_direction
+        nonlocal secondary_verification_enabled, secondary_verification_band_px
+
+        state, error = backend.select_management_camera(
+            str(profile.get("camera_id") or ""),
+            str(profile.get("id") or ""),
+        )
+        if state is None:
+            raise ValueError(error or "O backend recusou a troca no modo de gerenciamento.")
+
+        managed_profile = dict(profile)
+        managed_profile["_management_mode"] = True
+        managed_profile["_activation_skip_notify"] = True
+        pending_stream_profile = managed_profile
+        roi = dict(profile["roi"])
+        line = dict(profile["line"])
+        count_direction = profile["count_direction"]
+        secondary_verification_enabled = normalize_secondary_verification_enabled(
+            profile.get("secondary_verification_enabled", DEFAULT_SECONDARY_VERIFICATION_ENABLED)
+        )
+        secondary_verification_band_px = normalize_secondary_verification_band_px(
+            profile.get("secondary_verification_band_px", DEFAULT_SECONDARY_VERIFICATION_BAND_PX)
+        )
+        stream_store.select_profile(str(profile.get("id") or ""))
+        save_config(config_path, cfg)
+        if editor is not None:
+            editor.load_values(roi, line, message=message)
+        if control_panel is not None:
+            control_panel.set_active_stream_profile(profile)
+        return profile
 
     def queue_saved_profile_for_next_window(profile: dict, *, message: str):
         nonlocal pending_rotation_profile
@@ -3950,9 +4194,6 @@ def main():
     ) -> dict:
         nonlocal pending_rotation_profile
 
-        allowed, reason = backend.ensure_camera_change_allowed(cfg.get("camera_id", ""), "troca manual")
-        if not allowed:
-            raise ValueError(reason)
         target_url = str(stream_url or "").strip()
         target_camera_id = str(camera_id or "").strip()
         target_profile_id = str(profile_id or "").strip()
@@ -3981,14 +4222,23 @@ def main():
                 "stream_url": str(target_url or cfg.get("stream_url", "")).strip(),
                 "camera_id": str(target_camera_id or cfg.get("camera_id", "")).strip(),
             }
-        ensure_profile_allowed_for_schedule(candidate_profile, action_name="forcar a troca")
+        if not management_mode_active:
+            allowed, reason = backend.ensure_camera_change_allowed(cfg.get("camera_id", ""), "troca manual")
+            if not allowed:
+                raise ValueError(reason)
+            ensure_profile_allowed_for_schedule(candidate_profile, action_name="forcar a troca")
         profile, _created = stream_store.save_profile_entry(
             name=stream_name,
             camera_id=target_camera_id or cfg.get("camera_id", ""),
             stream_url=target_url or cfg.get("stream_url", ""),
         )
-        # Manual controls obey the same freeze as normal profile selection.
         pending_rotation_profile = None
+        if management_mode_active:
+            return queue_management_camera_profile(
+                profile,
+                message=f"Camera trocada agora para calibracao: {format_stream_profile_label(profile)}",
+            )
+        # Outside management mode, manual controls obey the normal safe boundary.
         return select_stream_profile(profile["id"])
 
     def open_stream_url(stream_url: str, stream_name: str, camera_id: str) -> dict:
@@ -4196,6 +4446,9 @@ def main():
             stream_store,
             save_editor_state,
             request_stream_reset,
+            begin_camera_edit,
+            save_and_resume_camera_edit,
+            lambda: management_mode_active,
             select_stream_profile,
             open_stream_url,
             save_stream_profile,
@@ -4238,6 +4491,16 @@ def main():
             if control_panel.should_close:
                 return True
 
+        if title == "Aguardando frames da stream" and last_operator_preview is not None:
+            # Keep the last image through normal inter-frame gaps, while still
+            # pumping both UI event loops at 20 Hz during network stalls.
+            preview = last_operator_preview
+            if time.time() - last_operator_preview_at > 1.0:
+                preview = preview.copy()
+                cv2.putText(preview, "Sem frames novos - reconectando a fonte", (18, 32),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2)
+            cv2.imshow(WINDOW_NAME, preview)
+            return poll_window_key(1) & 0xFF == ord("q")
         idle_frame = np.zeros((540, 960, 3), dtype=np.uint8)
         cv2.putText(
             idle_frame,
@@ -4470,6 +4733,7 @@ def main():
                     "requestedProfileLabel": requested_profile_label,
                     "activationStartedAt": activation_started_at,
                     "autoSwitchRound": bool(profile.get("_activation_auto_switch_round")),
+                    "managementMode": bool(profile.get("_management_mode")),
                     "requestNotified": False,
                     "readyNotified": False,
                 }
@@ -4539,10 +4803,8 @@ def main():
             time.sleep(0.05)
             continue
 
-        last_raw_seq, frame, captured_at = pipeline_runtime.wait_for_raw_frame(last_raw_seq, timeout=0.5)
+        last_raw_seq, frame, captured_at = pipeline_runtime.wait_for_raw_frame(last_raw_seq, timeout=0.05)
         if frame is None or captured_at is None:
-            if frame_count == 0:
-                logger.warning("Nenhum frame recebido ainda do stream...")
             if refresh_window_idle(
                 "Aguardando frames da stream",
                 str(editor.message if editor is not None else get_stream_schedule_status().get("lastMessage") or ""),
@@ -4551,13 +4813,26 @@ def main():
             active_pipeline_cfg = pipeline_runtime.get_config() or current_pipeline_cfg
             active_source_url = str(active_pipeline_cfg.get("stream_url") or cfg.get("stream_url") or "").strip()
             if is_youtube_url(active_source_url) and time.time() >= youtube_retry_after:
-                youtube_retry_after = time.time() + 30.0
-                logger.info("Stream YouTube sem frames; solicitando nova resolucao da URL.")
-                queue_pipeline_refresh()
+                # Automatic recovery must not resolve URLs, stop the publisher,
+                # or reconnect native capture on the UI thread.
+                recovery_cfg = dict(active_pipeline_cfg)
+                recovered = source_recovery_poll.poll(
+                    (cfg.get("camera_id"), active_source_url),
+                    lambda url=active_source_url, config=recovery_cfg: resolve_stream_source_url(url, config),
+                    30.0,
+                )
+                if recovered is not PENDING:
+                    youtube_retry_after = time.time() + 30.0
+                    if recovered is not None:
+                        pipeline_runtime.refresh_capture_source(recovered.capture_url)
+                        logger.info("Nova URL resolvida; reconexao agendada na thread de captura.")
             continue
 
         frame_count += 1
-        youtube_retry_after = 0.0
+        # Do not tear down a live source merely because one read times out.
+        # StreamCapture retries the direct HLS URL itself; only a sustained
+        # absence of frames should obtain a fresh URL from yt-dlp.
+        youtube_retry_after = time.time() + 8.0
         current_activation_status = get_camera_activation_status()
         current_activation_session_id = str(current_activation_status.get("activationSessionId") or "").strip()
         current_camera_id = str(cfg.get("camera_id") or "").strip()
@@ -4582,16 +4857,37 @@ def main():
             logger.info("Resolução do stream: %dx%d", w0, h0)
             logger.info("ROI: %s | Linha: %s | Direção: %s", roi, line, count_direction)
 
+        if isinstance(pending_camera_activation, dict) and (management_mode_active or bool(pending_camera_activation.get("managementMode"))):
+            # Preview is running in test-only mode. Do not complete the normal
+            # profile/frontend handshake, because that path can create a round.
+            pending_camera_activation = None
+
         if isinstance(pending_camera_activation, dict):
             activation_requested_camera = str(pending_camera_activation.get("requestedCameraId") or "").strip()
             activation_requested_profile = str(pending_camera_activation.get("requestedStreamProfileId") or "").strip()
             activation_requested_path = str(pending_camera_activation.get("requestedProcessedStreamPath") or "").strip()
             activation_requested_label = str(pending_camera_activation.get("requestedProfileLabel") or activation_requested_camera).strip()
 
-        now_ts = time.time()
-        if now_ts - last_config_poll >= CONFIG_POLL_INTERVAL:
-            last_config_poll = now_ts
-            admin_cfg = backend.fetch_camera_config(cfg["camera_id"])
+        poll_camera_id = cfg["camera_id"]
+        config_result = config_poll.poll(
+            poll_camera_id,
+            lambda camera_id=poll_camera_id: (backend.fetch_management_mode(), backend.fetch_camera_config(camera_id)),
+            CONFIG_POLL_INTERVAL,
+        )
+        if config_result is not PENDING and config_result is not None:
+            management_state, admin_cfg = config_result
+            was_management_mode_active = management_mode_active
+            if isinstance(management_state, dict):
+                management_mode_active = bool(management_state.get("isActive"))
+            if management_mode_active and not was_management_mode_active:
+                management_test_count = 0
+                try:
+                    management_draft = json.loads(management_state.get("draftConfigurationJson") or "{}")
+                    if isinstance(management_draft.get("roi"), dict) and isinstance(management_draft.get("line"), dict):
+                        roi = normalize_roi_config(management_draft["roi"])
+                        line = normalize_line_config(management_draft["line"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    logger.warning("Rascunho de gerenciamento invalido; mantendo a geometria atual.")
             if admin_cfg and (editor is None or (editor.mode == "idle" and not editor.dirty)):
                 proposal = dict(stream_store.get_selected_profile())
                 proposal.update(roi=admin_cfg.get("roi") or roi,
@@ -4762,7 +5058,11 @@ def main():
                         else:
                             path = ""
 
-                        backend.send_count_event(
+                        if management_mode_active:
+                            management_test_count += 1
+                            logger.info("Management test count: %d", management_test_count)
+                        else:
+                            backend.send_count_event(
                             {
                                 "cameraId": cfg["camera_id"],
                                 "roundId": current_round_id,
@@ -4782,7 +5082,7 @@ def main():
                                 "countAfter": total,
                                 "totalCount": total,
                             }
-                        )
+                            )
 
                         logger.info(
                             "Count: %d (%s #%d) via %s",

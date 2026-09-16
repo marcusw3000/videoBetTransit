@@ -16,6 +16,7 @@ import { buildHlsUrlFromPath, buildMjpegUrl, buildWebRtcWrapperUrlFromPath } fro
 import { voidRound, getRoundConfiguration, getAudit } from '../services/adminApi'
 import { startMetricsConnection, stopMetricsConnection } from '../services/metricsSignalr'
 import { getOperationsHealth } from '../services/operationsApi'
+import CameraManagementCard from './CameraManagementCard'
 import {
   acknowledgeFrontendReady,
   getCurrentRound,
@@ -205,6 +206,7 @@ export default function AdminDashboard() {
   const [isLoadingRoundDetail, setIsLoadingRoundDetail] = useState(false)
   const [frontendTransportState, setFrontendTransportState] = useState(DEFAULT_FRONTEND_TRANSPORT_STATE)
   const lastFrontendAckKeyRef = useRef('')
+  const pollInFlightRef = useRef(false)
 
   const activeSession = getActiveSession(sessions, selectedSessionId)
   const roundPhase = getRoundPhase(currentRound)
@@ -224,10 +226,10 @@ export default function AdminDashboard() {
   const activationSessionId = getActivationSessionId(operations)
   const selectedStreamProfileId = String(operations?.selectedStreamProfileId || operations?.health?.selectedStreamProfileId || '').trim()
   const waitingFrontendAck = isAwaitingFrontendAck(operations)
-  const pipelineCameraIds = useMemo(
-    () => getRuntimeHistoryCameraIds(operations, activeCameraId),
-    [operations, activeCameraId],
-  )
+  // Health refreshes replace the operations object, not the camera membership.
+  // Keep the same array identity so SignalR is not disconnected on every poll.
+  const pipelineCameraIdsKey = JSON.stringify(getRuntimeHistoryCameraIds(operations, activeCameraId))
+  const pipelineCameraIds = useMemo(() => JSON.parse(pipelineCameraIdsKey), [pipelineCameraIdsKey])
   const filteredHistory = useMemo(
     () => filterHistoryByPipelineCameras(history, pipelineCameraIds),
     [history, pipelineCameraIds],
@@ -348,7 +350,7 @@ export default function AdminDashboard() {
     }
   }, [loadRoundArtifacts])
 
-  const loadRounds = useCallback(async (preferredRoundId = '') => {
+  const loadRounds = useCallback(async (preferredRoundId = '', { includeArtifacts = true } = {}) => {
     const [currentRoundResult, roundHistory, nextRecentRounds] = await Promise.all([
       getCurrentRound(activeCameraId).then((value) => ({ ok: true, value })).catch((error) => ({ ok: false, error })),
       getRoundHistory(),
@@ -371,7 +373,9 @@ export default function AdminDashboard() {
 
     const targetRoundId = preferredRoundId || selectedRoundId || nextCurrentRound?.roundId || ''
     const fallbackRound = mergedRecentRounds.find((item) => item.roundId === targetRoundId) || null
-    await loadRoundDetail(targetRoundId, fallbackRound)
+    if (includeArtifacts) {
+      await loadRoundDetail(targetRoundId, fallbackRound)
+    }
   }, [activeCameraId, loadRoundDetail, waitingFrontendAck, selectedRoundId])
 
   const handleFirstPlayableFrame = useCallback(async ({ sourceSignature, mode, activationSessionId: provedActivationSessionId }) => {
@@ -464,10 +468,19 @@ export default function AdminDashboard() {
     void bootstrap()
 
     const intervalId = setInterval(() => {
-      void loadOperations().catch(console.error)
-      void loadRounds(selectedRoundId).catch(console.error)
-      void loadSessions().catch(console.error)
-    }, isCameraTransitioning ? 750 : 5000)
+      // Do not let a slow backend pile up overlapping refresh batches. During
+      // camera transitions the old 750ms cadence could start many copies of
+      // the expensive round-detail requests and make the browser unresponsive.
+      if (pollInFlightRef.current) return
+      pollInFlightRef.current = true
+      void Promise.allSettled([
+        loadOperations(),
+        loadRounds(selectedRoundId),
+        loadSessions(),
+      ]).catch(console.error).finally(() => {
+        pollInFlightRef.current = false
+      })
+    }, isCameraTransitioning ? 1500 : 5000)
 
     return () => {
       active = false
@@ -739,6 +752,7 @@ export default function AdminDashboard() {
               at: events[0]?.timestampUtc,
             }}
           />
+          <CameraManagementCard cameraId={activeCameraId} streamProfileId={selectedStreamProfileId} />
 
           <div className="admin-lower-grid">
             <EventsFeed events={events} />

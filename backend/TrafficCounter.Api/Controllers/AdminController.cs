@@ -12,8 +12,31 @@ using TrafficCounter.Api.Services;
 namespace TrafficCounter.Api.Controllers;
 
 [ApiController, Route("admin"), Authorize(Roles = "admin")]
-public class AdminController(RoundService rounds, IDbContextFactory<AppDbContext> factory, RoundEvidenceService evidence) : ControllerBase
+public class AdminController(RoundService rounds, IDbContextFactory<AppDbContext> factory, RoundEvidenceService evidence, CameraManagementService management) : ControllerBase
 {
+    [HttpGet("camera-management")]
+    public async Task<IActionResult> CameraManagement() => Ok(await management.GetAsync());
+
+    [HttpPost("camera-management/activate")]
+    public async Task<IActionResult> ActivateCameraManagement(ActivateCameraManagementRequest request)
+    {
+        if (!ModelState.IsValid) return BadRequest(new { error = "Informe camera, perfil e justificativa." });
+        return Ok(await management.ActivateAsync(request, User.FindFirstValue(ClaimTypes.NameIdentifier)!));
+    }
+
+    [HttpPut("camera-management/draft")]
+    public async Task<IActionResult> UpdateCameraManagementDraft(UpdateCameraManagementDraftRequest request)
+    {
+        try { var state = await management.UpdateDraftAsync(request, User.FindFirstValue(ClaimTypes.NameIdentifier)!); return state is null ? Conflict(await management.GetAsync()) : Ok(state); }
+        catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
+    [HttpPost("camera-management/apply")]
+    public async Task<IActionResult> ApplyCameraManagement() { try { return Ok(await management.ApplyAsync(User.FindFirstValue(ClaimTypes.NameIdentifier)!)); } catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); } }
+
+    [HttpPost("camera-management/deactivate")]
+    public async Task<IActionResult> DeactivateCameraManagement() { try { return Ok(await management.DeactivateAsync(User.FindFirstValue(ClaimTypes.NameIdentifier)!)); } catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); } }
     [HttpPost("rounds/{id:guid}/void")]
     public async Task<IActionResult> Void(Guid id, VoidRoundRequest request)
     {

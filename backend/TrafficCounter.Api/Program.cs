@@ -123,6 +123,7 @@ builder.Services.AddScoped<DynamicMarketLineService>();
 builder.Services.AddScoped<RoundService>();
 builder.Services.AddScoped<BetService>();
 builder.Services.AddScoped<RoundEvidenceService>();
+builder.Services.AddScoped<CameraManagementService>();
 
 // ── MediaMTX client — Singleton para poder ser injetado em Singletons/Workers ─
 builder.Services.AddSingleton<IMediaMtxClient>(sp =>
@@ -174,6 +175,10 @@ app.UseMiddleware<AdministrativeAuditMiddleware>();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.UseMiddleware<BrowserCsrfMiddleware>();
+// Startup must not depend on round creation: the pipeline can intentionally be
+// paused for camera management, in which case /rounds/current returns a domain
+// error even though the API is healthy.
+app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapControllers();
 app.MapHub<MetricsHub>("/hubs/metrics");
 app.MapHub<RoundHub>("/hubs/round");

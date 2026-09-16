@@ -23,6 +23,7 @@ public class AppDbContext : DbContext
 
     public DbSet<AdministrativeAudit> AdministrativeAudits => Set<AdministrativeAudit>();
     public DbSet<OperationalRecoveryDecision> OperationalRecoveryDecisions => Set<OperationalRecoveryDecision>();
+    public DbSet<PipelineManagementState> PipelineManagementStates => Set<PipelineManagementState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -37,6 +38,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<OperationalRecoveryDecision>().Property(e => e.Reason).HasMaxLength(512);
         modelBuilder.Entity<OperationalRecoveryDecision>().HasIndex(e => new { e.EventId, e.TimestampUtc });
         modelBuilder.Entity<CameraRoundState>().Property(e => e.Revision).IsConcurrencyToken();
+        modelBuilder.Entity<PipelineManagementState>().HasData(new PipelineManagementState { Id = 1, IsActive = false, Revision = 1, DraftApplied = true, UpdatedAt = DateTime.UnixEpoch });
         modelBuilder.Entity<EventReceipt>().HasKey(e => e.Id);
         modelBuilder.Entity<EventReceipt>().Property(e => e.Id).HasMaxLength(128);
     }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import useLatestCallback from '../hooks/useLatestCallback'
 
 const WEBRTC_BOOT_TIMEOUT_MS = 3500
 const CAMERA_TRANSITION_TIMEOUT_MS = 5000
@@ -56,9 +57,8 @@ export default function VideoPlayer({
       webrtcSrc: String(webrtcSrc || '').trim(),
       src: String(src || '').trim(),
       fallbackSrc: String(fallbackSrc || '').trim(),
-      title: String(title || '').trim(),
     }),
-    [fallbackSrc, src, title, webrtcSrc],
+    [fallbackSrc, src, webrtcSrc],
   )
   const callbackSourceSignature = useMemo(
     () => String(sourceSignature || '').trim() || mediaSignature,
@@ -84,16 +84,16 @@ export default function VideoPlayer({
     [title, transitionLabel],
   )
 
-  const notifyStatus = useCallback((status, playbackMode = '') => {
+  const notifyStatus = useLatestCallback((status, playbackMode = '') => {
     const normalizedMode = String(playbackMode || '').trim().toLowerCase()
     onStreamStatusChange?.({
       status,
       mode: normalizedMode,
       isFallback: normalizedMode === 'mjpeg',
     })
-  }, [onStreamStatusChange])
+  })
 
-  const notifyPlayableFrame = useCallback((playbackMode) => {
+  const notifyPlayableFrame = useLatestCallback((playbackMode) => {
     if (transitioning || isTransitioning) return
     if (!callbackSourceSignature) return
     const notificationKey = playbackSessionKey
@@ -105,7 +105,7 @@ export default function VideoPlayer({
       activationSessionId: normalizedActivationSessionId,
       title: String(title || '').trim(),
     })
-  }, [callbackSourceSignature, isTransitioning, normalizedActivationSessionId, onFirstPlayableFrame, playbackSessionKey, title, transitioning])
+  })
 
   const clearTransitionTimer = useCallback(() => {
     if (transitionTimeoutRef.current) {
@@ -202,7 +202,7 @@ export default function VideoPlayer({
   useEffect(() => {
     if (lastPlayableSourceRef.current !== playbackSessionKey) return
     notifyPlayableFrame(mode)
-  }, [mode, notifyPlayableFrame, playbackSessionKey])
+  }, [mode, notifyPlayableFrame, playbackSessionKey, isTransitioning, transitioning])
 
   useEffect(() => {
     const previous = previousSourceSignatureRef.current
@@ -275,7 +275,7 @@ export default function VideoPlayer({
     video.removeAttribute('src')
     video.load()
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    const attachNativeHls = () => {
       video.src = primarySrc
       const handleLoaded = () => {
         setHasError(false)
@@ -297,10 +297,17 @@ export default function VideoPlayer({
     }
 
     let cancelled = false
+    let clearNativeResources
     void import('hls.js').then(({ default: Hls }) => {
       if (cancelled) return
     if (!Hls.isSupported()) {
-      switchToFallback()
+      // Native capability detection can say "maybe" even when this browser
+      // cannot play MediaMTX's stream. Prefer MSE when HLS.js supports it.
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        clearNativeResources = attachNativeHls()
+      } else {
+        switchToFallback()
+      }
       return
     }
 
@@ -358,6 +365,7 @@ export default function VideoPlayer({
 
     return () => {
       cancelled = true
+      clearNativeResources?.()
       clearHlsResources()
     }
   }, [clearHlsResources, finishCameraTransition, mode, notifyPlayableFrame, notifyStatus, playbackSessionKey, primarySrc, switchToFallback])

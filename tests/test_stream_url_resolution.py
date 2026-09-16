@@ -156,6 +156,31 @@ class StreamUrlResolutionTests(unittest.TestCase):
         self.assertEqual("https://rr.youtube.example/videoplayback.m3u8", source_status["captureSourceUrl"])
         self.assertEqual("", source_status["lastResolveError"])
 
+    def test_youtube_pipeline_uses_resolved_url_directly_without_relay(self):
+        fake_resolution = SimpleNamespace(
+            original_url="https://www.youtube.com/watch?v=abc123",
+            capture_url="https://rr.youtube.example/videoplayback.m3u8",
+            resolved=True,
+        )
+        globals_dict = build_pipeline_config.__globals__
+        original_resolver = globals_dict["resolve_stream_source_url"]
+        original_mediamtx = globals_dict["ensure_mediamtx_source_path"]
+        try:
+            globals_dict["resolve_stream_source_url"] = mock.Mock(return_value=fake_resolution)
+            globals_dict["ensure_mediamtx_source_path"] = mock.Mock(return_value=True)
+            pipeline_cfg = build_pipeline_config({
+                "camera_id": "cam_yt",
+                "stream_url": "https://www.youtube.com/watch?v=abc123",
+                "mediamtx_rtsp_url": "rtsp://127.0.0.1:8554",
+            })
+            globals_dict["ensure_mediamtx_source_path"].assert_not_called()
+        finally:
+            globals_dict["resolve_stream_source_url"] = original_resolver
+            globals_dict["ensure_mediamtx_source_path"] = original_mediamtx
+
+        self.assertEqual(fake_resolution.capture_url, pipeline_cfg["capture_source_url"])
+        self.assertEqual("", pipeline_cfg["capture_fallback_source_url"])
+
     def test_build_pipeline_uses_rtsp_primary_and_direct_fallback_when_mediamtx_is_ready(self):
         globals_dict = build_pipeline_config.__globals__
         original_mediamtx = globals_dict["ensure_mediamtx_source_path"]

@@ -44,7 +44,7 @@ if ($failures.Count -eq 0) {
 }
 
 if ($CheckRunning) {
-    foreach ($endpoint in 'http://127.0.0.1:8080/rounds/current?cameraId=cam_001', 'http://127.0.0.1:8090/health') {
+    foreach ($endpoint in 'http://127.0.0.1:8080/health', 'http://127.0.0.1:8090/health') {
         try { $null = Invoke-WebRequest -UseBasicParsing $endpoint -TimeoutSec 3 }
         catch {
             $status = if ($null -ne $_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
